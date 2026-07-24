@@ -319,9 +319,11 @@ local function handleBpmInput(code, flags)
         state.arpBpm = val
       end
     end
+    local prevBpm = state.bpmBeforeEdit
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
     applyBpmChange()
+    setLogicBpmTarget(state.arpBpm, prevBpm)
     updateHud()
     return true
   elseif code == 126 then -- Arrow Up
@@ -368,43 +370,35 @@ end
 
 local isSyncingLogicBpm = false
 
-local function stepLogicBpm(deltaSteps)
+local function setLogicBpmTarget(targetBpm, prevBpm)
+  if not state.logicSyncEnabled then return end
+  if isSyncingLogicBpm then return end
   isSyncingLogicBpm = true
-  local actionName = deltaSteps > 0 and "AXIncrement" or "AXDecrement"
-  local absSteps = math.abs(deltaSteps)
-  local script = string.format([[
-    try {
-      var se = Application('System Events');
-      var logic = se.processes['Logic Pro'];
-      if (logic && logic.exists()) {
-        var win = logic.windows[0];
-        if (win && win.exists()) {
-          var grp = win.groups[0];
-          if (grp && grp.exists()) {
-            var ctrlBar = grp.uiElements[0];
-            if (ctrlBar && ctrlBar.exists()) {
-              var elems = ctrlBar.uiElements();
-              for (var i = 0; i < elems.length; i++) {
-                if (elems[i].description() === 'Tempo') {
-                  for (var k = 0; k < %d; k++) {
-                    elems[i].performAction('%s');
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch(e) {}
-  ]], absSteps, actionName)
 
-  local task = hs.task.new("/usr/bin/osascript", function()
-    hs.timer.doAfter(0.5, function()
-      isSyncingLogicBpm = false
-    end)
-  end, { "-l", "JavaScript", "-e", script })
+  local delta = math.floor(targetBpm - (prevBpm or targetBpm) + 0.5)
+  if delta == 0 then isSyncingLogicBpm = false; return end
+
+  local script = string.format([[
+    tell application "System Events"
+      tell process "Logic Pro"
+        try
+          set tempoSlider to slider 1 of group 1 of group 1 of window 1
+          set curVal to (value of tempoSlider) as real
+          set value of tempoSlider to (curVal + (%d))
+        end try
+      end tell
+    end tell
+  ]], delta)
+
+  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+    isSyncingLogicBpm = false
+  end, { "-e", script })
   task:start()
+end
+
+local function stepLogicBpm(delta)
+  -- delta is the BPM change (e.g. +5 or -5), each AXIncrement/Decrement = 1 BPM
+  setLogicBpmTarget(state.arpBpm, state.arpBpm - delta)
 end
 
 local function syncLogicBpm()
@@ -492,6 +486,7 @@ return {
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,
   syncLogicBpm = syncLogicBpm,
-  stepLogicBpm = stepLogicBpm
+  stepLogicBpm = stepLogicBpm,
+  setLogicBpmTarget = setLogicBpmTarget
 }
 
