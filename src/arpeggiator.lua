@@ -369,6 +369,7 @@ end
 local isSyncingLogicBpm = false
 
 local function stepLogicBpm(deltaSteps)
+  isSyncingLogicBpm = true
   local actionName = deltaSteps > 0 and "AXIncrement" or "AXDecrement"
   local absSteps = math.abs(deltaSteps)
   local script = string.format([[
@@ -398,7 +399,11 @@ local function stepLogicBpm(deltaSteps)
     } catch(e) {}
   ]], absSteps, actionName)
 
-  local task = hs.task.new("/usr/bin/osascript", nil, { "-l", "JavaScript", "-e", script })
+  local task = hs.task.new("/usr/bin/osascript", function()
+    hs.timer.doAfter(0.5, function()
+      isSyncingLogicBpm = false
+    end)
+  end, { "-l", "JavaScript", "-e", script })
   task:start()
 end
 
