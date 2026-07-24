@@ -28,12 +28,15 @@ local state = {
     { label = "1/8T", factor = 1.0 / 3.0 },
     { label = "1/16T", factor = 0.5 / 3.0 }
   },
-  arpGateIdx = 3,
+  arpGateIdx = 20,
   ARP_GATES = {
-    { label = "25%", ratio = 0.25 },
-    { label = "50%", ratio = 0.50 },
-    { label = "80%", ratio = 0.80 },
-    { label = "100%", ratio = 1.00 }
+    { label = "1%", ratio = 0.01 }, { label = "5%", ratio = 0.05 }, { label = "10%", ratio = 0.10 }, { label = "15%", ratio = 0.15 }, { label = "20%", ratio = 0.20 },
+    { label = "25%", ratio = 0.25 }, { label = "30%", ratio = 0.30 }, { label = "35%", ratio = 0.35 }, { label = "40%", ratio = 0.40 }, { label = "45%", ratio = 0.45 },
+    { label = "50%", ratio = 0.50 }, { label = "55%", ratio = 0.55 }, { label = "60%", ratio = 0.60 }, { label = "65%", ratio = 0.65 }, { label = "70%", ratio = 0.70 },
+    { label = "75%", ratio = 0.75 }, { label = "80%", ratio = 0.80 }, { label = "85%", ratio = 0.85 }, { label = "90%", ratio = 0.90 }, { label = "95%", ratio = 0.95 },
+    { label = "100%", ratio = 1.00 }, { label = "105%", ratio = 1.05 }, { label = "110%", ratio = 1.10 }, { label = "115%", ratio = 1.15 }, { label = "120%", ratio = 1.20 },
+    { label = "125%", ratio = 1.25 }, { label = "130%", ratio = 1.30 }, { label = "135%", ratio = 1.35 }, { label = "140%", ratio = 1.40 }, { label = "145%", ratio = 1.45 },
+    { label = "150%", ratio = 1.50 }
   },
   arpBpm = 120.0,
   arpTimer = nil,

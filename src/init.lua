@@ -135,6 +135,9 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
   _G.toggleMidiMode()
 end)
 
+midi.panicAllChannels()
+_G.toggleMidiMode(true)
+
 return {
   toggleMidiMode = _G.toggleMidiMode
 }
