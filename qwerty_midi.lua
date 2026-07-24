@@ -47,7 +47,7 @@ end
 local function updateWebviewHud(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
-  local baseW, baseH = 855, 330
+  local baseW, baseH = 980, 330
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale)
@@ -215,7 +215,7 @@ local function createMidiWebview()
 
   local screen = hs.screen.mainScreen():frame()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-  local width = math.floor(855 * effectiveScale)
+  local width = math.floor(980 * effectiveScale)
   local height = math.floor(330 * effectiveScale)
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
@@ -630,13 +630,48 @@ local function arpTick()
       state.arpStepIndex = math.min(#pitchList, 2)
       state.arpStepDirection = 1
     end
-  elseif state.arpDirectionIdx == 4 then -- RANDOM
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if state.arpStepIndex > #pitchList then
+      state.arpStepIndex = math.max(1, #pitchList - 1)
+      state.arpStepDirection = -1
+    elseif state.arpStepIndex < 1 then
+      state.arpStepIndex = math.min(#pitchList, 2)
+      state.arpStepDirection = 1
+    end
+  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In: 1, N, 2, N-1, 3, N-2, ...)
+    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then
+      idx = math.floor(pos / 2) + 1
+    else
+      idx = #pitchList - math.floor(pos / 2) + 1
+    end
+    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out: Middle, Middle+1, Middle-1, Middle+2, ...)
+    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then
+      idx = mid
+    elseif pos % 2 == 0 then
+      local offset = math.floor(pos / 2)
+      idx = mid + offset
+    else
+      local offset = math.floor(pos / 2)
+      idx = mid - offset
+    end
+    if idx < 1 or idx > #pitchList then
+      -- Fallback modulo bounce to stay inside valid range
+      idx = ((pos - 1) % #pitchList) + 1
+    end
+    state.arpStepIndex = idx
+  elseif state.arpDirectionIdx == 7 then -- RANDOM
     state.arpStepIndex = math.random(1, #pitchList)
   end
 
   local nextPitch = pitchList[state.arpStepIndex]
 
-  if state.arpDirectionIdx == 3 then
+  if state.arpDirectionIdx == 3 then -- UP-DOWN
     if #pitchList == 1 then
       state.arpStepIndex = 1
       state.arpStepDirection = 1
@@ -650,7 +685,21 @@ local function arpTick()
         state.arpStepDirection = 1
       end
     end
-  elseif state.arpDirectionIdx == 1 then
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if #pitchList == 1 then
+      state.arpStepIndex = 1
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
+      if state.arpStepIndex < 1 then
+        state.arpStepIndex = math.min(#pitchList, 2)
+        state.arpStepDirection = 1
+      elseif state.arpStepIndex > #pitchList then
+        state.arpStepIndex = math.max(1, #pitchList - 1)
+        state.arpStepDirection = -1
+      end
+    end
+  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
     state.arpStepIndex = state.arpStepIndex + 1
   elseif state.arpDirectionIdx == 2 then
     state.arpStepIndex = state.arpStepIndex - 1
@@ -749,7 +798,9 @@ end
 
 local function applyBpmChange()
   if state.arpTimer then
-    state.arpTimer:setNextTrigger(getArpIntervalSeconds())
+    state.arpTimer:stop()
+    state.arpTimer = nil
+    startArpTimer(true)
   end
 end
 
@@ -965,7 +1016,7 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 855px;
+    width: 980px;
     height: 330px;
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
@@ -1260,12 +1311,11 @@ local HTML_UI_CONTENT = [[
   }
 
   .arp-row-toggle {
-    font-size: 8.5px;
+    font-size: 10px;
     font-weight: 700;
     color: #706558;
-    background: rgba(36, 32, 28, 0.8);
-    border: 1px solid rgba(112, 101, 88, 0.4);
-    border-radius: 4px;
+    background: transparent;
+    border: none;
     padding: 3px 6px;
     cursor: pointer;
     outline: none;
@@ -1280,13 +1330,11 @@ local HTML_UI_CONTENT = [[
 
   .arp-row-toggle.active {
     color: #d4a359;
-    border-color: rgba(212, 163, 89, 0.6);
-    background: rgba(212, 163, 89, 0.15);
-    box-shadow: 0 0 4px rgba(212, 163, 89, 0.2);
+    text-shadow: 0 0 4px rgba(212, 163, 89, 0.4);
   }
 
   .arp-row-toggle:hover {
-    background: rgba(212, 163, 89, 0.25);
+    color: #f2eae1;
   }
 
   .draggable-octave {
@@ -1328,16 +1376,14 @@ local HTML_UI_CONTENT = [[
   }
 
   .octave-row-badge {
-    font-size: 9.5px;
-    font-weight: 700;
-    color: #d4a359;
-    background: rgba(36, 32, 28, 0.95);
-    border: 1.5px solid rgba(212, 163, 89, 0.4);
-    border-radius: 5px;
-    padding: 2px 6px;
-    letter-spacing: 0.3px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #a09588;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    letter-spacing: 0.5px;
     white-space: nowrap;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     height: 24px;
     display: flex;
     align-items: center;
@@ -1482,7 +1528,10 @@ local HTML_UI_CONTENT = [[
         <option value="1">UP</option>
         <option value="2">DOWN</option>
         <option value="3">UP-DN</option>
-        <option value="4">RND</option>
+        <option value="4">DN-UP</option>
+        <option value="5">CONV</option>
+        <option value="6">DIV</option>
+        <option value="7">RND</option>
       </select>
       <select id="arp-rate-select" class="badge-small" title="Arp Time Division">
         <option value="1">1/4</option>
@@ -1531,6 +1580,7 @@ local HTML_UI_CONTENT = [[
 <script>
   const LAYOUT_DATA = {
     number: [
+      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Panic!" },
       { code: 18, keyLabel: "1", isControl: true, noteLabel: "Arp" },
       { code: 19, keyLabel: "2", isControl: true, noteLabel: "Top Arp" },
       { code: 20, keyLabel: "3", isControl: true, noteLabel: "Bot Arp" },
@@ -1545,12 +1595,13 @@ local HTML_UI_CONTENT = [[
       { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
-      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain" },
+      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
       { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
     ],
     home: [
+      { code: 57, keyLabel: "Caps", isDummy: true, width: 95 },
       { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Latch" },
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
@@ -1563,6 +1614,7 @@ local HTML_UI_CONTENT = [[
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
     ],
     lower: [
+      { code: 56, keyLabel: "Shift", isDummy: true, width: 120 },
       { code: 6,  keyLabel: "Z" }, { code: 7,  keyLabel: "X" }, { code: 8,  keyLabel: "C" },
       { code: 9,  keyLabel: "V" }, { code: 11, keyLabel: "B" }, { code: 45, keyLabel: "N" },
       { code: 46, keyLabel: "M" }, { code: 43, keyLabel: "," }, { code: 47, keyLabel: "." }, { code: 44, keyLabel: "/" }
@@ -2120,8 +2172,8 @@ local state = {
 
   -- Arpeggiator State
   arpEnabled = false,
-  arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
-  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "RANDOM" },
+  arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
+  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
   arpRateIdx = 2,
   ARP_RATES = {
     { label = "1/4", factor = 1.0 },
@@ -2156,7 +2208,7 @@ local state = {
   bpmBeforeEdit = 120.0,
 
   DIGIT_KEYCODES = {
-    [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
+    [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
   },
 
@@ -2194,6 +2246,7 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
+  [50] = { key = "`", name = "Panic",    action = "panic",          shiftAction = "panic",        shiftName = "Panic!" },
   [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
   [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
   [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },

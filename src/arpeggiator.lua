@@ -80,13 +80,48 @@ local function arpTick()
       state.arpStepIndex = math.min(#pitchList, 2)
       state.arpStepDirection = 1
     end
-  elseif state.arpDirectionIdx == 4 then -- RANDOM
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if state.arpStepIndex > #pitchList then
+      state.arpStepIndex = math.max(1, #pitchList - 1)
+      state.arpStepDirection = -1
+    elseif state.arpStepIndex < 1 then
+      state.arpStepIndex = math.min(#pitchList, 2)
+      state.arpStepDirection = 1
+    end
+  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In: 1, N, 2, N-1, 3, N-2, ...)
+    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then
+      idx = math.floor(pos / 2) + 1
+    else
+      idx = #pitchList - math.floor(pos / 2) + 1
+    end
+    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out: Middle, Middle+1, Middle-1, Middle+2, ...)
+    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then
+      idx = mid
+    elseif pos % 2 == 0 then
+      local offset = math.floor(pos / 2)
+      idx = mid + offset
+    else
+      local offset = math.floor(pos / 2)
+      idx = mid - offset
+    end
+    if idx < 1 or idx > #pitchList then
+      -- Fallback modulo bounce to stay inside valid range
+      idx = ((pos - 1) % #pitchList) + 1
+    end
+    state.arpStepIndex = idx
+  elseif state.arpDirectionIdx == 7 then -- RANDOM
     state.arpStepIndex = math.random(1, #pitchList)
   end
 
   local nextPitch = pitchList[state.arpStepIndex]
 
-  if state.arpDirectionIdx == 3 then
+  if state.arpDirectionIdx == 3 then -- UP-DOWN
     if #pitchList == 1 then
       state.arpStepIndex = 1
       state.arpStepDirection = 1
@@ -100,7 +135,21 @@ local function arpTick()
         state.arpStepDirection = 1
       end
     end
-  elseif state.arpDirectionIdx == 1 then
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if #pitchList == 1 then
+      state.arpStepIndex = 1
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
+      if state.arpStepIndex < 1 then
+        state.arpStepIndex = math.min(#pitchList, 2)
+        state.arpStepDirection = 1
+      elseif state.arpStepIndex > #pitchList then
+        state.arpStepIndex = math.max(1, #pitchList - 1)
+        state.arpStepDirection = -1
+      end
+    end
+  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
     state.arpStepIndex = state.arpStepIndex + 1
   elseif state.arpDirectionIdx == 2 then
     state.arpStepIndex = state.arpStepIndex - 1
@@ -199,7 +248,9 @@ end
 
 local function applyBpmChange()
   if state.arpTimer then
-    state.arpTimer:setNextTrigger(getArpIntervalSeconds())
+    state.arpTimer:stop()
+    state.arpTimer = nil
+    startArpTimer(true)
   end
 end
 

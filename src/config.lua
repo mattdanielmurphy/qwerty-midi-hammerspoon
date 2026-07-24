@@ -17,8 +17,8 @@ local state = {
 
   -- Arpeggiator State
   arpEnabled = false,
-  arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
-  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "RANDOM" },
+  arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
+  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
   arpRateIdx = 2,
   ARP_RATES = {
     { label = "1/4", factor = 1.0 },
@@ -53,7 +53,7 @@ local state = {
   bpmBeforeEdit = 120.0,
 
   DIGIT_KEYCODES = {
-    [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
+    [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
   },
 
@@ -91,6 +91,7 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
+  [50] = { key = "`", name = "Panic",    action = "panic",          shiftAction = "panic",        shiftName = "Panic!" },
   [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
   [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
   [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
