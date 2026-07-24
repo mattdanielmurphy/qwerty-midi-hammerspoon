@@ -2553,9 +2553,9 @@ local function handleKeyDown(code)
       local isSustainedNote = false
 
       if state.shiftHeld then
-        -- Holding shift reverses both arp and sustain behaviors for note taps
-        isArpNote = not arpActive
-        isSustainedNote = not sustainActive
+        -- Holding Shift bypasses any active mode (Arp or Sustain), forcing a normal un-sustained note tap
+        isArpNote = false
+        isSustainedNote = false
       else
         isArpNote = arpActive
         isSustainedNote = sustainActive
@@ -2611,7 +2611,7 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        if isSustainedNote or state.sustainActive then
+        if isSustainedNote then
           state.sustainedPitches = state.sustainedPitches or {}
           state.sustainedPitches[playedPitch] = true
         else

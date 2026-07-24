@@ -18,6 +18,8 @@
 - **Arpeggiator Settings Expansion:** Separated Arp ON/OFF from direction dropdown. Added rate division (1/4 to 1/16T) and gate note length duration (25% to 100%). Updated qwerty_midi.lua and reloaded Hammerspoon config.
 - **Separate Row Volume Controls & Split Arp Boost:** Separated top and bottom row volume controls (`topRowVolume` & `bottomRowVolume`) with dedicated HUD `VOL` badges, and implemented automatic +20 volume velocity boost for top row notes when in split arp mode (bottom row arp active, top row non-arp synth). Link: [2026-07-24_14-56_separate-row-volumes-and-split-arp-boost.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_14-56_separate-row-volumes-and-split-arp-boost.md)
 - **Shift Key Sustain & Arpeggiator Bypass:** Holding Shift when tapping any note key on either top or bottom row now inverts the active Arpeggiator and Sustain states for that note press (bypassing active Arp/Sustain to play un-sustained single notes, or triggering Arp/Sustained notes when disabled). Link: [2026-07-24_15-12_shift-key-sustain-arp-bypass.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-12_shift-key-sustain-arp-bypass.md)
+- **Shift Key Tap Mode Bypass Fix:** Fixed Shift key note tap logic so holding Shift forces direct un-sustained non-arp note taps when Sustain is ON, without accidentally enabling the inactive Arpeggiator engine or latching sustained notes. Link: [2026-07-24_15-24_fix-shift-key-bypass-logic.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-24_fix-shift-key-bypass-logic.md)
+
 
 
 ## 2026-07-24
