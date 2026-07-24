@@ -2469,20 +2469,22 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "topVolDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    midi.sendMidiCC(7, state.topRowVolume)
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = "Upper Keys Level (CC#7)",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "topVolUp" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    midi.sendMidiCC(7, state.topRowVolume)
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = "Upper Keys Level (CC#7)",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
@@ -2510,10 +2512,11 @@ local function executeControlAction(act, code)
   elseif act == "volDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
     state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    midi.sendMidiCC(7, state.topRowVolume)
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
+      subtext = "Dual Row Volume Level (CC#7)",
       targetId = "header",
       color = "#d4a359"
     }
@@ -2521,10 +2524,11 @@ local function executeControlAction(act, code)
   elseif act == "volUp" or act == "volume" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
     state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    midi.sendMidiCC(7, state.topRowVolume)
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
+      subtext = "Dual Row Volume Level (CC#7)",
       targetId = "header",
       color = "#d4a359"
     }
