@@ -304,11 +304,27 @@ local function createMidiWebview()
     elseif body.type == "toggleArpTop" then
       if state.arpTopEnabled or not state.arpBottomEnabled then
         state.arpTopEnabled = not state.arpTopEnabled
+        if not state.arpTopEnabled then
+          for code in pairs(state.arpHeldNotes) do
+            if upperRowKeys[code] then
+              state.arpHeldNotes[code] = nil
+              state.arpKeysCurrentlyHeld[code] = nil
+            end
+          end
+        end
       end
       updateWebviewHud()
     elseif body.type == "toggleArpBottom" then
       if state.arpBottomEnabled or not state.arpTopEnabled then
-        state.arpBottomEnabled = not state.arpTopEnabled
+        state.arpBottomEnabled = not state.arpBottomEnabled
+        if not state.arpBottomEnabled then
+          for code in pairs(state.arpHeldNotes) do
+            if lowerRowKeys[code] then
+              state.arpHeldNotes[code] = nil
+              state.arpKeysCurrentlyHeld[code] = nil
+            end
+          end
+        end
       end
       updateWebviewHud()
     elseif body.type == "dragOctave" and body.row and body.direction then
