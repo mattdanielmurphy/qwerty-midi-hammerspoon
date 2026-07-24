@@ -1131,6 +1131,5 @@ local HTML_UI_CONTENT = [[
 </body>
 </html>
 ]]
-]]
 
 return HTML_UI_CONTENT
