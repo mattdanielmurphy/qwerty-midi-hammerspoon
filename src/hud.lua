@@ -86,11 +86,16 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
     local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isArpControl = (act:find("arp") ~= nil) or (act:find("bpm") ~= nil)
+    local isMainArp = (code == 50)
+    local isTopArp = (code == 18)
+    local isBotArp = (code == 19)
+    local isArpActive = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
       typeClass = isArpControl and "mode-control" or "",
-      pressed = (state.pressedKeys[code] ~= nil)
+      pressed = (state.pressedKeys[code] ~= nil),
+      sustainActive = isArpActive
     }
   end
 
