@@ -392,7 +392,12 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        midi.sendMidiNote("noteOff", playedPitch, 0)
+        if isSustainedNote then
+          state.sustainedPitches = state.sustainedPitches or {}
+          state.sustainedPitches[playedPitch] = true
+        else
+          midi.sendMidiNote("noteOff", playedPitch, 0)
+        end
       end
       state.pressedKeys[code] = nil
     end
@@ -422,6 +427,13 @@ local function handleKeyUp(code)
       end
 
       if not state.sustainActive then
+        midi.sendMidiCC(64, 0)
+        if state.sustainedPitches then
+          for pitch in pairs(state.sustainedPitches) do
+            midi.sendMidiNote("noteOff", pitch, 0)
+          end
+          state.sustainedPitches = {}
+        end
         midi.sendMidiCC(123, 0)
         if state.arpEnabled then
           local numPhysicalHeld = 0

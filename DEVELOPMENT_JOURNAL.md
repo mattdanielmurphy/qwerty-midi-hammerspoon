@@ -27,3 +27,6 @@
 
 ## 2026-07-24
 - **Always Send NoteOff:** Fixed infinite note sustain issue by making `keyUp` always dispatch standard `noteOff` events, letting MIDI CC #64 handle damper pedal sustain cleanly in the synth engine. Link: [2026-07-24_15-15_always-send-noteoff.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-15_always-send-noteoff.md)
+
+## 2026-07-24
+- **Tracked Sustained Notes Release:** Restored working sustain pedal note latching by tracking sustained pitches in state and explicitly dispatching individual `noteOff` commands alongside `CC #64 = 0` and `CC #123` when sustain mode is turned off or window is closed. Link: [2026-07-24_15-17_tracked-sustained-notes-release.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-17_tracked-sustained-notes-release.md)

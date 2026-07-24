@@ -64,6 +64,7 @@ local state = {
   },
 
   pressedKeys = {},
+  sustainedPitches = {},
   spotlightInfo = nil
 }
 
