@@ -177,6 +177,8 @@ local function executeControlAction(act, code)
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
     state.arpEnabled = false
+    state.arpTopEnabled = true
+    state.arpBottomEnabled = true
     midi.sendMidiCC(64, 0)
     midi.sendMidiCC(1, 0)
     local spot = {
