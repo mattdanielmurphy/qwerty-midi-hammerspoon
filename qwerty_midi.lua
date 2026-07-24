@@ -351,14 +351,14 @@ local function createMidiWebview()
       state.bpmInputBuffer = ""
       updateWebviewHud()
     elseif body.type == "bpmUp" then
-      state.arpBpm = math.min(300, state.arpBpm + 5)
+      state.arpBpm = math.min(300, state.arpBpm + 1)
       arpeggiator.applyBpmChange()
-      arpeggiator.stepLogicBpm(5)
+      arpeggiator.stepLogicBpm(1)
       updateWebviewHud()
     elseif body.type == "bpmDown" then
-      state.arpBpm = math.max(20, state.arpBpm - 5)
+      state.arpBpm = math.max(20, state.arpBpm - 1)
       arpeggiator.applyBpmChange()
-      arpeggiator.stepLogicBpm(-5)
+      arpeggiator.stepLogicBpm(-1)
       updateWebviewHud()
     elseif body.type == "toggleLogicSync" then
       arpeggiator.toggleLogicSync()
@@ -988,20 +988,58 @@ local function setLogicBpmTarget(targetBpm, prevBpm)
   if isSyncingLogicBpm then return end
   isSyncingLogicBpm = true
 
-  local delta = math.floor(targetBpm - (prevBpm or targetBpm) + 0.5)
-  if delta == 0 then isSyncingLogicBpm = false; return end
-
   local script = string.format([[
-    tell application "System Events"
-      tell process "Logic Pro"
-        try
+    property minBPM : 5
+    property maxBPM : 990
+
+    on setExactBPM(targetBPM)
+      set targetBPM to targetBPM as integer
+      
+      if targetBPM < minBPM then set targetBPM to minBPM
+      if targetBPM > maxBPM then set targetBPM to maxBPM
+      
+      tell application "System Events"
+        tell process "Logic Pro"
           set tempoSlider to slider 1 of group 1 of group 1 of window 1
-          set curVal to (value of tempoSlider) as real
-          set value of tempoSlider to (curVal + (%d))
-        end try
+          
+          repeat 20 times
+            set currentBPM to (value of tempoSlider) as integer
+            set deltaBPM to targetBPM - currentBPM
+            
+            if deltaBPM = 0 then return currentBPM
+            
+            if deltaBPM > 0 then
+              set goingUp to true
+              set amountLeft to deltaBPM
+            else
+              set goingUp to false
+              set amountLeft to -deltaBPM
+            end if
+            
+            set tenSteps to amountLeft div 10
+            repeat tenSteps times
+              if goingUp then
+                perform action "AXIncrement" of tempoSlider
+              else
+                perform action "AXDecrement" of tempoSlider
+              end if
+            end repeat
+            
+            set oneSteps to amountLeft mod 10
+            repeat oneSteps times
+              if goingUp then
+                set value of tempoSlider to maxBPM
+              else
+                set value of tempoSlider to minBPM
+              end if
+            end repeat
+          end repeat
+        end tell
       end tell
-    end tell
-  ]], delta)
+    end setExactBPM
+
+    setExactBPM(%d)
+  ]], math.floor(targetBpm + 0.5))
 
   local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
     isSyncingLogicBpm = false
