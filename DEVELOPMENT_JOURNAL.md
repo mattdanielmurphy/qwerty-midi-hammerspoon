@@ -60,4 +60,5 @@
 - **Fixed Webview Key Rendering:** Resolved JS string escaping syntax error in `ui_html.lua` that blocked key layout rendering. See [2026-07-24_16-12_fix-ui-html-js-syntax-error.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-12_fix-ui-html-js-syntax-error.md).
 
 ### 2026-07-24
-- **Minimum Gate Adjust:** Set minimum ARP gate limit to 5% across keyboard shortcuts, mouse drags, and stepper buttons. See [2026-07-24_16-15_update-min-gate-to-5-percent.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-15_update-min-gate-to-5-percent.md).
+### 2026-07-24
+- **Fixed Arp Latch Chord Transition & Unlimited Polyphony:** Fixed latch mode chord transitions by tracking chord attacks to clear prior latched notes on the first key press of a new chord while allowing full n-note polyphony for all keys in the new chord. See [2026-07-24_16-18_fix-arp-latch-chord-transitions.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-18_fix-arp-latch-chord-transitions.md).
