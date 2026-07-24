@@ -200,26 +200,28 @@ local HTML_UI_CONTENT = [[
     transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
-  /* Central Spotlight Popup */
+  /* Top Header Spotlight Notification Card (Never Obscures Keyboard) */
   .spotlight-card {
     position: absolute;
-    top: 50%;
+    top: 26px;
     left: 50%;
-    transform: translate(-50%, -50%) scale(1.4);
-    background: rgba(16, 22, 34, 0.96);
-    border: 2px solid #e6b432;
-    border-radius: 12px;
-    padding: 14px 24px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+    transform: translate(-50%, -50%) scale(1.0);
+    background: rgba(16, 22, 34, 0.98);
+    border: 1.5px solid #e6b432;
+    border-radius: 8px;
+    padding: 3px 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
+    gap: 8px;
     z-index: 1000;
     pointer-events: none;
     opacity: 1;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    white-space: nowrap;
   }
 
   .spotlight-card.hidden {
@@ -228,25 +230,25 @@ local HTML_UI_CONTENT = [[
   }
 
   .spotlight-title {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
-    letter-spacing: 1.5px;
+    letter-spacing: 1px;
     color: #9ab0c7;
     text-transform: uppercase;
-    margin-bottom: 4px;
+    margin-bottom: 0;
   }
 
   .spotlight-val {
-    font-size: 26px;
+    font-size: 15px;
     font-weight: 900;
     color: #ffffff;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
-    margin-bottom: 4px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    margin-bottom: 0;
     white-space: nowrap;
   }
 
   .spotlight-sub {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: #e6b432;
     white-space: nowrap;
@@ -442,6 +444,37 @@ local HTML_UI_CONTENT = [[
   let spotlightTimer1 = null;
   let spotlightTimer2 = null;
 
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('hud-container');
+    if (!container) return;
+
+    container.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.key-pad')) return;
+      isDragging = true;
+      dragStartX = e.screenX;
+      dragStartY = e.screenY;
+    });
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const dx = e.screenX - dragStartX;
+    const dy = e.screenY - dragStartY;
+    dragStartX = e.screenX;
+    dragStartY = e.screenY;
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'dragWindow', dx: dx, dy: dy });
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+
   function showSpotlight(spotlight) {
     if (!spotlight) return;
     const card = document.getElementById('spotlight-card');
@@ -459,14 +492,14 @@ local HTML_UI_CONTENT = [[
 
     const color = spotlight.color || '#e6b432';
     card.style.borderColor = color;
-    card.style.boxShadow = '0 12px 40px rgba(0,0,0,0.85), 0 0 25px ' + color + '66';
+    card.style.boxShadow = '0 4px 20px rgba(0,0,0,0.85), 0 0 15px ' + color + '66';
     subEl.style.color = color;
 
     card.classList.remove('hidden');
     card.style.transition = 'none';
     card.style.left = '50%';
-    card.style.top = '50%';
-    card.style.transform = 'translate(-50%, -50%) scale(1.4)';
+    card.style.top = '26px';
+    card.style.transform = 'translate(-50%, -50%) scale(1.0)';
     card.style.opacity = '1';
 
     card.offsetHeight; // Force layout reflow
@@ -475,8 +508,8 @@ local HTML_UI_CONTENT = [[
 
     spotlightTimer1 = setTimeout(() => {
       let targetX = '50%';
-      let targetY = '50%';
-      let targetScale = 'scale(0.35)';
+      let targetY = '26px';
+      let targetScale = 'scale(0.3)';
 
       if (spotlight.targetId) {
         const targetEl = document.getElementById(spotlight.targetId);
@@ -488,7 +521,7 @@ local HTML_UI_CONTENT = [[
           const tCenterY = tRect.top + tRect.height / 2 - cRect.top;
           targetX = tCenterX + 'px';
           targetY = tCenterY + 'px';
-          targetScale = 'scale(0.25)';
+          targetScale = 'scale(0.2)';
         }
       }
 
@@ -577,13 +610,13 @@ local HTML_UI_CONTENT = [[
           pad.appendChild(noteSpan);
 
           pad.addEventListener('mousedown', () => {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiApp) {
-              window.webkit.messageHandlers.midiApp.postMessage({ type: 'keyDown', code: k.code });
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyDown', code: k.code });
             }
           });
           pad.addEventListener('mouseup', () => {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiApp) {
-              window.webkit.messageHandlers.midiApp.postMessage({ type: 'keyUp', code: k.code });
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyUp', code: k.code });
             }
           });
 
@@ -751,6 +784,15 @@ local function createMidiWebview()
     local body = msg.body
     if body.type == "keyDown" and body.code then
       -- Click simulation
+    elseif body.type == "dragWindow" and body.dx and body.dy then
+      if activeWatchers.midiWebview then
+        local frame = activeWatchers.midiWebview:frame()
+        local newX = math.floor(frame.x + body.dx)
+        local newY = math.floor(frame.y + body.dy)
+        activeWatchers.midiWebview:frame({ x = newX, y = newY, w = frame.w, h = frame.h })
+        activeWatchers.hudX = newX
+        activeWatchers.hudY = newY
+      end
     end
   end)
 
@@ -821,17 +863,21 @@ activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollW
 
   if deltaY ~= 0 then
     local currentMod = ccStates[1] or 0
-    -- Scroll up (positive deltaY) increases mod wheel, scroll down decreases
-    local step = deltaY * 3
-    local newMod = math.max(0, math.min(127, math.floor(currentMod + step)))
-    if newMod ~= currentMod then
+    activeWatchers.modAccumulator = activeWatchers.modAccumulator or currentMod
+
+    -- Reversed scrolling (-deltaY) with drastically reduced sensitivity (0.15 step per scroll tick)
+    local sensitivity = 0.15
+    activeWatchers.modAccumulator = math.max(0, math.min(127, activeWatchers.modAccumulator - (deltaY * sensitivity)))
+    local newMod = math.floor(activeWatchers.modAccumulator + 0.5)
+
+    if newMod ~= ccStates[1] then
       ccStates[1] = newMod
       sendMidiCC(1, newMod)
       local spot = {
         title = "MOD WHEEL (CC #1)",
         value = tostring(newMod),
         subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
-        targetId = "hud-container",
+        targetId = "header",
         color = "#ff8c00"
       }
       updateWebviewHud(spot)
@@ -915,7 +961,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
         title = "HUD ZOOM",
         value = math.floor(zoomLevel * 100) .. "%",
         subtext = "Press + or - to adjust scale",
-        targetId = "hud-container",
+        targetId = "header",
         color = "#32b4cc"
       }
       updateWebviewHud(spot)
@@ -928,7 +974,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
         title = "HUD ZOOM",
         value = math.floor(zoomLevel * 100) .. "%",
         subtext = "Press + or - to adjust scale",
-        targetId = "hud-container",
+        targetId = "header",
         color = "#32b4cc"
       }
       updateWebviewHud(spot)
@@ -1068,13 +1114,14 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           currentScaleIdx = 1
           sustainActive = false
           ccStates[1] = 0
+          activeWatchers.modAccumulator = 0
           sendMidiCC(64, 0)
           sendMidiCC(1, 0)
           local spot = {
             title = "RESET ALL",
             value = "DEFAULTS RESTORED",
             subtext = "Octave 0  •  C Major  •  Mod 0",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#e6b432"
           }
           updateWebviewHud(spot)
@@ -1085,7 +1132,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
             title = "MIDI PANIC",
             value = "ALL NOTES OFF",
             subtext = "Reset active notes",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#ff4444"
           }
           updateWebviewHud(spot)
@@ -1093,12 +1140,13 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local currentVal = ccStates[1] or 0
           local newVal = math.max(0, currentVal - 16)
           ccStates[1] = newVal
+          activeWatchers.modAccumulator = newVal
           sendMidiCC(1, newVal)
           local spot = {
             title = "MOD WHEEL (CC #1)",
             value = tostring(newVal),
             subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#ff8c00"
           }
           updateWebviewHud(spot)
@@ -1106,12 +1154,13 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local currentVal = ccStates[1] or 0
           local newVal = math.min(127, currentVal + 16)
           ccStates[1] = newVal
+          activeWatchers.modAccumulator = newVal
           sendMidiCC(1, newVal)
           local spot = {
             title = "MOD WHEEL (CC #1)",
             value = tostring(newVal),
             subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#ff8c00"
           }
           updateWebviewHud(spot)
@@ -1124,7 +1173,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
             title = "MASTER VOLUME (CC #7)",
             value = tostring(newVal),
             subtext = math.floor((newVal / 127) * 100) .. "% Level",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#32b4cc"
           }
           updateWebviewHud(spot)
@@ -1137,7 +1186,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
             title = "MASTER VOLUME (CC #7)",
             value = tostring(newVal),
             subtext = math.floor((newVal / 127) * 100) .. "% Level",
-            targetId = "hud-container",
+            targetId = "header",
             color = "#32b4cc"
           }
           updateWebviewHud(spot)
