@@ -1584,7 +1584,12 @@ local function executeControlAction(act, code)
     }
     updateWebviewHud(spot)
   elseif act == "rootDown" then
-    currentRoot = (currentRoot - 1) % 12
+    if currentRoot == 0 then
+      currentRoot = 11
+      octaveShift = math.max(-36, octaveShift - 12)
+    else
+      currentRoot = currentRoot - 1
+    end
     updateLatchedArpNotes()
     local rootName = NOTE_NAMES[currentRoot + 1]
     local spot = {
@@ -1596,7 +1601,12 @@ local function executeControlAction(act, code)
     }
     updateWebviewHud(spot)
   elseif act == "rootUp" then
-    currentRoot = (currentRoot + 1) % 12
+    if currentRoot == 11 then
+      currentRoot = 0
+      octaveShift = math.min(36, octaveShift + 12)
+    else
+      currentRoot = currentRoot + 1
+    end
     updateLatchedArpNotes()
     local rootName = NOTE_NAMES[currentRoot + 1]
     local spot = {
