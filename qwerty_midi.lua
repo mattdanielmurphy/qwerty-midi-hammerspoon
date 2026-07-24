@@ -1344,9 +1344,9 @@ local HTML_UI_CONTENT = [[
   }
 
   .keyboard-row.number { margin-left: 0px; }
-  .keyboard-row.upper { margin-left: 12px; }
-  .keyboard-row.home { margin-left: 32px; }
-  .keyboard-row.lower { margin-left: 56px; }
+  .keyboard-row.upper { margin-left: 0px; }
+  .keyboard-row.home { margin-left: 0px; }
+  .keyboard-row.lower { margin-left: 0px; }
 
   .key-pad {
     width: 58px;
@@ -1428,6 +1428,13 @@ local HTML_UI_CONTENT = [[
   .key-pad.mode-control .key-note {
     color: #d4a359;
     font-weight: 600;
+  }
+
+  .key-pad.dummy-pad {
+    opacity: 0.45;
+    cursor: default;
+    background: rgba(20, 18, 16, 0.7);
+    border-color: rgba(50, 44, 38, 0.6);
   }
 
   .key-pad.sustain-active {
@@ -1538,7 +1545,7 @@ local HTML_UI_CONTENT = [[
       { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
-      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain" },
+      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
       { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
@@ -1556,6 +1563,7 @@ local HTML_UI_CONTENT = [[
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
     ],
     lower: [
+      { code: 57, keyLabel: "Caps", isDummy: true, width: 75 },
       { code: 6,  keyLabel: "Z" }, { code: 7,  keyLabel: "X" }, { code: 8,  keyLabel: "C" },
       { code: 9,  keyLabel: "V" }, { code: 11, keyLabel: "B" }, { code: 45, keyLabel: "N" },
       { code: 46, keyLabel: "M" }, { code: 43, keyLabel: "," }, { code: 47, keyLabel: "." }, { code: 44, keyLabel: "/" }
@@ -1594,7 +1602,10 @@ local HTML_UI_CONTENT = [[
         l[rowName].forEach(k => {
           const pad = document.createElement('div');
           pad.id = 'key-' + k.code;
-          pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '');
+          pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
+          if (k.width) {
+            pad.style.width = k.width + 'px';
+          }
           
           const codeSpan = document.createElement('span');
           codeSpan.className = 'key-code';
