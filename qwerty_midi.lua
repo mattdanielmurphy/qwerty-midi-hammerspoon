@@ -173,12 +173,12 @@ local HTML_UI_CONTENT = [[
 <head>
 <meta charset="utf-8">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-  body {
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; }
+  html, body {
     background: transparent;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     overflow: hidden;
     display: flex;
     justify-content: center;
@@ -186,8 +186,8 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 100%;
-    height: 100%;
+    width: 760px;
+    height: 230px;
     background: rgba(20, 24, 33, 0.95);
     border: 2px solid rgba(50, 65, 90, 0.8);
     border-radius: 14px;
@@ -196,8 +196,8 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     padding: 10px 14px 14px 14px;
     position: relative;
-    overflow: hidden;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transform-origin: center center;
+    transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   /* Central Spotlight Popup */
@@ -507,7 +507,7 @@ local HTML_UI_CONTENT = [[
     if (!data) return;
 
     if (data.zoomLevel !== undefined) {
-      document.body.style.zoom = data.zoomLevel;
+      document.getElementById('hud-container').style.transform = 'scale(' + data.zoomLevel + ')';
     }
 
     if (data.spotlight) {
@@ -759,10 +759,10 @@ local function createMidiWebview()
   wv:windowTitle("MIDI Controller HUD")
   wv:windowStyle({ "borderless", "utility" })
   wv:transparent(true)
-  wv:hasShadow(false)
   wv:html(HTML_UI_CONTENT)
   wv:level(hs.canvas.windowLevels.floating)
   wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+  wv:show()
 
   wv:windowCallback(function(action, webview)
     if action == "closing" then

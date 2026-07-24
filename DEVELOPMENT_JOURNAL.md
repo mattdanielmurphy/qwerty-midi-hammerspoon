@@ -2,5 +2,6 @@
 
 ## 2026-07-24
 - **HUD Zoom & Spotlight Animations:** Added +/- zoom shortcuts, central modifier spotlight animation with target-guided shrink transition, and removed top-right MOD readout to stabilize layout header widths. Link: [2026-07-24_02-44_hud-zoom-and-mod-animations.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_02-44_hud-zoom-and-mod-animations.md)
-- **Dynamic Window Resizing & Crisp Retina Zoom:** Resized webview window in sync with HUD zoom, enabled transparent borderless window styling for rounded corners, and switched from bitmap transform scaling to vector WebKit layout zoom. Link: [2026-07-24_02-47_crisp-zoom-and-window-resize.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_02-47_crisp-zoom-and-window-resize.md)
+- **Webview Rendering Fix:** Fixed layout collapse bug by restoring container transform scaling with antialiased font smoothing and explicit webview show call while maintaining dynamic window bounds and transparent rounded corners. Link: [2026-07-24_02-48_fix-webview-rendering.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_02-48_fix-webview-rendering.md)
+
 
