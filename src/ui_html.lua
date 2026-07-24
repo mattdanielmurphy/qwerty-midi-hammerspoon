@@ -579,18 +579,18 @@ local HTML_UI_CONTENT = [[
 <script>
   const LAYOUT_DATA = {
     number: [
-      { code: 18, keyLabel: "1", isControl: true, noteLabel: "TopOct -" },
-      { code: 19, keyLabel: "2", isControl: true, noteLabel: "TopOct +" },
-      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trnsp -" },
-      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Trnsp +" },
-      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Oct -" },
-      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Oct +" },
-      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Mode -" },
-      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Mode +" },
-      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Panic" },
-      { code: 29, keyLabel: "0", isControl: true, noteLabel: "Reset" },
-      { code: 27, keyLabel: "-", isControl: true, noteLabel: "Zoom -" },
-      { code: 24, keyLabel: "=", isControl: true, noteLabel: "Zoom +" }
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Arp" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Top Arp" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Bot Arp" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir -" },
+      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Dir +" },
+      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate -" },
+      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Rate +" },
+      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate -" },
+      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Gate +" },
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM Set" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM -" },
+      { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },

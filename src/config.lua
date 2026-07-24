@@ -88,18 +88,18 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
-  [18] = { key = "1", name = "TopOct -", action = "topOctDown" },
-  [19] = { key = "2", name = "TopOct +", action = "topOctUp" },
-  [20] = { key = "3", name = "Trnsp -",  action = "trnspDown" },
-  [21] = { key = "4", name = "Trnsp +",  action = "trnspUp" },
-  [23] = { key = "5", name = "Oct -",    action = "octaveDown" },
-  [22] = { key = "6", name = "Oct +",    action = "octaveUp" },
-  [26] = { key = "7", name = "Mode -",   action = "modeDown" },
-  [28] = { key = "8", name = "Mode +",   action = "modeUp" },
-  [25] = { key = "9", name = "Panic",    action = "panic" },
-  [29] = { key = "0", name = "Reset",    action = "resetAll" },
-  [27] = { key = "-", name = "Zoom -",   action = "zoomOut" },
-  [24] = { key = "=", name = "Zoom +",   action = "zoomIn" }
+  [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
+  [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
+  [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
+  [21] = { key = "4", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
+  [23] = { key = "5", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [22] = { key = "6", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
+  [26] = { key = "7", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
+  [28] = { key = "8", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
+  [25] = { key = "9", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
+  [29] = { key = "0", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
+  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
+  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
 
 local lowerRowKeys = {

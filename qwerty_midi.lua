@@ -90,11 +90,13 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
   local keyUpdates = {}
 
   for code, cData in pairs(numberRowControls) do
-    local isMode = (cData.action == "modeDown" or cData.action == "modeUp")
+    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
+    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local isArpControl = (act:find("arp") ~= nil) or (act:find("bpm") ~= nil)
     keyUpdates[tostring(code)] = {
-      note = cData.name,
+      note = label,
       isControl = true,
-      typeClass = isMode and "mode-control" or "",
+      typeClass = isArpControl and "mode-control" or "",
       pressed = (state.pressedKeys[code] ~= nil)
     }
   end
@@ -1519,18 +1521,18 @@ local HTML_UI_CONTENT = [[
 <script>
   const LAYOUT_DATA = {
     number: [
-      { code: 18, keyLabel: "1", isControl: true, noteLabel: "TopOct -" },
-      { code: 19, keyLabel: "2", isControl: true, noteLabel: "TopOct +" },
-      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trnsp -" },
-      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Trnsp +" },
-      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Oct -" },
-      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Oct +" },
-      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Mode -" },
-      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Mode +" },
-      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Panic" },
-      { code: 29, keyLabel: "0", isControl: true, noteLabel: "Reset" },
-      { code: 27, keyLabel: "-", isControl: true, noteLabel: "Zoom -" },
-      { code: 24, keyLabel: "=", isControl: true, noteLabel: "Zoom +" }
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Arp" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Top Arp" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Bot Arp" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir -" },
+      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Dir +" },
+      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate -" },
+      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Rate +" },
+      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate -" },
+      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Gate +" },
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM Set" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM -" },
+      { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
@@ -2175,18 +2177,18 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
-  [18] = { key = "1", name = "TopOct -", action = "topOctDown" },
-  [19] = { key = "2", name = "TopOct +", action = "topOctUp" },
-  [20] = { key = "3", name = "Trnsp -",  action = "trnspDown" },
-  [21] = { key = "4", name = "Trnsp +",  action = "trnspUp" },
-  [23] = { key = "5", name = "Oct -",    action = "octaveDown" },
-  [22] = { key = "6", name = "Oct +",    action = "octaveUp" },
-  [26] = { key = "7", name = "Mode -",   action = "modeDown" },
-  [28] = { key = "8", name = "Mode +",   action = "modeUp" },
-  [25] = { key = "9", name = "Panic",    action = "panic" },
-  [29] = { key = "0", name = "Reset",    action = "resetAll" },
-  [27] = { key = "-", name = "Zoom -",   action = "zoomOut" },
-  [24] = { key = "=", name = "Zoom +",   action = "zoomIn" }
+  [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
+  [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
+  [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
+  [21] = { key = "4", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
+  [23] = { key = "5", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [22] = { key = "6", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
+  [26] = { key = "7", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
+  [28] = { key = "8", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
+  [25] = { key = "9", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
+  [29] = { key = "0", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
+  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
+  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
 
 local lowerRowKeys = {
@@ -2569,6 +2571,140 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
+  elseif act == "arpTopToggle" then
+    state.arpTopEnabled = not state.arpTopEnabled
+    if not state.arpTopEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        if upperRowKeys[code] then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "TOP ROW ARP",
+      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-top-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpBottomToggle" then
+    state.arpBottomEnabled = not state.arpBottomEnabled
+    if not state.arpBottomEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        if lowerRowKeys[code] then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "BOTTOM ROW ARP",
+      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-bottom-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirDown" then
+    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirUp" then
+    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateDown" then
+    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateUp" then
+    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateDown" then
+    state.arpGateIdx = math.max(1, state.arpGateIdx - 1)
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = state.ARP_GATES[state.arpGateIdx].label,
+      subtext = "Gate Duration",
+      targetId = "arp-gate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateUp" then
+    state.arpGateIdx = math.min(#state.ARP_GATES, state.arpGateIdx + 1)
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = state.ARP_GATES[state.arpGateIdx].label,
+      subtext = "Gate Duration",
+      targetId = "arp-gate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmDown" then
+    state.arpBpm = math.max(20.0, state.arpBpm - 5.0)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Arpeggiator Speed",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmUp" then
+    state.arpBpm = math.min(300.0, state.arpBpm + 5.0)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Arpeggiator Speed",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmEdit" then
+    state.bpmInputMode = true
+    state.bpmBeforeEdit = state.arpBpm
+    state.bpmInputBuffer = ""
+    local spot = {
+      title = "EDIT BPM",
+      value = "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
   end
 end
 
@@ -2620,7 +2756,8 @@ local function handleKeyDown(code)
     local cData = numberRowControls[code]
     if not state.pressedKeys[code] then
       state.pressedKeys[code] = true
-      executeControlAction(cData.action, code)
+      local act = state.shiftHeld and cData.shiftAction or cData.action
+      executeControlAction(act, code)
     end
     return true
   elseif homeRowControls[code] then

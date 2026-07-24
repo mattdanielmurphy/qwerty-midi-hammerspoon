@@ -324,6 +324,140 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
+  elseif act == "arpTopToggle" then
+    state.arpTopEnabled = not state.arpTopEnabled
+    if not state.arpTopEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        if upperRowKeys[code] then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "TOP ROW ARP",
+      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-top-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpBottomToggle" then
+    state.arpBottomEnabled = not state.arpBottomEnabled
+    if not state.arpBottomEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        if lowerRowKeys[code] then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "BOTTOM ROW ARP",
+      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-bottom-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirDown" then
+    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirUp" then
+    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateDown" then
+    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateUp" then
+    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateDown" then
+    state.arpGateIdx = math.max(1, state.arpGateIdx - 1)
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = state.ARP_GATES[state.arpGateIdx].label,
+      subtext = "Gate Duration",
+      targetId = "arp-gate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateUp" then
+    state.arpGateIdx = math.min(#state.ARP_GATES, state.arpGateIdx + 1)
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = state.ARP_GATES[state.arpGateIdx].label,
+      subtext = "Gate Duration",
+      targetId = "arp-gate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmDown" then
+    state.arpBpm = math.max(20.0, state.arpBpm - 5.0)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Arpeggiator Speed",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmUp" then
+    state.arpBpm = math.min(300.0, state.arpBpm + 5.0)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Arpeggiator Speed",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmEdit" then
+    state.bpmInputMode = true
+    state.bpmBeforeEdit = state.arpBpm
+    state.bpmInputBuffer = ""
+    local spot = {
+      title = "EDIT BPM",
+      value = "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
   end
 end
 
@@ -375,7 +509,8 @@ local function handleKeyDown(code)
     local cData = numberRowControls[code]
     if not state.pressedKeys[code] then
       state.pressedKeys[code] = true
-      executeControlAction(cData.action, code)
+      local act = state.shiftHeld and cData.shiftAction or cData.action
+      executeControlAction(act, code)
     end
     return true
   elseif homeRowControls[code] then
