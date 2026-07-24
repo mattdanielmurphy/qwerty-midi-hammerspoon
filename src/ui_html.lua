@@ -594,8 +594,9 @@ local HTML_UI_CONTENT = [[
       { code: 26, keyLabel: "7", isControl: true, noteLabel: "Gate -" },
       { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate +" },
       { code: 25, keyLabel: "9", isControl: true, noteLabel: "BPM Set" },
-      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM -" },
-      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM +" }
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM Set" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM -" },
+      { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
       { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
