@@ -1785,7 +1785,7 @@ local function executeControlAction(act, code)
     stopArpTimer()
     arpHeldNotes = {}
     arpKeysCurrentlyHeld = {}
-    arpMode = 0
+    arpEnabled = false
     sendMidiCC(64, 0)
     sendMidiCC(1, 0)
     local spot = {
@@ -1954,7 +1954,7 @@ local function handleKeyUp(code)
     if playedPitch then
       local isTop = upperRowKeys[code] ~= nil
       local arpEnabledForRow = isTop and arpTopEnabled or arpBottomEnabled
-      if arpMode > 0 and arpEnabledForRow then
+      if arpEnabled and arpEnabledForRow then
         arpRemoveNote(code)
       else
         if not sustainActive then
@@ -1990,7 +1990,7 @@ local function handleKeyUp(code)
         end
       end
 
-      if not sustainActive and arpMode > 0 then
+      if not sustainActive and arpEnabled then
         local numPhysicalHeld = 0
         for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
         if numPhysicalHeld == 0 then
