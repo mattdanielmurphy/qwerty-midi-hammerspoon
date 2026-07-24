@@ -403,6 +403,9 @@ function _G.toggleMidiMode(newState)
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.pressedKeys = {}
+    state.sustainActive = false
+    midi.sendMidiCC(64, 0)
+    midi.sendMidiCC(123, 0)
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
@@ -2633,12 +2636,15 @@ local function handleKeyUp(code)
         end
       end
 
-      if not state.sustainActive and state.arpEnabled then
-        local numPhysicalHeld = 0
-        for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-        if numPhysicalHeld == 0 then
-          arpeggiator.stopArpTimer()
-          state.arpHeldNotes = {}
+      if not state.sustainActive then
+        midi.sendMidiCC(123, 0)
+        if state.arpEnabled then
+          local numPhysicalHeld = 0
+          for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+          if numPhysicalHeld == 0 then
+            arpeggiator.stopArpTimer()
+            state.arpHeldNotes = {}
+          end
         end
       end
 

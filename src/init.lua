@@ -28,6 +28,9 @@ function _G.toggleMidiMode(newState)
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.pressedKeys = {}
+    state.sustainActive = false
+    midi.sendMidiCC(64, 0)
+    midi.sendMidiCC(123, 0)
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}

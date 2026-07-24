@@ -423,12 +423,15 @@ local function handleKeyUp(code)
         end
       end
 
-      if not state.sustainActive and state.arpEnabled then
-        local numPhysicalHeld = 0
-        for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-        if numPhysicalHeld == 0 then
-          arpeggiator.stopArpTimer()
-          state.arpHeldNotes = {}
+      if not state.sustainActive then
+        midi.sendMidiCC(123, 0)
+        if state.arpEnabled then
+          local numPhysicalHeld = 0
+          for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+          if numPhysicalHeld == 0 then
+            arpeggiator.stopArpTimer()
+            state.arpHeldNotes = {}
+          end
         end
       end
 
