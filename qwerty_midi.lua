@@ -69,6 +69,18 @@ local shiftHeld = false          -- Shift key active state
 local zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0  -- HUD Zoom Scale Factor (1.0 = 100%)
 local BASE_HUD_SCALE = 1.4                                         -- 100% zoom maps to 1.4x baseline scale factor
 
+-- Arpeggiator State
+local arpMode = 0                -- 0: OFF, 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
+local ARP_MODES = { "OFF", "UP", "DOWN", "UP-DOWN", "RANDOM" }
+local arpBpmOptions = { 90, 120, 140, 160, 180, 200 }
+local arpBpmIdx = 2              -- Default 120 BPM
+local arpBpm = arpBpmOptions[arpBpmIdx]
+local arpTimer = nil
+local arpHeldNotes = {}          -- [code] = pitch
+local arpCurrentPitch = nil
+local arpStepIndex = 1
+local arpStepDirection = 1
+
 local ccStates = {
   [1] = 0,   -- Mod Wheel default 0
   [7] = 100  -- Volume default 100
@@ -183,6 +195,150 @@ local function getIntervalInfo(noteNum)
   return nil, semitonesFromRoot
 end
 
+-- Forward declaration of updateWebviewHud
+local updateWebviewHud
+
+-- ── Arpeggiator Engine ───────────────────────────────────────────────────────
+local function stopArpTimer()
+  if arpTimer then
+    arpTimer:stop()
+    arpTimer = nil
+  end
+  if arpCurrentPitch then
+    sendMidiNote("noteOff", arpCurrentPitch, 0)
+    arpCurrentPitch = nil
+  end
+  arpStepIndex = 1
+  arpStepDirection = 1
+end
+
+local function arpTick()
+  local pitchList = {}
+  for code, pitch in pairs(arpHeldNotes) do
+    table.insert(pitchList, pitch)
+  end
+  table.sort(pitchList)
+
+  if #pitchList == 0 then
+    if arpCurrentPitch then
+      sendMidiNote("noteOff", arpCurrentPitch, 0)
+      arpCurrentPitch = nil
+      if updateWebviewHud then updateWebviewHud() end
+    end
+    return
+  end
+
+  if arpMode == 1 then -- UP
+    arpStepIndex = ((arpStepIndex - 1) % #pitchList) + 1
+  elseif arpMode == 2 then -- DOWN
+    arpStepIndex = ((arpStepIndex - 2 + #pitchList) % #pitchList) + 1
+  elseif arpMode == 3 then -- UP-DOWN
+    if arpStepIndex > #pitchList then
+      arpStepIndex = math.max(1, #pitchList - 1)
+      arpStepDirection = -1
+    elseif arpStepIndex < 1 then
+      arpStepIndex = math.min(#pitchList, 2)
+      arpStepDirection = 1
+    end
+  elseif arpMode == 4 then -- RANDOM
+    arpStepIndex = math.random(1, #pitchList)
+  end
+
+  local nextPitch = pitchList[arpStepIndex]
+
+  if arpMode == 3 then
+    if #pitchList == 1 then
+      arpStepIndex = 1
+      arpStepDirection = 1
+    else
+      arpStepIndex = arpStepIndex + arpStepDirection
+      if arpStepIndex > #pitchList then
+        arpStepIndex = math.max(1, #pitchList - 1)
+        arpStepDirection = -1
+      elseif arpStepIndex < 1 then
+        arpStepIndex = math.min(#pitchList, 2)
+        arpStepDirection = 1
+      end
+    end
+  elseif arpMode == 1 then
+    arpStepIndex = arpStepIndex + 1
+  elseif arpMode == 2 then
+    arpStepIndex = arpStepIndex - 1
+  end
+
+  if arpCurrentPitch and arpCurrentPitch ~= nextPitch then
+    sendMidiNote("noteOff", arpCurrentPitch, 0)
+  end
+
+  sendMidiNote("noteOn", nextPitch, 100)
+  arpCurrentPitch = nextPitch
+
+  if updateWebviewHud then
+    updateWebviewHud(nil, nextPitch)
+  end
+end
+
+local function startArpTimer()
+  if arpTimer then return end
+  local intervalSeconds = (60.0 / arpBpm) / 2.0 -- 8th notes
+  arpStepIndex = 1
+  arpStepDirection = 1
+  arpTick()
+  arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
+end
+
+local function arpAddNote(code, pitch)
+  arpHeldNotes[code] = pitch
+  if not arpTimer then
+    startArpTimer()
+  end
+end
+
+local function arpRemoveNote(code)
+  arpHeldNotes[code] = nil
+  local count = 0
+  for _ in pairs(arpHeldNotes) do count = count + 1 end
+  if count == 0 then
+    stopArpTimer()
+    if updateWebviewHud then updateWebviewHud() end
+  end
+end
+
+local function cycleArpMode()
+  arpMode = (arpMode + 1) % #ARP_MODES -- 0, 1, 2, 3, 4 -> 0
+  if arpMode == 0 then
+    stopArpTimer()
+    arpHeldNotes = {}
+  end
+  local spot = {
+    title = "ARPEGGIATOR",
+    value = "MODE: " .. ARP_MODES[arpMode + 1],
+    subtext = arpMode > 0 and (arpBpm .. " BPM") or "Arp Disabled",
+    targetId = "arp-btn",
+    color = "#d4a359"
+  }
+  if updateWebviewHud then updateWebviewHud(spot) end
+end
+
+local function cycleArpBpm()
+  arpBpmIdx = (arpBpmIdx % #arpBpmOptions) + 1
+  arpBpm = arpBpmOptions[arpBpmIdx]
+  if arpTimer then
+    stopArpTimer()
+    if next(arpHeldNotes) ~= nil then
+      startArpTimer()
+    end
+  end
+  local spot = {
+    title = "ARP TEMPO",
+    value = arpBpm .. " BPM",
+    subtext = "8th Note Speed",
+    targetId = "arp-rate-btn",
+    color = "#d4a359"
+  }
+  if updateWebviewHud then updateWebviewHud(spot) end
+end
+
 -- ── HTML UI Engine ─────────────────────────────────────────────────────────────
 local HTML_UI_CONTENT = [[
 <!DOCTYPE html>
@@ -222,7 +378,7 @@ local HTML_UI_CONTENT = [[
     transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
-  /* Top Header Spotlight Notification Card (Positioned Above Controls) */
+  /* Top Header Spotlight Notification Card */
   .spotlight-card {
     position: absolute;
     top: 36px;
@@ -308,7 +464,7 @@ local HTML_UI_CONTENT = [[
     margin-bottom: 12px;
     cursor: move;
     -webkit-app-region: drag;
-    gap: 12px;
+    gap: 10px;
   }
 
   .badge {
@@ -317,14 +473,28 @@ local HTML_UI_CONTENT = [[
     color: #d4a359;
     font-weight: 700;
     font-size: 14px;
-    padding: 3px 10px;
+    padding: 3px 6px;
     border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-    width: 48px;
+    width: 52px;
     flex-shrink: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    text-align: center;
+    text-align-last: center;
+    font-family: inherit;
+    -webkit-app-region: no-drag;
+    cursor: pointer;
+  }
+  
+  .badge option {
+    background: #181614;
+    color: #d4a359;
+    font-weight: 600;
   }
 
   .mode-center-block {
@@ -332,30 +502,33 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 230px;
+    width: 210px;
     flex-shrink: 0;
+    -webkit-app-region: no-drag;
   }
 
   .mode-slider-track {
-    width: 210px;
-    height: 8px;
+    width: 190px;
+    height: 10px;
     background: linear-gradient(90deg, #d4a359 0%, #b8860b 40%, #706558 70%, #3a342e 100%);
-    border-radius: 4px;
+    border-radius: 5px;
     position: relative;
+    cursor: pointer;
   }
 
   .mode-slider-thumb {
-    width: 8px;
-    height: 14px;
+    width: 10px;
+    height: 16px;
     background: #f2eae1;
     border: 1px solid #333;
     border-radius: 3px;
     position: absolute;
     top: -3px;
-    left: 50%;
+    left: 0%;
     transform: translateX(-50%);
     box-shadow: 0 1px 4px rgba(0,0,0,0.6);
-    transition: left 0.15s ease;
+    transition: left 0.08s ease;
+    pointer-events: none;
   }
 
   .mode-name-label {
@@ -366,6 +539,32 @@ local HTML_UI_CONTENT = [[
     margin-top: 3px;
     white-space: nowrap;
     text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+
+  .arp-btn {
+    background: rgba(212, 163, 89, 0.15);
+    border: 1.5px solid #d4a359;
+    color: #d4a359;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+    -webkit-app-region: no-drag;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+  }
+  
+  .arp-btn:hover {
+    background: rgba(212, 163, 89, 0.3);
+  }
+  
+  .arp-btn.arp-active {
+    background: rgba(212, 163, 89, 0.45);
+    box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
   .status-info {
@@ -431,6 +630,7 @@ local HTML_UI_CONTENT = [[
     transition: background 0.05s ease, border-color 0.05s ease;
     cursor: pointer;
     flex-shrink: 0;
+    -webkit-app-region: no-drag;
   }
 
   .key-pad:active, .key-pad.pressed {
@@ -444,6 +644,7 @@ local HTML_UI_CONTENT = [[
     font-weight: 700;
     color: #f2eae1;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
   }
 
   .key-pad .key-note {
@@ -453,9 +654,10 @@ local HTML_UI_CONTENT = [[
     margin-top: 1px;
     white-space: nowrap;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
   }
 
-  /* Glowing Outlines for Note Intervals (Single Gold Accent Palette) */
+  /* Glowing Outlines for Note Intervals */
   .key-pad.root-key {
     border-color: rgba(212, 163, 89, 0.9);
     box-shadow: 0 0 10px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2);
@@ -517,13 +719,28 @@ local HTML_UI_CONTENT = [[
       <div id="spotlight-sub" class="spotlight-sub"></div>
     </div>
     <div id="header">
-      <div id="root-badge" class="badge">C</div>
+      <select id="root-select" class="badge">
+        <option value="0">C</option>
+        <option value="1">C#</option>
+        <option value="2">D</option>
+        <option value="3">D#</option>
+        <option value="4">E</option>
+        <option value="5">F</option>
+        <option value="6">F#</option>
+        <option value="7">G</option>
+        <option value="8">G#</option>
+        <option value="9">A</option>
+        <option value="10">A#</option>
+        <option value="11">B</option>
+      </select>
       <div class="mode-center-block">
-        <div class="mode-slider-track">
+        <div id="mode-track" class="mode-slider-track">
           <div id="mode-thumb" class="mode-slider-thumb"></div>
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
+      <button id="arp-btn" class="arp-btn">ARP: OFF</button>
+      <button id="arp-rate-btn" class="arp-btn">120 BPM</button>
       <div id="status-text" class="status-info"></div>
     </div>
     
@@ -569,8 +786,8 @@ local HTML_UI_CONTENT = [[
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
       { code: 5,  keyLabel: "G", isControl: true, noteLabel: "Vol -" },
       { code: 4,  keyLabel: "H", isControl: true, noteLabel: "Root -" },
-      { code: 38, keyLabel: "J", isControl: true, noteLabel: "Mod -" },
-      { code: 40, keyLabel: "K", isControl: true, noteLabel: "Mod +" },
+      { code: 38, keyLabel: "J", isControl: true, noteLabel: "Mode -" },
+      { code: 40, keyLabel: "K", isControl: true, noteLabel: "Mode +" },
       { code: 37, keyLabel: "L", isControl: true, noteLabel: "Root +" },
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
     ],
@@ -587,6 +804,8 @@ local HTML_UI_CONTENT = [[
   let isDragging = false;
   let dragStartX = 0;
   let dragStartY = 0;
+
+  const activeClickedPads = new Set();
 
   function initGrid(layout) {
     const l = layout || LAYOUT_DATA;
@@ -611,21 +830,50 @@ local HTML_UI_CONTENT = [[
           pad.appendChild(codeSpan);
           pad.appendChild(noteSpan);
 
-          pad.addEventListener('mousedown', () => {
+          pad.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            activeClickedPads.add(k.code);
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
               window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyDown', code: k.code });
             }
           });
-          pad.addEventListener('mouseup', () => {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyUp', code: k.code });
+
+          const releasePad = (e) => {
+            if (activeClickedPads.has(k.code)) {
+              activeClickedPads.delete(k.code);
+              if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+                window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyUp', code: k.code });
+              }
             }
-          });
+          };
+
+          pad.addEventListener('mouseup', releasePad);
+          pad.addEventListener('mouseleave', releasePad);
 
           rowEl.appendChild(pad);
         });
       }
     });
+  }
+
+  let isModeDragging = false;
+  const SCALES_COUNT = 9;
+
+  function handleModeSliderEvent(e) {
+    const modeTrack = document.getElementById('mode-track');
+    if (!modeTrack) return;
+    const rect = modeTrack.getBoundingClientRect();
+    let frac = (e.clientX - rect.left) / rect.width;
+    frac = Math.max(0, Math.min(1, frac));
+    
+    const modeIdx = Math.min(SCALES_COUNT, Math.max(1, Math.floor(frac * SCALES_COUNT) + 1));
+    
+    const thumb = document.getElementById('mode-thumb');
+    if (thumb) thumb.style.left = (frac * 100) + '%';
+    
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setModeIdx', modeIdx: modeIdx });
+    }
   }
 
   // Auto-initialize grid instantly on document load
@@ -635,15 +883,59 @@ local HTML_UI_CONTENT = [[
     const container = document.getElementById('hud-container');
     if (container) {
       container.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.key-pad')) return;
+        if (e.target.closest('.key-pad') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.mode-center-block')) return;
         isDragging = true;
         dragStartX = e.screenX;
         dragStartY = e.screenY;
       });
     }
+
+    const rootSelect = document.getElementById('root-select');
+    if (rootSelect) {
+      rootSelect.addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setRoot', root: val });
+        }
+      });
+      rootSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    const modeTrack = document.getElementById('mode-track');
+    if (modeTrack) {
+      modeTrack.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        isModeDragging = true;
+        handleModeSliderEvent(e);
+      });
+    }
+
+    const arpBtn = document.getElementById('arp-btn');
+    if (arpBtn) {
+      arpBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'cycleArpMode' });
+        }
+      });
+    }
+
+    const arpRateBtn = document.getElementById('arp-rate-btn');
+    if (arpRateBtn) {
+      arpRateBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'cycleArpBpm' });
+        }
+      });
+    }
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (isModeDragging) {
+      handleModeSliderEvent(e);
+      return;
+    }
     if (!isDragging) return;
     const dx = e.screenX - dragStartX;
     const dy = e.screenY - dragStartY;
@@ -656,6 +948,7 @@ local HTML_UI_CONTENT = [[
 
   window.addEventListener('mouseup', () => {
     isDragging = false;
+    isModeDragging = false;
   });
 
   function showSpotlight(spotlight) {
@@ -730,12 +1023,30 @@ local HTML_UI_CONTENT = [[
       showSpotlight(data.spotlight);
     }
     
-    if (data.rootNote) {
-      document.getElementById('root-badge').textContent = data.rootNote;
+    if (data.rootIdx !== undefined) {
+      const rootSelect = document.getElementById('root-select');
+      if (rootSelect) rootSelect.value = data.rootIdx;
     }
     
     if (data.modeName) {
       document.getElementById('mode-name').textContent = data.modeName;
+    }
+
+    if (data.arpModeStr !== undefined) {
+      const arpBtn = document.getElementById('arp-btn');
+      if (arpBtn) {
+        arpBtn.textContent = 'ARP: ' + data.arpModeStr;
+        if (data.arpModeStr !== 'OFF') {
+          arpBtn.classList.add('arp-active');
+        } else {
+          arpBtn.classList.remove('arp-active');
+        }
+      }
+    }
+
+    if (data.arpBpmStr !== undefined) {
+      const arpRateBtn = document.getElementById('arp-rate-btn');
+      if (arpRateBtn) arpRateBtn.textContent = data.arpBpmStr;
     }
 
     if (data.statusText !== undefined) {
@@ -752,7 +1063,7 @@ local HTML_UI_CONTENT = [[
       if (botEl) botEl.textContent = 'OCT ' + data.bottomOctaveStr;
     }
 
-    if (data.modeFrac !== undefined) {
+    if (data.modeFrac !== undefined && !isModeDragging) {
       document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
     }
 
@@ -791,7 +1102,347 @@ local HTML_UI_CONTENT = [[
 </html>
 ]]
 
-local function updateWebviewHud(spotlightInfo)
+local function executeControlAction(act, code)
+  if act == "topOctDown" then
+    topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
+    local spot = {
+      title = "TOP ROW OCTAVE",
+      value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+      subtext = "Upper Row Pitch",
+      targetId = "octave-indicator-top",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "topOctUp" then
+    topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
+    local spot = {
+      title = "TOP ROW OCTAVE",
+      value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+      subtext = "Upper Row Pitch",
+      targetId = "octave-indicator-top",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "trnspDown" then
+    transposeShift = math.max(-12, transposeShift - 1)
+    local spot = {
+      title = "TRANSPOSE",
+      value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+      subtext = "Semitone Shift",
+      targetId = "status-text",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "trnspUp" then
+    transposeShift = math.min(12, transposeShift + 1)
+    local spot = {
+      title = "TRANSPOSE",
+      value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+      subtext = "Semitone Shift",
+      targetId = "status-text",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "octaveDown" then
+    octaveShift = math.max(-36, octaveShift - 12)
+    local spot = {
+      title = "GLOBAL OCTAVE",
+      value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+      subtext = "Global Pitch Offset",
+      targetId = "octave-indicator-bottom",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "octaveUp" then
+    octaveShift = math.min(36, octaveShift + 12)
+    local spot = {
+      title = "GLOBAL OCTAVE",
+      value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+      subtext = "Global Pitch Offset",
+      targetId = "octave-indicator-bottom",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "modeDown" then
+    currentScaleIdx = (currentScaleIdx - 2) % #SCALES + 1
+    local scaleInfo = SCALES[currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "modeUp" then
+    currentScaleIdx = (currentScaleIdx % #SCALES) + 1
+    local scaleInfo = SCALES[currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "rootDown" then
+    currentRoot = (currentRoot - 1) % 12
+    local rootName = NOTE_NAMES[currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "rootUp" then
+    currentRoot = (currentRoot + 1) % 12
+    local rootName = NOTE_NAMES[currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "randomScale" then
+    currentRoot = math.random(0, 11)
+    currentScaleIdx = math.random(1, #SCALES)
+    local rootName = NOTE_NAMES[currentRoot + 1]
+    local scaleInfo = SCALES[currentScaleIdx]
+    local spot = {
+      title = "RANDOM SCALE",
+      value = rootName .. " " .. scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "panic" then
+    sendMidiCC(123, 0)
+    pressedKeys = {}
+    stopArpTimer()
+    arpHeldNotes = {}
+    local spot = {
+      title = "MIDI PANIC",
+      value = "ALL NOTES OFF",
+      subtext = "Reset Active Notes",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "resetAll" then
+    octaveShift = 0
+    topRowOctaveOffset = 0
+    transposeShift = 0
+    currentRoot = 0
+    currentScaleIdx = 1
+    sustainActive = false
+    ccStates[1] = 0
+    activeWatchers.modAccumulator = 0
+    stopArpTimer()
+    arpHeldNotes = {}
+    arpMode = 0
+    sendMidiCC(64, 0)
+    sendMidiCC(1, 0)
+    local spot = {
+      title = "RESET ALL",
+      value = "DEFAULTS RESTORED",
+      subtext = "All Parameters Reset",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "zoomOut" then
+    zoomLevel = math.max(0.5, zoomLevel - 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "zoomIn" then
+    zoomLevel = math.min(2.0, zoomLevel + 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "sustain" then
+    sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    sustainWasActiveOnPress = sustainActive
+    sustainActive = true
+    sendMidiCC(64, 127)
+    local spot = {
+      title = "SUSTAIN PEDAL",
+      value = "SUSTAIN ON",
+      subtext = "CC #64 Latch",
+      targetId = "key-0",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "modWheelDown" then
+    local currentVal = ccStates[1] or 0
+    local newVal = math.max(0, currentVal - 4)
+    ccStates[1] = newVal
+    activeWatchers.modAccumulator = newVal
+    sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "modWheelUp" or act == "modWheel" then
+    local currentVal = ccStates[1] or 0
+    local newVal = math.min(127, currentVal + 4)
+    ccStates[1] = newVal
+    activeWatchers.modAccumulator = newVal
+    sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "volDown" then
+    local currentVal = ccStates[7] or 100
+    local newVal = math.max(0, currentVal - 4)
+    ccStates[7] = newVal
+    sendMidiCC(7, newVal)
+    local spot = {
+      title = "MASTER VOLUME",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #7 Level",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "volUp" or act == "volume" then
+    local currentVal = ccStates[7] or 100
+    local newVal = math.min(127, currentVal + 4)
+    ccStates[7] = newVal
+    sendMidiCC(7, newVal)
+    local spot = {
+      title = "MASTER VOLUME",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #7 Level",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  end
+end
+
+local function handleKeyDown(code)
+  if lowerRowKeys[code] then
+    local kData = lowerRowKeys[code]
+    if not pressedKeys[code] then
+      local transposedPitch = getTransposedPitch(kData.baseNote, false)
+      pressedKeys[code] = transposedPitch
+      if arpMode > 0 then
+        arpAddNote(code, transposedPitch)
+      else
+        sendMidiNote("noteOn", transposedPitch, 100)
+      end
+      updateWebviewHud()
+    end
+    return true
+  elseif upperRowKeys[code] then
+    local kData = upperRowKeys[code]
+    if not pressedKeys[code] then
+      local transposedPitch = getTransposedPitch(kData.baseNote, true)
+      pressedKeys[code] = transposedPitch
+      if arpMode > 0 then
+        arpAddNote(code, transposedPitch)
+      else
+        sendMidiNote("noteOn", transposedPitch, 100)
+      end
+      updateWebviewHud()
+    end
+    return true
+  elseif numberRowControls[code] then
+    local cData = numberRowControls[code]
+    if not pressedKeys[code] then
+      pressedKeys[code] = true
+      executeControlAction(cData.action, code)
+    end
+    return true
+  elseif homeRowControls[code] then
+    local cData = homeRowControls[code]
+    if not pressedKeys[code] then
+      pressedKeys[code] = true
+      local act = shiftHeld and cData.shiftAction or cData.action
+      executeControlAction(act, code)
+    end
+    return true
+  end
+  return false
+end
+
+local function handleKeyUp(code)
+  if lowerRowKeys[code] or upperRowKeys[code] then
+    local playedPitch = pressedKeys[code]
+    if playedPitch then
+      if arpMode > 0 then
+        arpRemoveNote(code)
+      else
+        sendMidiNote("noteOff", playedPitch, 0)
+      end
+      pressedKeys[code] = nil
+    end
+    updateWebviewHud()
+    return true
+  elseif numberRowControls[code] then
+    pressedKeys[code] = nil
+    updateWebviewHud()
+    return true
+  elseif homeRowControls[code] then
+    local cData = homeRowControls[code]
+    pressedKeys[code] = nil
+    local act = shiftHeld and cData.shiftAction or cData.action
+    if act == "sustain" then
+      local holdDuration = hs.timer.secondsSinceEpoch() - sustainKeyDownTime
+      if holdDuration > 0.25 then
+        sustainActive = false
+        sendMidiCC(64, 0)
+      else
+        if sustainWasActiveOnPress then
+          sustainActive = false
+          sendMidiCC(64, 0)
+        else
+          sustainActive = true
+          sendMidiCC(64, 127)
+        end
+      end
+      local spot = {
+        title = "SUSTAIN PEDAL (CC #64)",
+        value = sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+        subtext = sustainActive and "Notes latch & hold" or "Damping enabled",
+        targetId = "key-0",
+        color = sustainActive and "#d4a359" or "#b5aba0"
+      }
+      updateWebviewHud(spot)
+    else
+      updateWebviewHud()
+    end
+    return true
+  end
+  return false
+end
+
+updateWebviewHud = function(spotlightInfo, activeArpPitch)
   if not activeWatchers.midiWebview then return end
 
   -- Dynamically resize window frame to match zoom level for crisp rendering
@@ -862,10 +1513,15 @@ local function updateWebviewHud(spotlightInfo)
       typeClass = "fifth-key"
     end
 
+    local isPressed = (pressedKeys[code] ~= nil)
+    if arpMode > 0 and activeArpPitch and noteNum == activeArpPitch then
+      isPressed = true
+    end
+
     keyUpdates[tostring(code)] = {
       note = noteName,
       typeClass = typeClass,
-      pressed = (pressedKeys[code] ~= nil)
+      pressed = isPressed
     }
   end
 
@@ -883,10 +1539,15 @@ local function updateWebviewHud(spotlightInfo)
       typeClass = "fifth-key"
     end
 
+    local isPressed = (pressedKeys[code] ~= nil)
+    if arpMode > 0 and activeArpPitch and noteNum == activeArpPitch then
+      isPressed = true
+    end
+
     keyUpdates[tostring(code)] = {
       note = noteName,
       typeClass = typeClass,
-      pressed = (pressedKeys[code] ~= nil)
+      pressed = isPressed
     }
   end
 
@@ -904,9 +1565,13 @@ local function updateWebviewHud(spotlightInfo)
     }
   end
 
+  local modVal = ccStates[1] or 0
+
   local payload = {
-    rootNote = NOTE_NAMES[currentRoot + 1],
+    rootIdx = currentRoot,
     modeName = modeName,
+    arpModeStr = ARP_MODES[arpMode + 1],
+    arpBpmStr = arpBpm .. " BPM",
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
@@ -985,7 +1650,35 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "keyDown" and body.code then
-      -- Click simulation
+      handleKeyDown(body.code)
+    elseif body.type == "keyUp" and body.code then
+      handleKeyUp(body.code)
+    elseif body.type == "setRoot" and body.root ~= nil then
+      currentRoot = math.max(0, math.min(11, body.root))
+      local rootName = NOTE_NAMES[currentRoot + 1]
+      local spot = {
+        title = "ROOT NOTE",
+        value = rootName,
+        subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
+        targetId = "root-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
+      currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
+      local scaleInfo = SCALES[currentScaleIdx]
+      local spot = {
+        title = "SCALE / MODE",
+        value = scaleInfo.name,
+        subtext = scaleInfo.brightTag,
+        targetId = "mode-thumb",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "cycleArpMode" then
+      cycleArpMode()
+    elseif body.type == "cycleArpBpm" then
+      cycleArpBpm()
     elseif body.type == "dragWindow" and body.dx and body.dy then
       if activeWatchers.midiWebview then
         local frame = activeWatchers.midiWebview:frame()
@@ -1046,6 +1739,8 @@ function _G.toggleMidiMode(newState)
     activeWatchers.midiKeyTap:stop()
     activeWatchers.midiScrollTap:stop()
     pressedKeys = {}
+    stopArpTimer()
+    arpHeldNotes = {}
     if activeWatchers.midiWebview then
       activeWatchers.midiWebview:hide()
     end
@@ -1133,437 +1828,11 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
   local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
   local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
-  -- 1. Check Lower Row Note Keys
-  if lowerRowKeys[code] then
-    local kData = lowerRowKeys[code]
-    if isDown then
-      if not pressedKeys[code] then
-        local transposedPitch = getTransposedPitch(kData.baseNote, false)
-        pressedKeys[code] = transposedPitch
-        sendMidiNote("noteOn", transposedPitch, 100)
-        updateWebviewHud()
-      end
-    else
-      local playedPitch = pressedKeys[code]
-      if playedPitch then
-        sendMidiNote("noteOff", playedPitch, 0)
-        pressedKeys[code] = nil
-      end
-      updateWebviewHud()
-    end
-    return true
+  if isDown then
+    return handleKeyDown(code)
+  else
+    return handleKeyUp(code)
   end
-
-  -- 2. Check Upper Row Note Keys
-  if upperRowKeys[code] then
-    local kData = upperRowKeys[code]
-    if isDown then
-      if not pressedKeys[code] then
-        local transposedPitch = getTransposedPitch(kData.baseNote, true)
-        pressedKeys[code] = transposedPitch
-        sendMidiNote("noteOn", transposedPitch, 100)
-        updateWebviewHud()
-      end
-    else
-      local playedPitch = pressedKeys[code]
-      if playedPitch then
-        sendMidiNote("noteOff", playedPitch, 0)
-        pressedKeys[code] = nil
-      end
-      updateWebviewHud()
-    end
-    return true
-  end
-
-  -- 3. Check Number Row Controls
-  if numberRowControls[code] then
-    local cData = numberRowControls[code]
-    if isDown then
-      if not pressedKeys[code] then
-        pressedKeys[code] = true
-
-        local act = cData.action
-
-        if act == "topOctDown" then
-          topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
-          local spot = {
-            title = "TOP ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch",
-            targetId = "octave-indicator-top",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "topOctUp" then
-          topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
-          local spot = {
-            title = "TOP ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch",
-            targetId = "octave-indicator-top",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "trnspDown" then
-          transposeShift = math.max(-12, transposeShift - 1)
-          local spot = {
-            title = "TRANSPOSE",
-            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
-            subtext = "Semitone Shift",
-            targetId = "status-text",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "trnspUp" then
-          transposeShift = math.min(12, transposeShift + 1)
-          local spot = {
-            title = "TRANSPOSE",
-            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
-            subtext = "Semitone Shift",
-            targetId = "status-text",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "octaveDown" then
-          octaveShift = math.max(-36, octaveShift - 12)
-          local spot = {
-            title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Global Pitch Offset",
-            targetId = "octave-indicator-bottom",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "octaveUp" then
-          octaveShift = math.min(36, octaveShift + 12)
-          local spot = {
-            title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Global Pitch Offset",
-            targetId = "octave-indicator-bottom",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modeDown" then
-          currentScaleIdx = (currentScaleIdx - 2) % #SCALES + 1
-          local scaleInfo = SCALES[currentScaleIdx]
-          local spot = {
-            title = "SCALE / MODE",
-            value = scaleInfo.name,
-            subtext = scaleInfo.brightTag,
-            targetId = "mode-thumb",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modeUp" then
-          currentScaleIdx = (currentScaleIdx % #SCALES) + 1
-          local scaleInfo = SCALES[currentScaleIdx]
-          local spot = {
-            title = "SCALE / MODE",
-            value = scaleInfo.name,
-            subtext = scaleInfo.brightTag,
-            targetId = "mode-thumb",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "panic" then
-          sendMidiCC(123, 0)
-          pressedKeys = {}
-          local spot = {
-            title = "MIDI PANIC",
-            value = "ALL NOTES OFF",
-            subtext = "Reset Active Notes",
-            targetId = "key-" .. code,
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "resetAll" then
-          octaveShift = 0
-          topRowOctaveOffset = 0
-          transposeShift = 0
-          currentRoot = 0
-          currentScaleIdx = 1
-          sustainActive = false
-          ccStates[1] = 0
-          activeWatchers.modAccumulator = 0
-          sendMidiCC(64, 0)
-          sendMidiCC(1, 0)
-          local spot = {
-            title = "RESET ALL",
-            value = "DEFAULTS RESTORED",
-            subtext = "All Parameters Reset",
-            targetId = "key-" .. code,
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "zoomOut" then
-          zoomLevel = math.max(0.5, zoomLevel - 0.1)
-          local spot = {
-            title = "HUD ZOOM",
-            value = math.floor(zoomLevel * 100) .. "%",
-            subtext = "Scale Factor",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "zoomIn" then
-          zoomLevel = math.min(2.0, zoomLevel + 0.1)
-          local spot = {
-            title = "HUD ZOOM",
-            value = math.floor(zoomLevel * 100) .. "%",
-            subtext = "Scale Factor",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        end
-      end
-    else
-      pressedKeys[code] = nil
-      updateWebviewHud()
-    end
-    return true
-  end
-
-  -- 4. Check Home Row Controls
-  if homeRowControls[code] then
-    local cData = homeRowControls[code]
-    if isDown then
-      if not pressedKeys[code] then
-        pressedKeys[code] = true
-
-        local act = shiftHeld and cData.shiftAction or cData.action
-
-        if act == "sustain" then
-          sustainKeyDownTime = hs.timer.secondsSinceEpoch()
-          sustainWasActiveOnPress = sustainActive
-          sustainActive = true
-          sendMidiCC(64, 127)
-          local spot = {
-            title = "SUSTAIN PEDAL",
-            value = "SUSTAIN ON",
-            subtext = "CC #64 Latch",
-            targetId = "key-0",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "octaveDown" then
-          octaveShift = math.max(-36, octaveShift - 12)
-          local spot = {
-            title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Global Pitch Offset",
-            targetId = "octave-indicator-bottom",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "octaveUp" then
-          octaveShift = math.min(36, octaveShift + 12)
-          local spot = {
-            title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Global Pitch Offset",
-            targetId = "octave-indicator-bottom",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "topOctDown" then
-          topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
-          local spot = {
-            title = "TOP ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch",
-            targetId = "octave-indicator-top",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "topOctUp" then
-          topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
-          local spot = {
-            title = "TOP ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch",
-            targetId = "octave-indicator-top",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "rootDown" then
-          currentRoot = (currentRoot - 1) % 12
-          local rootName = NOTE_NAMES[currentRoot + 1]
-          local spot = {
-            title = "ROOT NOTE",
-            value = rootName,
-            subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
-            targetId = "root-badge",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "rootUp" then
-          currentRoot = (currentRoot + 1) % 12
-          local rootName = NOTE_NAMES[currentRoot + 1]
-          local spot = {
-            title = "ROOT NOTE",
-            value = rootName,
-            subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
-            targetId = "root-badge",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modeDown" then
-          currentScaleIdx = (currentScaleIdx - 2) % #SCALES + 1
-          local scaleInfo = SCALES[currentScaleIdx]
-          local spot = {
-            title = "SCALE / MODE",
-            value = scaleInfo.name,
-            subtext = scaleInfo.brightTag,
-            targetId = "mode-thumb",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modeUp" then
-          currentScaleIdx = (currentScaleIdx % #SCALES) + 1
-          local scaleInfo = SCALES[currentScaleIdx]
-          local spot = {
-            title = "SCALE / MODE",
-            value = scaleInfo.name,
-            subtext = scaleInfo.brightTag,
-            targetId = "mode-thumb",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "randomScale" then
-          currentRoot = math.random(0, 11)
-          currentScaleIdx = math.random(1, #SCALES)
-          local rootName = NOTE_NAMES[currentRoot + 1]
-          local scaleInfo = SCALES[currentScaleIdx]
-          local spot = {
-            title = "RANDOM SCALE",
-            value = rootName .. " " .. scaleInfo.name,
-            subtext = scaleInfo.brightTag,
-            targetId = "mode-thumb",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "resetAll" then
-          octaveShift = 0
-          topRowOctaveOffset = 0
-          transposeShift = 0
-          currentRoot = 0
-          currentScaleIdx = 1
-          sustainActive = false
-          ccStates[1] = 0
-          activeWatchers.modAccumulator = 0
-          sendMidiCC(64, 0)
-          sendMidiCC(1, 0)
-          local spot = {
-            title = "RESET ALL",
-            value = "DEFAULTS RESTORED",
-            subtext = "All Parameters Reset",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "panic" then
-          sendMidiCC(123, 0)
-          pressedKeys = {}
-          local spot = {
-            title = "MIDI PANIC",
-            value = "ALL NOTES OFF",
-            subtext = "Reset Active Notes",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modWheelDown" then
-          local currentVal = ccStates[1] or 0
-          local newVal = math.max(0, currentVal - 4)
-          ccStates[1] = newVal
-          activeWatchers.modAccumulator = newVal
-          sendMidiCC(1, newVal)
-          local spot = {
-            title = "MOD WHEEL",
-            value = math.floor((newVal / 127) * 100) .. "%",
-            subtext = "CC #1 Intensity",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "modWheelUp" or act == "modWheel" then
-          local currentVal = ccStates[1] or 0
-          local newVal = math.min(127, currentVal + 4)
-          ccStates[1] = newVal
-          activeWatchers.modAccumulator = newVal
-          sendMidiCC(1, newVal)
-          local spot = {
-            title = "MOD WHEEL",
-            value = math.floor((newVal / 127) * 100) .. "%",
-            subtext = "CC #1 Intensity",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "volDown" then
-          local currentVal = ccStates[7] or 100
-          local newVal = math.max(0, currentVal - 4)
-          ccStates[7] = newVal
-          sendMidiCC(7, newVal)
-          local spot = {
-            title = "MASTER VOLUME",
-            value = math.floor((newVal / 127) * 100) .. "%",
-            subtext = "CC #7 Level",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        elseif act == "volUp" or act == "volume" then
-          local currentVal = ccStates[7] or 100
-          local newVal = math.min(127, currentVal + 4)
-          ccStates[7] = newVal
-          sendMidiCC(7, newVal)
-          local spot = {
-            title = "MASTER VOLUME",
-            value = math.floor((newVal / 127) * 100) .. "%",
-            subtext = "CC #7 Level",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          updateWebviewHud(spot)
-        end
-      end
-    else
-      pressedKeys[code] = nil
-
-      local act = shiftHeld and cData.shiftAction or cData.action
-      if act == "sustain" then
-        local holdDuration = hs.timer.secondsSinceEpoch() - sustainKeyDownTime
-        if holdDuration > 0.25 then
-          sustainActive = false
-          sendMidiCC(64, 0)
-        else
-          if sustainWasActiveOnPress then
-            sustainActive = false
-            sendMidiCC(64, 0)
-          else
-            sustainActive = true
-            sendMidiCC(64, 127)
-          end
-        end
-        local spot = {
-          title = "SUSTAIN PEDAL (CC #64)",
-          value = sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-          subtext = sustainActive and "Notes latch & hold" or "Damping enabled",
-          targetId = "key-0",
-          color = sustainActive and "#d4a359" or "#b5aba0"
-        }
-        updateWebviewHud(spot)
-      else
-        updateWebviewHud()
-      end
-    end
-    return true
-  end
-
-  return false
 end)
 
 -- Toggle MIDI Mode hotkey (Cmd + Option + M)
