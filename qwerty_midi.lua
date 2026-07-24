@@ -1345,8 +1345,8 @@ local HTML_UI_CONTENT = [[
 
   .keyboard-row.number { margin-left: 0px; }
   .keyboard-row.upper { margin-left: 0px; }
-  .keyboard-row.home { margin-left: 0px; }
-  .keyboard-row.lower { margin-left: 0px; }
+  .keyboard-row.home { margin-left: 18px; }
+  .keyboard-row.lower { margin-left: 42px; }
 
   .key-pad {
     width: 58px;
@@ -1545,7 +1545,7 @@ local HTML_UI_CONTENT = [[
       { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
-      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
+      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain" },
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
       { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
@@ -1563,7 +1563,6 @@ local HTML_UI_CONTENT = [[
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
     ],
     lower: [
-      { code: 57, keyLabel: "Caps", isDummy: true, width: 75 },
       { code: 6,  keyLabel: "Z" }, { code: 7,  keyLabel: "X" }, { code: 8,  keyLabel: "C" },
       { code: 9,  keyLabel: "V" }, { code: 11, keyLabel: "B" }, { code: 45, keyLabel: "N" },
       { code: 46, keyLabel: "M" }, { code: 43, keyLabel: "," }, { code: 47, keyLabel: "." }, { code: 44, keyLabel: "/" }
