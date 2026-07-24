@@ -188,6 +188,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
+    logicSyncEnabled = state.logicSyncEnabled,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
     statusText = statusStr,
@@ -322,6 +323,8 @@ local function createMidiWebview()
       state.arpBpm = math.max(20, state.arpBpm - 1)
       arpeggiator.applyBpmChange()
       updateWebviewHud()
+    elseif body.type == "toggleLogicSync" then
+      arpeggiator.toggleLogicSync()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
@@ -939,6 +942,74 @@ local function handleBpmInput(code, flags)
   return false
 end
 
+local function fetchLogicBpm()
+  local script = 'tell application "System Events" to tell process "Logic Pro" to get value of every UI element of UI element 1 of group 1 of window 1 whose description is "Tempo"'
+  local ok, res, _ = hs.osascript.javascript([[
+    var bpm = null;
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic.exists()) {
+        var win = logic.windows[0];
+        if (win.exists()) {
+          var grp = win.groups[0];
+          if (grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar.exists()) {
+              var elems = ctrlBar.uiElements();
+              for (var i = 0; i < elems.length; i++) {
+                if (elems[i].description() === 'Tempo') {
+                  bpm = parseFloat(elems[i].value());
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+    bpm;
+  ]])
+  if ok and res and type(res) == "number" and res >= 20 and res <= 300 then
+    return res
+  end
+  return nil
+end
+
+local function syncLogicBpm()
+  if not state.logicSyncEnabled then return end
+  local logicBpm = fetchLogicBpm()
+  if logicBpm and math.abs(state.arpBpm - logicBpm) > 0.01 then
+    state.arpBpm = logicBpm
+    applyBpmChange()
+    updateHud()
+  end
+end
+
+local function toggleLogicSync()
+  state.logicSyncEnabled = not state.logicSyncEnabled
+  if state.logicSyncEnabled then
+    syncLogicBpm()
+  end
+  local spot = {
+    title = "LOGIC PRO SYNC",
+    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
+    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
+    targetId = "bpm-val",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+end
+
+local function initLogicSync()
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  end
+  syncLogicBpm()
+end
+
+initLogicSync()
+
 return {
   setHudModule = setHudModule,
   stopArpTimer = stopArpTimer,
@@ -952,8 +1023,11 @@ return {
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
   toggleArp = toggleArp,
-  handleBpmInput = handleBpmInput
+  handleBpmInput = handleBpmInput,
+  toggleLogicSync = toggleLogicSync,
+  syncLogicBpm = syncLogicBpm
 }
+
 
 end
 
@@ -1581,6 +1655,7 @@ local HTML_UI_CONTENT = [[
         <span id="bpm-value" class="bpm-display">120 BPM</span>
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
+      <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <div id="status-text" class="status-info"></div>
     </div>
     
@@ -1942,6 +2017,16 @@ local HTML_UI_CONTENT = [[
       }
     });
 
+    const logicSyncBtn = document.getElementById('logic-sync-btn');
+    if (logicSyncBtn) {
+      logicSyncBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'toggleLogicSync' });
+        }
+      });
+    }
+
     // Arp Row Toggle handlers
     const arpTopToggle = document.getElementById('arp-top-toggle');
     if (arpTopToggle) {
@@ -2157,6 +2242,15 @@ local HTML_UI_CONTENT = [[
       }
     }
 
+    if (data.logicSyncEnabled !== undefined) {
+      const syncBtn = document.getElementById('logic-sync-btn');
+      if (syncBtn) {
+        syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
+        if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
+        else syncBtn.style.color = '#7a7067';
+      }
+    }
+
     if (data.arpTopEnabled !== undefined) {
       const topToggle = document.getElementById('arp-top-toggle');
       if (topToggle) {
@@ -2290,10 +2384,12 @@ local state = {
   arpTopEnabled = false,
   arpBottomEnabled = true,
 
-  -- BPM Input Mode State
+  -- BPM Input Mode & Sync State
   bpmInputMode = false,
   bpmInputBuffer = "",
   bpmBeforeEdit = 120.0,
+  logicSyncEnabled = true,
+  logicSyncTimer = nil,
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",

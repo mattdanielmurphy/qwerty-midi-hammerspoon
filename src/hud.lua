@@ -171,6 +171,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
+    logicSyncEnabled = state.logicSyncEnabled,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
     statusText = statusStr,
@@ -305,6 +306,8 @@ local function createMidiWebview()
       state.arpBpm = math.max(20, state.arpBpm - 1)
       arpeggiator.applyBpmChange()
       updateWebviewHud()
+    elseif body.type == "toggleLogicSync" then
+      arpeggiator.toggleLogicSync()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()

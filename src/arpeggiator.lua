@@ -366,6 +366,74 @@ local function handleBpmInput(code, flags)
   return false
 end
 
+local function fetchLogicBpm()
+  local script = 'tell application "System Events" to tell process "Logic Pro" to get value of every UI element of UI element 1 of group 1 of window 1 whose description is "Tempo"'
+  local ok, res, _ = hs.osascript.javascript([[
+    var bpm = null;
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic.exists()) {
+        var win = logic.windows[0];
+        if (win.exists()) {
+          var grp = win.groups[0];
+          if (grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar.exists()) {
+              var elems = ctrlBar.uiElements();
+              for (var i = 0; i < elems.length; i++) {
+                if (elems[i].description() === 'Tempo') {
+                  bpm = parseFloat(elems[i].value());
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+    bpm;
+  ]])
+  if ok and res and type(res) == "number" and res >= 20 and res <= 300 then
+    return res
+  end
+  return nil
+end
+
+local function syncLogicBpm()
+  if not state.logicSyncEnabled then return end
+  local logicBpm = fetchLogicBpm()
+  if logicBpm and math.abs(state.arpBpm - logicBpm) > 0.01 then
+    state.arpBpm = logicBpm
+    applyBpmChange()
+    updateHud()
+  end
+end
+
+local function toggleLogicSync()
+  state.logicSyncEnabled = not state.logicSyncEnabled
+  if state.logicSyncEnabled then
+    syncLogicBpm()
+  end
+  local spot = {
+    title = "LOGIC PRO SYNC",
+    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
+    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
+    targetId = "bpm-val",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+end
+
+local function initLogicSync()
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  end
+  syncLogicBpm()
+end
+
+initLogicSync()
+
 return {
   setHudModule = setHudModule,
   stopArpTimer = stopArpTimer,
@@ -379,5 +447,8 @@ return {
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
   toggleArp = toggleArp,
-  handleBpmInput = handleBpmInput
+  handleBpmInput = handleBpmInput,
+  toggleLogicSync = toggleLogicSync,
+  syncLogicBpm = syncLogicBpm
 }
+

@@ -41,10 +41,12 @@ local state = {
   arpTopEnabled = false,
   arpBottomEnabled = true,
 
-  -- BPM Input Mode State
+  -- BPM Input Mode & Sync State
   bpmInputMode = false,
   bpmInputBuffer = "",
   bpmBeforeEdit = 120.0,
+  logicSyncEnabled = true,
+  logicSyncTimer = nil,
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",

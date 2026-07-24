@@ -555,6 +555,7 @@ local HTML_UI_CONTENT = [[
         <span id="bpm-value" class="bpm-display">120 BPM</span>
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
+      <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <div id="status-text" class="status-info"></div>
     </div>
     
@@ -916,6 +917,16 @@ local HTML_UI_CONTENT = [[
       }
     });
 
+    const logicSyncBtn = document.getElementById('logic-sync-btn');
+    if (logicSyncBtn) {
+      logicSyncBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'toggleLogicSync' });
+        }
+      });
+    }
+
     // Arp Row Toggle handlers
     const arpTopToggle = document.getElementById('arp-top-toggle');
     if (arpTopToggle) {
@@ -1128,6 +1139,15 @@ local HTML_UI_CONTENT = [[
         } else {
           bpmVal.classList.remove('editing');
         }
+      }
+    }
+
+    if (data.logicSyncEnabled !== undefined) {
+      const syncBtn = document.getElementById('logic-sync-btn');
+      if (syncBtn) {
+        syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
+        if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
+        else syncBtn.style.color = '#7a7067';
       }
     }
 
