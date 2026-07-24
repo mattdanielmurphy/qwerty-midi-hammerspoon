@@ -195,7 +195,7 @@ local HTML_UI_CONTENT = [[
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; }
   html, body {
     background: transparent;
-    font-family: 'Fraunces', Georgia, serif, system-ui;
+    font-family: 'Fraunces', Georgia, serif, system-ui, -apple-system, sans-serif;
     width: 100%;
     height: 100%;
     overflow: hidden;
@@ -205,7 +205,7 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 790px;
+    width: 810px;
     height: 285px;
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
@@ -367,12 +367,12 @@ local HTML_UI_CONTENT = [[
   }
 
   .keyboard-row.number { margin-left: 0px; }
-  .keyboard-row.upper { margin-left: 0px; }
-  .keyboard-row.home { margin-left: 18px; }
-  .keyboard-row.lower { margin-left: 42px; }
+  .keyboard-row.upper { margin-left: 12px; }
+  .keyboard-row.home { margin-left: 32px; }
+  .keyboard-row.lower { margin-left: 56px; }
 
   .key-pad {
-    width: 60px;
+    width: 58px;
     height: 44px;
     background: rgba(36, 32, 28, 0.95);
     border: 1.5px solid rgba(60, 54, 48, 1.0);
@@ -383,6 +383,7 @@ local HTML_UI_CONTENT = [[
     align-items: center;
     transition: background 0.05s ease, border-color 0.05s ease;
     cursor: pointer;
+    flex-shrink: 0;
   }
 
   .key-pad:active, .key-pad.pressed {
@@ -392,13 +393,13 @@ local HTML_UI_CONTENT = [[
   }
 
   .key-pad .key-code {
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 600;
     color: rgba(220, 210, 195, 0.9);
   }
 
   .key-pad .key-note {
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 400;
     color: rgba(165, 155, 140, 0.8);
     margin-top: 1px;
@@ -425,7 +426,7 @@ local HTML_UI_CONTENT = [[
 
   .key-pad.control-pad .key-note {
     color: #a09588;
-    font-size: 10px;
+    font-size: 9.5px;
   }
 
   .key-pad.sustain-active {
@@ -464,6 +465,45 @@ local HTML_UI_CONTENT = [[
   </div>
 
 <script>
+  const LAYOUT_DATA = {
+    number: [
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "TopOct -" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "TopOct +" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trnsp -" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Trnsp +" },
+      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Oct -" },
+      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Oct +" },
+      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Mode -" },
+      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Mode +" },
+      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Panic" },
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "Reset" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "Zoom -" },
+      { code: 24, keyLabel: "=", isControl: true, noteLabel: "Zoom +" }
+    ],
+    upper: [
+      { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
+      { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
+      { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
+    ],
+    home: [
+      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Sustain" },
+      { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
+      { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
+      { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
+      { code: 5,  keyLabel: "G", isControl: true, noteLabel: "Vol -" },
+      { code: 4,  keyLabel: "H", isControl: true, noteLabel: "Root -" },
+      { code: 38, keyLabel: "J", isControl: true, noteLabel: "Mod -" },
+      { code: 40, keyLabel: "K", isControl: true, noteLabel: "Mod +" },
+      { code: 37, keyLabel: "L", isControl: true, noteLabel: "Root +" },
+      { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
+    ],
+    lower: [
+      { code: 6,  keyLabel: "Z" }, { code: 7,  keyLabel: "X" }, { code: 8,  keyLabel: "C" },
+      { code: 9,  keyLabel: "V" }, { code: 11, keyLabel: "B" }, { code: 45, keyLabel: "N" },
+      { code: 46, keyLabel: "M" }, { code: 43, keyLabel: "," }, { code: 47, keyLabel: "." }, { code: 44, keyLabel: "/" }
+    ]
+  };
+
   let spotlightTimer1 = null;
   let spotlightTimer2 = null;
 
@@ -471,16 +511,59 @@ local HTML_UI_CONTENT = [[
   let dragStartX = 0;
   let dragStartY = 0;
 
-  window.addEventListener('DOMContentLoaded', () => {
-    const container = document.getElementById('hud-container');
-    if (!container) return;
+  function initGrid(layout) {
+    const l = layout || LAYOUT_DATA;
+    ['number', 'upper', 'home', 'lower'].forEach(rowName => {
+      const rowEl = document.getElementById('row-' + rowName);
+      if (!rowEl) return;
+      rowEl.innerHTML = '';
+      if (l[rowName]) {
+        l[rowName].forEach(k => {
+          const pad = document.createElement('div');
+          pad.id = 'key-' + k.code;
+          pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '');
+          
+          const codeSpan = document.createElement('span');
+          codeSpan.className = 'key-code';
+          codeSpan.textContent = k.keyLabel;
+          
+          const noteSpan = document.createElement('span');
+          noteSpan.className = 'key-note';
+          noteSpan.textContent = k.noteLabel || '';
+          
+          pad.appendChild(codeSpan);
+          pad.appendChild(noteSpan);
 
-    container.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.key-pad')) return;
-      isDragging = true;
-      dragStartX = e.screenX;
-      dragStartY = e.screenY;
+          pad.addEventListener('mousedown', () => {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyDown', code: k.code });
+            }
+          });
+          pad.addEventListener('mouseup', () => {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyUp', code: k.code });
+            }
+          });
+
+          rowEl.appendChild(pad);
+        });
+      }
     });
+  }
+
+  // Auto-initialize grid instantly on document load
+  window.addEventListener('DOMContentLoaded', () => {
+    initGrid(LAYOUT_DATA);
+
+    const container = document.getElementById('hud-container');
+    if (container) {
+      container.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.key-pad')) return;
+        isDragging = true;
+        dragStartX = e.screenX;
+        dragStartY = e.screenY;
+      });
+    }
   });
 
   window.addEventListener('mousemove', (e) => {
@@ -610,44 +693,8 @@ local HTML_UI_CONTENT = [[
     }
   }
 
-  function initGrid(layout) {
-    ['number', 'upper', 'home', 'lower'].forEach(rowName => {
-      const rowEl = document.getElementById('row-' + rowName);
-      if (!rowEl) return;
-      rowEl.innerHTML = '';
-      if (layout[rowName]) {
-        layout[rowName].forEach(k => {
-          const pad = document.createElement('div');
-          pad.id = 'key-' + k.code;
-          pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '');
-          
-          const codeSpan = document.createElement('span');
-          codeSpan.className = 'key-code';
-          codeSpan.textContent = k.keyLabel;
-          
-          const noteSpan = document.createElement('span');
-          noteSpan.className = 'key-note';
-          noteSpan.textContent = k.noteLabel || '';
-          
-          pad.appendChild(codeSpan);
-          pad.appendChild(noteSpan);
-
-          pad.addEventListener('mousedown', () => {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyDown', code: k.code });
-            }
-          });
-          pad.addEventListener('mouseup', () => {
-            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-              window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'keyUp', code: k.code });
-            }
-          });
-
-          rowEl.appendChild(pad);
-        });
-      }
-    });
-  }
+  // Immediate init execution in case DOM ready state passed
+  initGrid(LAYOUT_DATA);
 </script>
 </body>
 </html>
@@ -657,7 +704,7 @@ local function updateWebviewHud(spotlightInfo)
   if not activeWatchers.midiWebview then return end
 
   -- Dynamically resize window frame to match zoom level for crisp rendering
-  local baseW, baseH = 790, 285
+  local baseW, baseH = 810, 285
   local newW = math.floor(baseW * zoomLevel)
   local newH = math.floor(baseH * zoomLevel)
   local curFrame = activeWatchers.midiWebview:frame()
@@ -820,7 +867,7 @@ local function createMidiWebview()
   end
 
   local screen = hs.screen.mainScreen():frame()
-  local width = math.floor(790 * zoomLevel)
+  local width = math.floor(810 * zoomLevel)
   local height = math.floor(285 * zoomLevel)
   local hudX = activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
   local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
@@ -862,10 +909,8 @@ local function createMidiWebview()
   activeWatchers.midiWebview = wv
 
   -- Initialize layout after webview loads
-  hs.timer.doAfter(0.2, function()
+  hs.timer.doAfter(0.1, function()
     if activeWatchers.midiWebview then
-      local layoutJson = buildLayoutJson()
-      activeWatchers.midiWebview:evaluateJavaScript("initGrid(" .. layoutJson .. ")")
       updateWebviewHud()
     end
   end)
