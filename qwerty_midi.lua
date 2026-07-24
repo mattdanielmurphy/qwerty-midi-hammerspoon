@@ -397,7 +397,7 @@ local HTML_UI_CONTENT = [[
     position: relative;
     transform-origin: center center;
     transform: scale(1.4);
-    transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   /* Top Header Spotlight Notification Card */
@@ -898,9 +898,13 @@ local HTML_UI_CONTENT = [[
     }
   }
 
-  // Auto-initialize grid instantly on document load
+  // Auto-initialize grid instantly on document load and notify Lua host
   window.addEventListener('DOMContentLoaded', () => {
     initGrid(LAYOUT_DATA);
+
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'domReady' });
+    }
 
     const container = document.getElementById('hud-container');
     if (container) {
@@ -1038,7 +1042,13 @@ local HTML_UI_CONTENT = [[
     if (!data) return;
 
     if (data.zoomLevel !== undefined) {
-      document.getElementById('hud-container').style.transform = 'scale(' + data.zoomLevel + ')';
+      const container = document.getElementById('hud-container');
+      if (container) {
+        const targetTransform = 'scale(' + data.zoomLevel + ')';
+        if (container.style.transform !== targetTransform) {
+          container.style.transform = targetTransform;
+        }
+      }
     }
 
     if (data.spotlight) {
@@ -1661,7 +1671,9 @@ local function createMidiWebview()
   uc:setCallback(function(msg)
     if not msg or not msg.body then return end
     local body = msg.body
-    if body.type == "keyDown" and body.code then
+    if body.type == "domReady" then
+      updateWebviewHud()
+    elseif body.type == "keyDown" and body.code then
       handleKeyDown(body.code)
     elseif body.type == "keyUp" and body.code then
       handleKeyUp(body.code)
@@ -1723,8 +1735,13 @@ local function createMidiWebview()
 
   activeWatchers.midiWebview = wv
 
-  -- Initialize layout after webview loads
-  hs.timer.doAfter(0.01, function()
+  -- Staggered fallbacks in case DOM ready fires before/after callback setup
+  hs.timer.doAfter(0.05, function()
+    if activeWatchers.midiWebview then
+      updateWebviewHud()
+    end
+  end)
+  hs.timer.doAfter(0.25, function()
     if activeWatchers.midiWebview then
       updateWebviewHud()
     end
