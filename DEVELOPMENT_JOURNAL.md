@@ -41,3 +41,4 @@
 
 ## 2026-07-24
 - **Retroactive Sustain for Held Notes:** Pressing the Sustain key while holding down notes now retroactively tags all active pitches as sustained, keeping them ringing upon key release until Sustain is toggled off. Link: [2026-07-24_15-22_retroactive-sustain-on-keypress.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-22_retroactive-sustain-on-keypress.md)
+- **Modifier Key Passthrough:** Verified that modifier combinations involving `Cmd`, `Option`/`Alt`, or `Control` pass through to macOS (`midiKeyTap` returns `false`), enabling system shortcuts like screenshots (`Cmd+Shift+3/4/5`) and native hotkeys while QWERTY MIDI mode is active. Link: [2026-07-24_15-30_modifier-key-passthrough.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-30_modifier-key-passthrough.md)
