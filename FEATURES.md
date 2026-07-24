@@ -24,5 +24,6 @@
 - **Auto-Bundle Launch Agent Watcher**: System Launch Agent (`com.matt.agent.qwerty-midi-bundler`) watches `src/` files and automatically reloads Hammerspoon with macOS notifications on file save.
 - **Shift Key Sustain & Arpeggiator Bypass**: Holding **Shift** when tapping any note key inverts both current Arpeggiator and Sustain states for that note (e.g. bypasses active Arp/Sustain to play a direct un-sustained note, or triggers an Arp/Sustained note when Arp/Sustain are disabled) across both upper and lower keyboard rows.
 - **Dedicated Number Row Arp Controls**: Number keys `1` through `=` mapped to comprehensive Arp & BPM controls (`1`: Arp On/Off, `2`: Top Arp, `3`: Bot Arp, `4`/`5`: Dir -/+, `6`/`7`: Rate -/+, `8`/`9`: Gate -/+, `0`: BPM Set, `-`/`=`: BPM -/+). Holding **Shift** accesses alternate controls (Panic, Transpose, Octave, Mode, Zoom, Reset).
+- **Arp Latch Chord Transition Handling**: Improved latch mode chord recognition so transitioning between chords seamlessly replaces the prior chord without restricting subsequent note polyphony or dropping notes.
 
 

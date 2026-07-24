@@ -777,11 +777,14 @@ local function arpAddNote(code, pitch)
   local numPhysicalHeld = 0
   for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
 
-  if state.arpLatchActive and numPhysicalHeld == 0 then
-    state.arpHeldNotes = {}
-    if state.arpCurrentPitch then
-      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-      state.arpCurrentPitch = nil
+  if state.arpLatchActive then
+    if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
+      state.arpHeldNotes = {}
+      state.arpLatchClearedForNewChord = true
+      if state.arpCurrentPitch then
+        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        state.arpCurrentPitch = nil
+      end
     end
   end
 
@@ -796,7 +799,13 @@ end
 local function arpRemoveNote(code)
   state.arpKeysCurrentlyHeld[code] = nil
 
+  local numPhysicalHeld = 0
+  for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+
   if state.arpLatchActive then
+    if numPhysicalHeld == 0 then
+      state.arpLatchClearedForNewChord = false
+    end
     return
   end
 
