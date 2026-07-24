@@ -991,74 +991,89 @@ local function handleBpmInput(code, flags)
 end
 
 local isSyncingLogicBpm = false
+local logicBpmTask = nil
+local logicBpmDebounceTimer = nil
 
-local function setLogicBpmTarget(targetBpm, prevBpm)
+local function setLogicBpmTarget(targetBpm)
   if not state.logicSyncEnabled then return end
-  if isSyncingLogicBpm then return end
-  isSyncingLogicBpm = true
 
-  local script = string.format([[
-    property minBPM : 5
-    property maxBPM : 990
+  if logicBpmDebounceTimer then
+    logicBpmDebounceTimer:stop()
+    logicBpmDebounceTimer = nil
+  end
 
-    on setExactBPM(targetBPM)
-      set targetBPM to targetBPM as integer
-      
-      if targetBPM < minBPM then set targetBPM to minBPM
-      if targetBPM > maxBPM then set targetBPM to maxBPM
-      
-      tell application "System Events"
-        tell process "Logic Pro"
-          set tempoSlider to slider 1 of group 1 of group 1 of window 1
-          
-          repeat 20 times
-            set currentBPM to (value of tempoSlider) as integer
-            set deltaBPM to targetBPM - currentBPM
+  logicBpmDebounceTimer = hs.timer.doAfter(0.15, function()
+    logicBpmDebounceTimer = nil
+    if logicBpmTask then
+      logicBpmTask:terminate()
+      logicBpmTask = nil
+    end
+
+    isSyncingLogicBpm = true
+
+    local script = string.format([[
+      property minBPM : 5
+      property maxBPM : 990
+
+      on setExactBPM(targetBPM)
+        set targetBPM to targetBPM as integer
+        
+        if targetBPM < minBPM then set targetBPM to minBPM
+        if targetBPM > maxBPM then set targetBPM to maxBPM
+        
+        tell application "System Events"
+          tell process "Logic Pro"
+            set tempoSlider to slider 1 of group 1 of group 1 of window 1
             
-            if deltaBPM = 0 then return currentBPM
-            
-            if deltaBPM > 0 then
-              set goingUp to true
-              set amountLeft to deltaBPM
-            else
-              set goingUp to false
-              set amountLeft to -deltaBPM
-            end if
-            
-            set tenSteps to amountLeft div 10
-            repeat tenSteps times
-              if goingUp then
-                perform action "AXIncrement" of tempoSlider
+            repeat 20 times
+              set currentBPM to (value of tempoSlider) as integer
+              set deltaBPM to targetBPM - currentBPM
+              
+              if deltaBPM = 0 then return currentBPM
+              
+              if deltaBPM > 0 then
+                set goingUp to true
+                set amountLeft to deltaBPM
               else
-                perform action "AXDecrement" of tempoSlider
+                set goingUp to false
+                set amountLeft to -deltaBPM
               end if
+              
+              set tenSteps to amountLeft div 10
+              repeat tenSteps times
+                if goingUp then
+                  perform action "AXIncrement" of tempoSlider
+                else
+                  perform action "AXDecrement" of tempoSlider
+                end if
+              end repeat
+              
+              set oneSteps to amountLeft mod 10
+              repeat oneSteps times
+                if goingUp then
+                  set value of tempoSlider to maxBPM
+                else
+                  set value of tempoSlider to minBPM
+                end if
+              end repeat
             end repeat
-            
-            set oneSteps to amountLeft mod 10
-            repeat oneSteps times
-              if goingUp then
-                set value of tempoSlider to maxBPM
-              else
-                set value of tempoSlider to minBPM
-              end if
-            end repeat
-          end repeat
+          end tell
         end tell
-      end tell
-    end setExactBPM
+      end setExactBPM
 
-    setExactBPM(%d)
-  ]], math.floor(targetBpm + 0.5))
+      setExactBPM(%d)
+    ]], math.floor(targetBpm + 0.5))
 
-  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
-    isSyncingLogicBpm = false
-  end, { "-e", script })
-  task:start()
+    logicBpmTask = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+      isSyncingLogicBpm = false
+      logicBpmTask = nil
+    end, { "-e", script })
+    logicBpmTask:start()
+  end)
 end
 
 local function stepLogicBpm(delta)
-  -- delta is the BPM change (e.g. +5 or -5), each AXIncrement/Decrement = 1 BPM
-  setLogicBpmTarget(state.arpBpm, state.arpBpm - delta)
+  setLogicBpmTarget(state.arpBpm)
 end
 
 local function syncLogicBpm()
