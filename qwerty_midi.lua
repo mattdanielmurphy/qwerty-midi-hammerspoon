@@ -191,12 +191,12 @@ local HTML_UI_CONTENT = [[
 <meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; }
   html, body {
     background: transparent;
-    font-family: 'Fraunces', Georgia, serif, system-ui, -apple-system, sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
     width: 100%;
     height: 100%;
     overflow: hidden;
@@ -207,7 +207,7 @@ local HTML_UI_CONTENT = [[
   
   #hud-container {
     width: 810px;
-    height: 285px;
+    height: 330px;
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
     border-radius: 14px;
@@ -215,28 +215,29 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 20px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
-    padding: 10px 14px 14px 14px;
+    padding: 12px 14px 14px 14px;
     position: relative;
     transform-origin: center center;
+    transform: scale(1.4);
     transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
-  /* Top Header Spotlight Notification Card (Never Obscures Keyboard) */
+  /* Top Header Spotlight Notification Card (Positioned Above Controls) */
   .spotlight-card {
     position: absolute;
-    top: 26px;
+    top: 36px;
     left: 50%;
     transform: translate(-50%, -50%) scale(1.0);
     background: rgba(20, 18, 16, 0.98);
     border: 1.5px solid #d4a359;
     border-radius: 8px;
-    padding: 4px 16px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
+    padding: 5px 18px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.9);
     display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 10px;
     z-index: 1000;
     pointer-events: none;
     opacity: 1;
@@ -275,7 +276,7 @@ local HTML_UI_CONTENT = [[
     white-space: nowrap;
   }
   
-  /* Dynamic Mod Wheel Glow (High Contrast & Readability at 100% Mod) */
+  /* Dynamic Mod Wheel Glow */
   #hud-container.mod-active {
     box-shadow: 0 0 calc(8px + var(--mod-intensity) * 18px) rgba(212, 163, 89, calc(0.2 + var(--mod-intensity) * 0.25)),
                 inset 0 0 calc(10px + var(--mod-intensity) * 15px) rgba(212, 163, 89, calc(0.08 + var(--mod-intensity) * 0.12));
@@ -298,38 +299,45 @@ local HTML_UI_CONTENT = [[
 
   /* Header Bar */
   #header {
-    height: 32px;
+    height: 48px;
     background: rgba(36, 32, 28, 0.9);
     border-radius: 8px;
     display: flex;
     align-items: center;
-    padding: 0 10px;
-    margin-bottom: 10px;
+    padding: 0 12px;
+    margin-bottom: 12px;
     cursor: move;
     -webkit-app-region: drag;
-    gap: 8px;
+    gap: 12px;
   }
 
   .badge {
-    background: rgba(212, 163, 89, 0.2);
+    background: rgba(212, 163, 89, 0.18);
     border: 1.5px solid #d4a359;
     color: #d4a359;
     font-weight: 700;
-    font-size: 13px;
-    padding: 2px 8px;
+    font-size: 14px;
+    padding: 3px 10px;
     border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
     white-space: nowrap;
-    width: 58px;
+    width: 48px;
+    flex-shrink: 0;
+  }
+
+  .mode-center-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 230px;
     flex-shrink: 0;
   }
 
   .mode-slider-track {
-    width: 100px;
-    flex-shrink: 0;
+    width: 210px;
     height: 8px;
     background: linear-gradient(90deg, #d4a359 0%, #b8860b 40%, #706558 70%, #3a342e 100%);
     border-radius: 4px;
@@ -350,6 +358,16 @@ local HTML_UI_CONTENT = [[
     transition: left 0.15s ease;
   }
 
+  .mode-name-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #d4a359;
+    letter-spacing: 0.5px;
+    margin-top: 3px;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+
   .status-info {
     font-size: 12px;
     color: #b5aba0;
@@ -359,13 +377,14 @@ local HTML_UI_CONTENT = [[
     text-overflow: ellipsis;
     flex: 1;
     min-width: 0;
+    text-align: right;
   }
 
   /* Keyboard Grid */
   .keyboard-grid {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     flex: 1;
   }
 
@@ -382,7 +401,7 @@ local HTML_UI_CONTENT = [[
   }
 
   .octave-row-badge {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
     color: #d4a359;
     background: rgba(36, 32, 28, 0.95);
@@ -436,27 +455,27 @@ local HTML_UI_CONTENT = [[
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   }
 
-  /* Glowing Outline Variations for Note Intervals */
+  /* Glowing Outlines for Note Intervals (Single Gold Accent Palette) */
   .key-pad.root-key {
-    border-color: rgba(212, 163, 89, 0.85);
-    box-shadow: 0 0 10px rgba(212, 163, 89, 0.4), inset 0 0 6px rgba(212, 163, 89, 0.2);
+    border-color: rgba(212, 163, 89, 0.9);
+    box-shadow: 0 0 10px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2);
   }
   .key-pad.root-key .key-note { color: #f0c27b; font-weight: 700; }
   .key-pad.root-key:active, .key-pad.root-key.pressed { background: rgba(212, 163, 89, 0.3); }
 
   .key-pad.third-key {
-    border-color: rgba(210, 130, 95, 0.85);
-    box-shadow: 0 0 10px rgba(210, 130, 95, 0.4), inset 0 0 6px rgba(210, 130, 95, 0.2);
+    border: 1.5px dashed rgba(212, 163, 89, 0.75);
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.25), inset 0 0 4px rgba(212, 163, 89, 0.1);
   }
-  .key-pad.third-key .key-note { color: #e89e7c; font-weight: 700; }
-  .key-pad.third-key:active, .key-pad.third-key.pressed { background: rgba(210, 130, 95, 0.25); }
+  .key-pad.third-key .key-note { color: rgba(212, 163, 89, 0.9); font-weight: 600; }
+  .key-pad.third-key:active, .key-pad.third-key.pressed { background: rgba(212, 163, 89, 0.2); }
 
   .key-pad.fifth-key {
-    border-color: rgba(110, 180, 155, 0.85);
-    box-shadow: 0 0 10px rgba(110, 180, 155, 0.4), inset 0 0 6px rgba(110, 180, 155, 0.2);
+    border-color: rgba(212, 163, 89, 0.45);
+    box-shadow: 0 0 4px rgba(212, 163, 89, 0.15);
   }
-  .key-pad.fifth-key .key-note { color: #8ecdb5; font-weight: 700; }
-  .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(110, 180, 155, 0.25); }
+  .key-pad.fifth-key .key-note { color: rgba(212, 163, 89, 0.75); font-weight: 500; }
+  .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(212, 163, 89, 0.15); }
 
   .key-pad.control-pad {
     background: rgba(30, 26, 23, 0.95);
@@ -466,6 +485,16 @@ local HTML_UI_CONTENT = [[
   .key-pad.control-pad .key-note {
     color: #a09588;
     font-size: 9.5px;
+  }
+
+  .key-pad.mode-control {
+    background: rgba(45, 38, 30, 0.95);
+    border-color: rgba(212, 163, 89, 0.55);
+  }
+
+  .key-pad.mode-control .key-note {
+    color: #d4a359;
+    font-weight: 600;
   }
 
   .key-pad.sustain-active {
@@ -488,23 +517,26 @@ local HTML_UI_CONTENT = [[
       <div id="spotlight-sub" class="spotlight-sub"></div>
     </div>
     <div id="header">
-      <div id="root-badge" class="badge">🎵 C</div>
-      <div class="mode-slider-track">
-        <div id="mode-thumb" class="mode-slider-thumb"></div>
+      <div id="root-badge" class="badge">C</div>
+      <div class="mode-center-block">
+        <div class="mode-slider-track">
+          <div id="mode-thumb" class="mode-slider-thumb"></div>
+        </div>
+        <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <div id="status-text" class="status-info">Major / Ionian  •  +0 Oct  •  Top: +1 Oct</div>
+      <div id="status-text" class="status-info"></div>
     </div>
     
     <div class="keyboard-grid">
       <div id="row-number" class="keyboard-row number"></div>
       <div class="row-with-indicator">
         <div id="row-upper" class="keyboard-row upper"></div>
-        <div id="octave-indicator-top" class="octave-row-badge">Oct +1</div>
+        <div id="octave-indicator-top" class="octave-row-badge">TOP +1</div>
       </div>
       <div id="row-home" class="keyboard-row home"></div>
       <div class="row-with-indicator">
         <div id="row-lower" class="keyboard-row lower"></div>
-        <div id="octave-indicator-bottom" class="octave-row-badge">Oct +0</div>
+        <div id="octave-indicator-bottom" class="octave-row-badge">OCT 0</div>
       </div>
     </div>
   </div>
@@ -699,21 +731,25 @@ local HTML_UI_CONTENT = [[
     }
     
     if (data.rootNote) {
-      document.getElementById('root-badge').textContent = '🎵 ' + data.rootNote;
+      document.getElementById('root-badge').textContent = data.rootNote;
     }
     
-    if (data.statusText) {
+    if (data.modeName) {
+      document.getElementById('mode-name').textContent = data.modeName;
+    }
+
+    if (data.statusText !== undefined) {
       document.getElementById('status-text').textContent = data.statusText;
     }
 
     if (data.topOctaveStr !== undefined) {
       const topEl = document.getElementById('octave-indicator-top');
-      if (topEl) topEl.textContent = '⬆️ ' + data.topOctaveStr;
+      if (topEl) topEl.textContent = 'TOP ' + data.topOctaveStr;
     }
 
     if (data.bottomOctaveStr !== undefined) {
       const botEl = document.getElementById('octave-indicator-bottom');
-      if (botEl) botEl.textContent = '⬇️ ' + data.bottomOctaveStr;
+      if (botEl) botEl.textContent = 'OCT ' + data.bottomOctaveStr;
     }
 
     if (data.modeFrac !== undefined) {
@@ -759,7 +795,7 @@ local function updateWebviewHud(spotlightInfo)
   if not activeWatchers.midiWebview then return end
 
   -- Dynamically resize window frame to match zoom level for crisp rendering
-  local baseW, baseH = 810, 285
+  local baseW, baseH = 810, 330
   local effectiveScale = zoomLevel * BASE_HUD_SCALE
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale)
@@ -784,24 +820,30 @@ local function updateWebviewHud(spotlightInfo)
   
   local modeBrightness = SCALES[currentScaleIdx].brightness or 3
   local modeFrac = 1.0 - (modeBrightness / 6.0)
+  local modeName = SCALES[currentScaleIdx].name
   
   local octStr = (octaveShift >= 0 and "+" or "") .. (octaveShift / 12) .. " Oct"
-  local trnspStr = (transposeShift ~= 0) and ("  •  Trnsp: " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. "st") or ""
-  local topOctVal = (topRowOctaveOffset / 12) + 1
-  local topOctStr = "Top: +" .. topOctVal .. " Oct"
-  local shiftStr = shiftHeld and "  •  [SHIFT]" or ""
-  local modVal = ccStates[1] or 0
-  local statusStr = SCALES[currentScaleIdx].name .. "  •  " .. octStr .. trnspStr .. "  •  " .. topOctStr .. shiftStr
+  local trnspStr = (transposeShift ~= 0) and ("Trnsp: " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. "st") or ""
+  local susStr = sustainActive and "SUS: ON" or ""
+  local shiftStr = shiftHeld and "[SHIFT]" or ""
 
-  local topOctaveStr = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct"
-  local bottomOctaveStr = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct"
+  local statusParts = {}
+  if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
+  if susStr ~= "" then table.insert(statusParts, susStr) end
+  if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
+  local statusStr = table.concat(statusParts, "  •  ")
+
+  local topOctaveStr = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12)
+  local bottomOctaveStr = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12)
 
   local keyUpdates = {}
 
   for code, cData in pairs(numberRowControls) do
+    local isMode = (cData.action == "modeDown" or cData.action == "modeUp")
     keyUpdates[tostring(code)] = {
       note = cData.name,
       isControl = true,
+      typeClass = isMode and "mode-control" or "",
       pressed = (pressedKeys[code] ~= nil)
     }
   end
@@ -850,10 +892,13 @@ local function updateWebviewHud(spotlightInfo)
 
   for code, cData in pairs(homeRowControls) do
     local label = shiftHeld and cData.shiftName or cData.name
+    local act = shiftHeld and cData.shiftAction or cData.action
     local isSustain = (code == 0 or code == 48)
+    local isMode = (act == "modeDown" or act == "modeUp")
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
+      typeClass = isMode and "mode-control" or "",
       pressed = (pressedKeys[code] ~= nil),
       sustainActive = isSustain and sustainActive
     }
@@ -861,6 +906,7 @@ local function updateWebviewHud(spotlightInfo)
 
   local payload = {
     rootNote = NOTE_NAMES[currentRoot + 1],
+    modeName = modeName,
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
@@ -928,7 +974,7 @@ local function createMidiWebview()
   local screen = hs.screen.mainScreen():frame()
   local effectiveScale = zoomLevel * BASE_HUD_SCALE
   local width = math.floor(810 * effectiveScale)
-  local height = math.floor(285 * effectiveScale)
+  local height = math.floor(330 * effectiveScale)
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
   local hudX = savedX or activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
@@ -973,7 +1019,7 @@ local function createMidiWebview()
   activeWatchers.midiWebview = wv
 
   -- Initialize layout after webview loads
-  hs.timer.doAfter(0.05, function()
+  hs.timer.doAfter(0.01, function()
     if activeWatchers.midiWebview then
       updateWebviewHud()
     end
@@ -1142,7 +1188,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
           local spot = {
             title = "TOP ROW OCTAVE",
-            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
             subtext = "Upper Row Pitch",
             targetId = "octave-indicator-top",
             color = "#d4a359"
@@ -1152,7 +1198,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
           local spot = {
             title = "TOP ROW OCTAVE",
-            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
             subtext = "Upper Row Pitch",
             targetId = "octave-indicator-top",
             color = "#d4a359"
@@ -1162,7 +1208,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           transposeShift = math.max(-12, transposeShift - 1)
           local spot = {
             title = "TRANSPOSE",
-            value = "♭♯ " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
             subtext = "Semitone Shift",
             targetId = "status-text",
             color = "#d4a359"
@@ -1172,7 +1218,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           transposeShift = math.min(12, transposeShift + 1)
           local spot = {
             title = "TRANSPOSE",
-            value = "♭♯ " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
             subtext = "Semitone Shift",
             targetId = "status-text",
             color = "#d4a359"
@@ -1182,7 +1228,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           octaveShift = math.max(-36, octaveShift - 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
             subtext = "Global Pitch Offset",
             targetId = "octave-indicator-bottom",
             color = "#d4a359"
@@ -1192,7 +1238,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           octaveShift = math.min(36, octaveShift + 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
             subtext = "Global Pitch Offset",
             targetId = "octave-indicator-bottom",
             color = "#d4a359"
@@ -1203,7 +1249,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = "🎼 " .. scaleInfo.name,
+            value = scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1214,7 +1260,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = "🎼 " .. scaleInfo.name,
+            value = scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1225,7 +1271,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           pressedKeys = {}
           local spot = {
             title = "MIDI PANIC",
-            value = "🚨 ALL NOTES OFF",
+            value = "ALL NOTES OFF",
             subtext = "Reset Active Notes",
             targetId = "key-" .. code,
             color = "#d4a359"
@@ -1244,7 +1290,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, 0)
           local spot = {
             title = "RESET ALL",
-            value = "🔄 DEFAULTS RESTORED",
+            value = "DEFAULTS RESTORED",
             subtext = "All Parameters Reset",
             targetId = "key-" .. code,
             color = "#d4a359"
@@ -1254,7 +1300,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           zoomLevel = math.max(0.5, zoomLevel - 0.1)
           local spot = {
             title = "HUD ZOOM",
-            value = "🔍 " .. math.floor(zoomLevel * 100) .. "%",
+            value = math.floor(zoomLevel * 100) .. "%",
             subtext = "Scale Factor",
             targetId = "header",
             color = "#d4a359"
@@ -1264,7 +1310,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           zoomLevel = math.min(2.0, zoomLevel + 0.1)
           local spot = {
             title = "HUD ZOOM",
-            value = "🔍 " .. math.floor(zoomLevel * 100) .. "%",
+            value = math.floor(zoomLevel * 100) .. "%",
             subtext = "Scale Factor",
             targetId = "header",
             color = "#d4a359"
@@ -1295,7 +1341,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(64, 127)
           local spot = {
             title = "SUSTAIN PEDAL",
-            value = "🦶 SUSTAIN ON",
+            value = "SUSTAIN ON",
             subtext = "CC #64 Latch",
             targetId = "key-0",
             color = "#d4a359"
@@ -1305,7 +1351,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           octaveShift = math.max(-36, octaveShift - 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
             subtext = "Global Pitch Offset",
             targetId = "octave-indicator-bottom",
             color = "#d4a359"
@@ -1315,7 +1361,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           octaveShift = math.min(36, octaveShift + 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
             subtext = "Global Pitch Offset",
             targetId = "octave-indicator-bottom",
             color = "#d4a359"
@@ -1325,7 +1371,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
           local spot = {
             title = "TOP ROW OCTAVE",
-            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
             subtext = "Upper Row Pitch",
             targetId = "octave-indicator-top",
             color = "#d4a359"
@@ -1335,7 +1381,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
           local spot = {
             title = "TOP ROW OCTAVE",
-            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
             subtext = "Upper Row Pitch",
             targetId = "octave-indicator-top",
             color = "#d4a359"
@@ -1346,7 +1392,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local rootName = NOTE_NAMES[currentRoot + 1]
           local spot = {
             title = "ROOT NOTE",
-            value = "🎵 " .. rootName,
+            value = rootName,
             subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
             targetId = "root-badge",
             color = "#d4a359"
@@ -1357,7 +1403,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local rootName = NOTE_NAMES[currentRoot + 1]
           local spot = {
             title = "ROOT NOTE",
-            value = "🎵 " .. rootName,
+            value = rootName,
             subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
             targetId = "root-badge",
             color = "#d4a359"
@@ -1368,7 +1414,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = "🎼 " .. scaleInfo.name,
+            value = scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1379,7 +1425,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = "🎼 " .. scaleInfo.name,
+            value = scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1392,7 +1438,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "RANDOM SCALE",
-            value = "🎲 " .. rootName .. " " .. scaleInfo.name,
+            value = rootName .. " " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1411,7 +1457,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, 0)
           local spot = {
             title = "RESET ALL",
-            value = "🔄 DEFAULTS RESTORED",
+            value = "DEFAULTS RESTORED",
             subtext = "All Parameters Reset",
             targetId = "header",
             color = "#d4a359"
@@ -1422,7 +1468,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           pressedKeys = {}
           local spot = {
             title = "MIDI PANIC",
-            value = "🚨 ALL NOTES OFF",
+            value = "ALL NOTES OFF",
             subtext = "Reset Active Notes",
             targetId = "header",
             color = "#d4a359"
@@ -1436,7 +1482,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, newVal)
           local spot = {
             title = "MOD WHEEL",
-            value = "🎛️ " .. math.floor((newVal / 127) * 100) .. "%",
+            value = math.floor((newVal / 127) * 100) .. "%",
             subtext = "CC #1 Intensity",
             targetId = "header",
             color = "#d4a359"
@@ -1450,7 +1496,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, newVal)
           local spot = {
             title = "MOD WHEEL",
-            value = "🎛️ " .. math.floor((newVal / 127) * 100) .. "%",
+            value = math.floor((newVal / 127) * 100) .. "%",
             subtext = "CC #1 Intensity",
             targetId = "header",
             color = "#d4a359"
@@ -1463,7 +1509,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(7, newVal)
           local spot = {
             title = "MASTER VOLUME",
-            value = "🔊 " .. math.floor((newVal / 127) * 100) .. "%",
+            value = math.floor((newVal / 127) * 100) .. "%",
             subtext = "CC #7 Level",
             targetId = "header",
             color = "#d4a359"
@@ -1476,7 +1522,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(7, newVal)
           local spot = {
             title = "MASTER VOLUME",
-            value = "🔊 " .. math.floor((newVal / 127) * 100) .. "%",
+            value = math.floor((newVal / 127) * 100) .. "%",
             subtext = "CC #7 Level",
             targetId = "header",
             color = "#d4a359"
