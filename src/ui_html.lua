@@ -306,26 +306,31 @@ local HTML_UI_CONTENT = [[
 
   .row-controls {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
     flex-shrink: 0;
+    margin-left: auto;
+    height: 44px;
   }
 
   .arp-row-toggle {
-    font-size: 8px;
+    font-size: 8.5px;
     font-weight: 700;
     color: #706558;
     background: rgba(36, 32, 28, 0.8);
     border: 1px solid rgba(112, 101, 88, 0.4);
     border-radius: 4px;
-    padding: 1px 6px;
+    padding: 3px 6px;
     cursor: pointer;
     outline: none;
     font-family: inherit;
     letter-spacing: 0.5px;
     transition: all 0.15s ease;
     -webkit-app-region: no-drag;
+    height: 24px;
+    display: flex;
+    align-items: center;
   }
 
   .arp-row-toggle.active {
@@ -370,24 +375,27 @@ local HTML_UI_CONTENT = [[
     gap: 5px;
   }
 
-  .row-with-indicator {
+  .row-with-controls {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     width: 100%;
+    height: 44px;
   }
 
   .octave-row-badge {
-    font-size: 10.5px;
+    font-size: 9.5px;
     font-weight: 700;
     color: #d4a359;
     background: rgba(36, 32, 28, 0.95);
     border: 1.5px solid rgba(212, 163, 89, 0.4);
-    border-radius: 6px;
-    padding: 3px 8px;
-    letter-spacing: 0.5px;
+    border-radius: 5px;
+    padding: 2px 6px;
+    letter-spacing: 0.3px;
     white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    height: 24px;
+    display: flex;
+    align-items: center;
   }
 
   .keyboard-row.number { margin-left: 0px; }
@@ -548,7 +556,7 @@ local HTML_UI_CONTENT = [[
     
     <div class="keyboard-grid">
       <div id="row-number" class="keyboard-row number"></div>
-      <div class="row-with-indicator">
+      <div class="row-with-controls">
         <div id="row-upper" class="keyboard-row upper"></div>
         <div class="row-controls">
           <button id="arp-top-toggle" class="arp-row-toggle active">ARP</button>
@@ -557,7 +565,7 @@ local HTML_UI_CONTENT = [[
         </div>
       </div>
       <div id="row-home" class="keyboard-row home"></div>
-      <div class="row-with-indicator">
+      <div class="row-with-controls">
         <div id="row-lower" class="keyboard-row lower"></div>
         <div class="row-controls">
           <button id="arp-bottom-toggle" class="arp-row-toggle active">ARP</button>
