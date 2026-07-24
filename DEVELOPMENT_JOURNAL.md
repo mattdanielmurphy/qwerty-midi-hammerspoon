@@ -34,3 +34,6 @@
 
 ## 2026-07-24
 - **Preserve Sustain Across Window Toggle:** Preserved `sustainActive` and tracked sustained notes across MIDI controller hide/show toggles so Sustain remains active and visible on reopen, allowing notes to continue ringing until sustain is explicitly toggled off. Link: [2026-07-24_15-19_preserve-sustain-across-window-toggle.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-19_preserve-sustain-across-window-toggle.md)
+
+## 2026-07-24
+- **Retroactive Sustain for Held Notes:** Pressing the Sustain key while holding down notes now retroactively tags all active pitches as sustained, keeping them ringing upon key release until Sustain is toggled off. Link: [2026-07-24_15-22_retroactive-sustain-on-keypress.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-22_retroactive-sustain-on-keypress.md)

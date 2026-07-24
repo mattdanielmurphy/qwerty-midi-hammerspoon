@@ -211,6 +211,18 @@ local function executeControlAction(act, code)
     state.sustainWasActiveOnPress = state.sustainActive
     state.sustainActive = true
     midi.sendMidiCC(64, 127)
+
+    -- Retroactively sustain all notes currently being physically held down
+    for code, keyInfo in pairs(state.pressedKeys) do
+      if type(keyInfo) == "table" then
+        keyInfo.isSustainedNote = true
+        if not keyInfo.isArpNote and keyInfo.pitch then
+          state.sustainedPitches = state.sustainedPitches or {}
+          state.sustainedPitches[keyInfo.pitch] = true
+        end
+      end
+    end
+
     local spot = {
       title = "SUSTAIN / LATCH (CC #64)",
       value = "SUSTAIN ON",
@@ -392,7 +404,7 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        if isSustainedNote then
+        if isSustainedNote or state.sustainActive then
           state.sustainedPitches = state.sustainedPitches or {}
           state.sustainedPitches[playedPitch] = true
         else
