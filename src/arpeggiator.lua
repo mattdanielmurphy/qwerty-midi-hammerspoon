@@ -253,11 +253,57 @@ local function formatBpm(bpm)
   end
 end
 
-local function applyBpmChange()
+local isPushingBpmToLogic = false
+
+local function pushBpmToLogic(newBpm)
+  if not state.logicSyncEnabled or isPushingBpmToLogic then return end
+  isPushingBpmToLogic = true
+
+  local script = string.format([[
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic && logic.exists()) {
+        var win = logic.windows[0];
+        if (win && win.exists()) {
+          var grp = win.groups[0];
+          if (grp && grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar && ctrlBar.exists()) {
+              var tempoElem = ctrlBar.uiElements().find(function(e) { return e.description() === 'Tempo'; });
+              if (tempoElem) {
+                var currentBpm = parseFloat(tempoElem.value());
+                var targetBpm = %f;
+                var diff = Math.round(targetBpm - currentBpm);
+                if (diff !== 0) {
+                  var actionName = diff > 0 ? 'AXIncrement' : 'AXDecrement';
+                  var steps = Math.abs(diff);
+                  for (var i = 0; i < steps; i++) {
+                    tempoElem.actions.byName(actionName).perform();
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+  ]], newBpm)
+
+  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+    isPushingBpmToLogic = false
+  end, { "-l", "JavaScript", "-e", script })
+  task:start()
+end
+
+local function applyBpmChange(userInitiated)
   if state.arpTimer then
     state.arpTimer:stop()
     state.arpTimer = nil
     startArpTimer(true)
+  end
+  if userInitiated then
+    pushBpmToLogic(state.arpBpm)
   end
 end
 
@@ -321,7 +367,7 @@ local function handleBpmInput(code, flags)
     end
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
-    applyBpmChange()
+    applyBpmChange(true)
     updateHud()
     return true
   elseif code == 126 then -- Arrow Up
@@ -330,7 +376,7 @@ local function handleBpmInput(code, flags)
     elseif flags.alt then delta = 0.1 end
     state.arpBpm = math.min(300, state.arpBpm + delta)
     state.bpmInputBuffer = ""
-    applyBpmChange()
+    applyBpmChange(true)
     updateHud()
     return true
   elseif code == 125 then -- Arrow Down
@@ -339,7 +385,7 @@ local function handleBpmInput(code, flags)
     elseif flags.alt then delta = 0.1 end
     state.arpBpm = math.max(20, state.arpBpm - delta)
     state.bpmInputBuffer = ""
-    applyBpmChange()
+    applyBpmChange(true)
     updateHud()
     return true
   elseif code == 51 then -- Backspace
@@ -369,7 +415,7 @@ end
 local isSyncingLogicBpm = false
 
 local function syncLogicBpm()
-  if not state.logicSyncEnabled or isSyncingLogicBpm then return end
+  if not state.logicSyncEnabled or isSyncingLogicBpm or isPushingBpmToLogic then return end
   isSyncingLogicBpm = true
 
   local script = [[
