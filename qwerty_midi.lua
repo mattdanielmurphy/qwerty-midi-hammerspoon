@@ -186,8 +186,8 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 760px;
-    height: 230px;
+    width: 100%;
+    height: 100%;
     background: rgba(20, 24, 33, 0.95);
     border: 2px solid rgba(50, 65, 90, 0.8);
     border-radius: 14px;
@@ -196,8 +196,8 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     padding: 10px 14px 14px 14px;
     position: relative;
-    transform-origin: center center;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   /* Central Spotlight Popup */
@@ -507,7 +507,7 @@ local HTML_UI_CONTENT = [[
     if (!data) return;
 
     if (data.zoomLevel !== undefined) {
-      document.getElementById('hud-container').style.transform = 'scale(' + data.zoomLevel + ')';
+      document.body.style.zoom = data.zoomLevel;
     }
 
     if (data.spotlight) {
@@ -599,6 +599,23 @@ local HTML_UI_CONTENT = [[
 
 local function updateWebviewHud(spotlightInfo)
   if not activeWatchers.midiWebview then return end
+
+  -- Dynamically resize window frame to match zoom level for crisp rendering
+  local baseW, baseH = 760, 230
+  local newW = math.floor(baseW * zoomLevel)
+  local newH = math.floor(baseH * zoomLevel)
+  local curFrame = activeWatchers.midiWebview:frame()
+
+  if curFrame.w ~= newW or curFrame.h ~= newH then
+    local screen = hs.screen.mainScreen():frame()
+    local cx = curFrame.x + (curFrame.w / 2)
+    local cy = curFrame.y + (curFrame.h / 2)
+    local nx = math.floor(cx - (newW / 2))
+    local ny = math.floor(cy - (newH / 2))
+    nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
+    ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
+    activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+  end
   
   local modeBrightness = SCALES[currentScaleIdx].brightness or 3
   local modeFrac = 1.0 - (modeBrightness / 6.0)
@@ -723,10 +740,10 @@ local function createMidiWebview()
   end
 
   local screen = hs.screen.mainScreen():frame()
-  local width = 1200
-  local height = 400
+  local width = math.floor(760 * zoomLevel)
+  local height = math.floor(230 * zoomLevel)
   local hudX = activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
-  local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 30)
+  local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
 
   local uc = hsUsercontent.new("midiControllerUC")
   uc:setCallback(function(msg)
@@ -740,6 +757,9 @@ local function createMidiWebview()
   local rect = { x = hudX, y = hudY, w = width, h = height }
   local wv = hsWebview.new(rect, { developerExtrasEnabled = false }, uc)
   wv:windowTitle("MIDI Controller HUD")
+  wv:windowStyle({ "borderless", "utility" })
+  wv:transparent(true)
+  wv:hasShadow(false)
   wv:html(HTML_UI_CONTENT)
   wv:level(hs.canvas.windowLevels.floating)
   wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
