@@ -280,7 +280,7 @@ local function createMidiWebview()
       }
       updateWebviewHud(spot)
     elseif body.type == "dragGate" and body.delta ~= nil then
-      state.arpGatePercent = math.max(1.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
+      state.arpGatePercent = math.max(5.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
       local spot = {
         title = "ARP NOTE LENGTH",
         value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -300,7 +300,7 @@ local function createMidiWebview()
       }
       updateWebviewHud(spot)
     elseif body.type == "gateDown" then
-      state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
+      state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
       local spot = {
         title = "ARP NOTE LENGTH",
         value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -2823,7 +2823,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateDown" then
-    state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
+    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
       value = math.floor(state.arpGatePercent + 0.5) .. "%",

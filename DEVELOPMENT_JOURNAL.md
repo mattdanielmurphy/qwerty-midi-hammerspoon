@@ -58,3 +58,6 @@
 
 ### 2026-07-24
 - **Fixed Webview Key Rendering:** Resolved JS string escaping syntax error in `ui_html.lua` that blocked key layout rendering. See [2026-07-24_16-12_fix-ui-html-js-syntax-error.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-12_fix-ui-html-js-syntax-error.md).
+
+### 2026-07-24
+- **Minimum Gate Adjust:** Set minimum ARP gate limit to 5% across keyboard shortcuts, mouse drags, and stepper buttons. See [2026-07-24_16-15_update-min-gate-to-5-percent.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-15_update-min-gate-to-5-percent.md).

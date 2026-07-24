@@ -428,7 +428,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateDown" then
-    state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
+    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
       value = math.floor(state.arpGatePercent + 0.5) .. "%",
