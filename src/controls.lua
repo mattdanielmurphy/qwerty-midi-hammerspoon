@@ -209,13 +209,13 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "sustain" or act == "latch" then
+  elseif act == "sustain" then
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
     state.sustainWasActiveOnPress = state.sustainActive
     state.sustainActive = true
     midi.sendMidiCC(64, 127)
 
-    -- Retroactively sustain all notes currently being physically held down
+    -- Retroactively sustain all non-arp notes currently being physically held down
     for code, keyInfo in pairs(state.pressedKeys) do
       if type(keyInfo) == "table" then
         keyInfo.isSustainedNote = true
@@ -227,10 +227,23 @@ local function executeControlAction(act, code)
     end
 
     local spot = {
-      title = "SUSTAIN / LATCH (CC #64)",
+      title = "SUSTAIN (CC #64)",
       value = "SUSTAIN ON",
-      subtext = "Notes & Arp pattern hold",
-      targetId = "key-0",
+      subtext = "Notes held across release",
+      targetId = code and ("key-" .. code) or "key-48",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "latch" then
+    state.arpLatchKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.arpLatchWasActiveOnPress = state.arpLatchActive
+    state.arpLatchActive = true
+
+    local spot = {
+      title = "ARP LATCH",
+      value = "LATCH ON",
+      subtext = "Arp chord patterns held",
+      targetId = code and ("key-" .. code) or "key-0",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
@@ -561,7 +574,7 @@ local function handleKeyUp(code)
     local cData = homeRowControls[code]
     state.pressedKeys[code] = nil
     local act = state.shiftHeld and cData.shiftAction or cData.action
-    if act == "sustain" or act == "latch" then
+    if act == "sustain" then
       local holdDuration = hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime
       if holdDuration > 0.25 then
         state.sustainActive = false
@@ -585,22 +598,43 @@ local function handleKeyUp(code)
           state.sustainedPitches = {}
         end
         midi.sendMidiCC(123, 0)
-        if state.arpEnabled then
-          local numPhysicalHeld = 0
-          for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-          if numPhysicalHeld == 0 then
-            arpeggiator.stopArpTimer()
-            state.arpHeldNotes = {}
-          end
+      end
+
+      local spot = {
+        title = "SUSTAIN (CC #64)",
+        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
+        targetId = "key-48",
+        color = state.sustainActive and "#d4a359" or "#b5aba0"
+      }
+      hud.updateWebviewHud(spot)
+    elseif act == "latch" then
+      local holdDuration = hs.timer.secondsSinceEpoch() - state.arpLatchKeyDownTime
+      if holdDuration > 0.25 then
+        state.arpLatchActive = false
+      else
+        if state.arpLatchWasActiveOnPress then
+          state.arpLatchActive = false
+        else
+          state.arpLatchActive = true
+        end
+      end
+
+      if not state.arpLatchActive then
+        local numPhysicalHeld = 0
+        for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+        if numPhysicalHeld == 0 then
+          arpeggiator.stopArpTimer()
+          state.arpHeldNotes = {}
         end
       end
 
       local spot = {
-        title = "SUSTAIN / LATCH (CC #64)",
-        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-        subtext = state.sustainActive and "Notes & Arp pattern hold" or "Damping enabled",
+        title = "ARP LATCH",
+        value = state.arpLatchActive and "LATCH ON" or "LATCH OFF",
+        subtext = state.arpLatchActive and "Arp chord patterns held" or "Latch disabled",
         targetId = "key-0",
-        color = state.sustainActive and "#d4a359" or "#b5aba0"
+        color = state.arpLatchActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
     else

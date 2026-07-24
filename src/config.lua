@@ -5,9 +5,12 @@ local state = {
   octaveShift = 0,            -- Global Octave offset in semitones (-36 to +36)
   topRowOctaveOffset = 0,     -- Independent Top Row Octave Offset
   transposeShift = 0,         -- Transpose offset in semitones (-12 to +12)
-  sustainActive = false,      -- Sustain / Latch mode toggle state (CC64)
+  sustainActive = false,      -- Sustain toggle state (CC64)
   sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
   sustainWasActiveOnPress = false,
+  arpLatchActive = false,     -- Arpeggiator Latch mode toggle state
+  arpLatchKeyDownTime = 0,    -- Timestamp when arp latch key was pressed down
+  arpLatchWasActiveOnPress = false,
   shiftHeld = false,          -- Shift key active state
   zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0,
   BASE_HUD_SCALE = 1.4,
@@ -130,7 +133,7 @@ local upperRowKeys = {
 
 local homeRowControls = {
   [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
-  [0]  = { key = "A",   name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+  [0]  = { key = "A",   name = "Latch",   action = "latch",       shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },

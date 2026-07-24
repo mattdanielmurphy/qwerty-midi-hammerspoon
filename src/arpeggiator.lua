@@ -157,7 +157,7 @@ local function arpAddNote(code, pitch)
   local numPhysicalHeld = 0
   for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
 
-  if state.sustainActive and numPhysicalHeld == 0 then
+  if state.arpLatchActive and numPhysicalHeld == 0 then
     state.arpHeldNotes = {}
     if state.arpCurrentPitch then
       midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
@@ -176,7 +176,7 @@ end
 local function arpRemoveNote(code)
   state.arpKeysCurrentlyHeld[code] = nil
 
-  if state.sustainActive then
+  if state.arpLatchActive then
     return
   end
 

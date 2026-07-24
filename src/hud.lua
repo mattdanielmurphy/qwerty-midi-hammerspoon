@@ -59,11 +59,13 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
   local octStr = (state.octaveShift >= 0 and "+" or "") .. (state.octaveShift / 12) .. " Oct"
   local trnspStr = (state.transposeShift ~= 0) and ("Trnsp: " .. (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. "st") or ""
   local susStr = state.sustainActive and "SUS: ON" or ""
+  local latchStr = state.arpLatchActive and "LATCH: ON" or ""
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
 
   local statusParts = {}
   if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
   if susStr ~= "" then table.insert(statusParts, susStr) end
+  if latchStr ~= "" then table.insert(statusParts, latchStr) end
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
@@ -139,14 +141,15 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
   for code, cData in pairs(homeRowControls) do
     local label = state.shiftHeld and cData.shiftName or cData.name
     local act = state.shiftHeld and cData.shiftAction or cData.action
-    local isSustain = (code == 0 or code == 48)
+    local isSustain = (code == 48)
+    local isLatch = (code == 0)
     local isMode = (act == "modeDown" or act == "modeUp")
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
-      typeClass = isMode and "mode-control" or "",
+      typeClass = isMode and "mode-control" or (isLatch and state.arpLatchActive and "latch-active" or ""),
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = isSustain and state.sustainActive
+      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpLatchActive)
     }
   end
 

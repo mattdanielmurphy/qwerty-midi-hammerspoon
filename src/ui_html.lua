@@ -593,12 +593,13 @@ local HTML_UI_CONTENT = [[
       { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
+      { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain" },
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
       { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
     ],
     home: [
-      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Sustain" },
+      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Latch" },
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
