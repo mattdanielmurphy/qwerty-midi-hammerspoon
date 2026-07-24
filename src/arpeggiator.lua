@@ -47,7 +47,11 @@ end
 local function arpTick()
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
-    table.insert(pitchList, pitch)
+    local isTop = upperRowKeys[code] ~= nil
+    local rowArpEnabled = isTop and state.arpTopEnabled or state.arpBottomEnabled
+    if rowArpEnabled then
+      table.insert(pitchList, pitch)
+    end
   end
   table.sort(pitchList)
 
