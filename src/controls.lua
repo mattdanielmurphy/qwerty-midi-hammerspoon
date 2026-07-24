@@ -148,7 +148,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "panic" then
-    midi.sendMidiCC(123, 0)
+    midi.panicAllChannels()
+    state.sustainActive = false
     state.pressedKeys = {}
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}

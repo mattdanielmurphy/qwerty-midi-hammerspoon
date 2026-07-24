@@ -2355,7 +2355,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "panic" then
-    midi.sendMidiCC(123, 0)
+    midi.panicAllChannels()
+    state.sustainActive = false
     state.pressedKeys = {}
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
@@ -2736,11 +2737,31 @@ local function sendMidiCC(controllerNum, val)
   end
 end
 
+local function panicAllChannels()
+  local dev = getMidiDevice()
+  if not dev then return end
+
+  for ch = 0, 15 do
+    -- Turn off sustain, all sound, all notes, and reset controllers across all channels
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
+
+    -- Send explicit note off for all pitch numbers 0..127
+    for note = 0, 127 do
+      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
+    end
+  end
+end
+
 return {
   getMidiDevice = getMidiDevice,
   sendMidiNote = sendMidiNote,
-  sendMidiCC = sendMidiCC
+  sendMidiCC = sendMidiCC,
+  panicAllChannels = panicAllChannels
 }
+
 
 end
 
