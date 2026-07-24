@@ -368,6 +368,40 @@ end
 
 local isSyncingLogicBpm = false
 
+local function stepLogicBpm(deltaSteps)
+  local actionName = deltaSteps > 0 and "AXIncrement" or "AXDecrement"
+  local absSteps = math.abs(deltaSteps)
+  local script = string.format([[
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic && logic.exists()) {
+        var win = logic.windows[0];
+        if (win && win.exists()) {
+          var grp = win.groups[0];
+          if (grp && grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar && ctrlBar.exists()) {
+              var elems = ctrlBar.uiElements();
+              for (var i = 0; i < elems.length; i++) {
+                if (elems[i].description() === 'Tempo') {
+                  for (var k = 0; k < %d; k++) {
+                    elems[i].performAction('%s');
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+  ]], absSteps, actionName)
+
+  local task = hs.task.new("/usr/bin/osascript", nil, { "-l", "JavaScript", "-e", script })
+  task:start()
+end
+
 local function syncLogicBpm()
   if not state.logicSyncEnabled or isSyncingLogicBpm then return end
   isSyncingLogicBpm = true
@@ -452,6 +486,7 @@ return {
   toggleArp = toggleArp,
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,
-  syncLogicBpm = syncLogicBpm
+  syncLogicBpm = syncLogicBpm,
+  stepLogicBpm = stepLogicBpm
 }
 

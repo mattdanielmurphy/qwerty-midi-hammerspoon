@@ -450,6 +450,7 @@ local function executeControlAction(act, code)
   elseif act == "bpmDown" then
     state.arpBpm = math.max(20.0, state.arpBpm - 5.0)
     arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(-5)
     local spot = {
       title = "TEMPO / BPM",
       value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
@@ -461,6 +462,7 @@ local function executeControlAction(act, code)
   elseif act == "bpmUp" then
     state.arpBpm = math.min(300.0, state.arpBpm + 5.0)
     arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(5)
     local spot = {
       title = "TEMPO / BPM",
       value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",

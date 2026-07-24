@@ -336,10 +336,12 @@ local function createMidiWebview()
     elseif body.type == "bpmUp" then
       state.arpBpm = math.min(300, state.arpBpm + 1)
       arpeggiator.applyBpmChange()
+      arpeggiator.stepLogicBpm(1)
       updateWebviewHud()
     elseif body.type == "bpmDown" then
       state.arpBpm = math.max(20, state.arpBpm - 1)
       arpeggiator.applyBpmChange()
+      arpeggiator.stepLogicBpm(-1)
       updateWebviewHud()
     elseif body.type == "toggleLogicSync" then
       arpeggiator.toggleLogicSync()
