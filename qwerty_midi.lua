@@ -290,12 +290,14 @@ local function arpTick()
   end
 end
 
-local function startArpTimer()
+local function startArpTimer(preserveState)
   if arpTimer then return end
   local intervalSeconds = (60.0 / arpBpm) / 2.0 -- 8th notes
-  arpStepIndex = 1
-  arpStepDirection = 1
-  arpTick()
+  if not preserveState then
+    arpStepIndex = 1
+    arpStepDirection = 1
+    arpTick()
+  end
   arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
 end
 
@@ -348,10 +350,8 @@ end
 
 local function applyBpmChange()
   if arpTimer then
-    stopArpTimer()
-    if next(arpHeldNotes) ~= nil then
-      startArpTimer()
-    end
+    local intervalSeconds = (60.0 / arpBpm) / 2.0
+    arpTimer:setNextTrigger(intervalSeconds)
   end
 end
 
