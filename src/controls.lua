@@ -392,9 +392,7 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        if not isSustainedNote then
-          midi.sendMidiNote("noteOff", playedPitch, 0)
-        end
+        midi.sendMidiNote("noteOff", playedPitch, 0)
       end
       state.pressedKeys[code] = nil
     end
