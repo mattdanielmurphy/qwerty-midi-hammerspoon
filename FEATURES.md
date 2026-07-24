@@ -18,5 +18,5 @@
   - Automatic default volume boost (+20 velocity) for Top Row when entering Split Arp mode (bottom row arp active, top row non-arp synth).
   - Dedicated VOL HUD badges displaying row volume levels and split-arp boost status.
 - **Fine Increment Button Controls**: Vol - / Vol + and Mod - / Mod + buttons use smooth 4-step adjustments.
-- **Dedicated Number Row & Transpose Controls**:
-  - Permanently visible Top Row (`1-0, -, =`) exposing Top Octave, Transpose (-/+ semitones), Global Octave, Scale Mode, Panic, Reset, and Zoom.
+- **Modular Architecture & Generic `hs-bundler`**: Code split into `src/` modules (`config`, `midi`, `transposer`, `arpeggiator`, `hud`, `controls`, `ui_html`) with a generic Python bundler (`bin/hs-bundler`).
+- **Auto-Bundle Launch Agent Watcher**: System Launch Agent (`com.matt.agent.qwerty-midi-bundler`) watches `src/` files and automatically reloads Hammerspoon with macOS notifications on file save.
