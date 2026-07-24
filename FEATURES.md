@@ -12,7 +12,11 @@
 - **Subtle Interval Indicators**: Root, 3rd, and 5th intervals highlighted with soft muted tones (`#d4a359`, `#c9bfb3`, `#b8aca0`) rather than bright colors.
 - **Trackpad Volume & Mod Wheel Control**:
   - 2-finger scroll adjusts Mod Wheel (CC 1) by default.
-  - Holding **Shift** while scrolling adjusts Master Volume (CC 7).
+  - Holding **Shift** while scrolling adjusts Top and Bottom Row Volumes simultaneously.
+- **Separate Row Volume Controls & Split Arp Volume Boost**:
+  - Independent volume levels for Top Row (upper keys Q..P) and Bottom Row (lower keys Z../).
+  - Automatic default volume boost (+20 velocity) for Top Row when entering Split Arp mode (bottom row arp active, top row non-arp synth).
+  - Dedicated VOL HUD badges displaying row volume levels and split-arp boost status.
 - **Fine Increment Button Controls**: Vol - / Vol + and Mod - / Mod + buttons use smooth 4-step adjustments.
 - **Dedicated Number Row & Transpose Controls**:
   - Permanently visible Top Row (`1-0, -, =`) exposing Top Octave, Transpose (-/+ semitones), Global Octave, Scale Mode, Panic, Reset, and Zoom.

@@ -110,10 +110,27 @@ local DIGIT_KEYCODES = {
   [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
 }
 
+local topRowVolume = 100         -- Top row default volume (0..127)
+local bottomRowVolume = 100      -- Bottom row default volume (0..127)
+local splitArpTopBoost = 20      -- Volume boost for top row in split arp mode (bottom row arp, top row regular)
+
 local ccStates = {
   [1] = 0,   -- Mod Wheel default 0
   [7] = 100  -- Volume default 100
 }
+
+local function getEffectiveRowVelocity(isTopRow)
+  local isSplitArp = arpEnabled and arpBottomEnabled and (not arpTopEnabled)
+  if isTopRow then
+    local baseVol = topRowVolume
+    if isSplitArp then
+      baseVol = baseVol + splitArpTopBoost
+    end
+    return math.max(0, math.min(127, baseVol))
+  else
+    return math.max(0, math.min(127, bottomRowVolume))
+  end
+end
 
 local function getTransposedPitch(basePitch, isTopRow)
   local effectivePitch = basePitch + (isTopRow and topRowOctaveOffset or 0) + transposeShift
@@ -319,7 +336,15 @@ local function arpTick()
     sendMidiNote("noteOff", arpCurrentPitch, 0)
   end
 
-  sendMidiNote("noteOn", nextPitch, 100)
+  local isTopRowArpNote = false
+  for code, p in pairs(arpHeldNotes) do
+    if p == nextPitch and upperRowKeys[code] then
+      isTopRowArpNote = true
+      break
+    end
+  end
+  local vel = getEffectiveRowVelocity(isTopRowArpNote)
+  sendMidiNote("noteOn", nextPitch, vel)
   arpCurrentPitch = nextPitch
 
   if updateWebviewHud then
@@ -1065,6 +1090,7 @@ local HTML_UI_CONTENT = [[
         <div class="row-controls">
           <button id="arp-top-toggle" class="arp-row-toggle active">ARP</button>
           <div id="octave-indicator-top" class="octave-row-badge draggable-octave" data-row="top">TOP +1</div>
+          <div id="vol-indicator-top" class="octave-row-badge" title="Top Row Volume">VOL 79%</div>
         </div>
       </div>
       <div id="row-home" class="keyboard-row home"></div>
@@ -1073,6 +1099,7 @@ local HTML_UI_CONTENT = [[
         <div class="row-controls">
           <button id="arp-bottom-toggle" class="arp-row-toggle active">ARP</button>
           <div id="octave-indicator-bottom" class="octave-row-badge draggable-octave" data-row="bottom">OCT 0</div>
+          <div id="vol-indicator-bottom" class="octave-row-badge" title="Bottom Row Volume">VOL 79%</div>
         </div>
       </div>
     </div>
@@ -1587,6 +1614,22 @@ local HTML_UI_CONTENT = [[
       if (botEl) botEl.textContent = 'OCT ' + data.bottomOctaveStr;
     }
 
+    if (data.topVolPercent !== undefined) {
+      const topVolEl = document.getElementById('vol-indicator-top');
+      if (topVolEl) {
+        if (data.effectiveTopVolPercent !== undefined && data.effectiveTopVolPercent !== data.topVolPercent) {
+          topVolEl.textContent = 'VOL ' + data.effectiveTopVolPercent + '% (🚀)';
+        } else {
+          topVolEl.textContent = 'VOL ' + data.topVolPercent + '%';
+        }
+      }
+    }
+
+    if (data.bottomVolPercent !== undefined) {
+      const botVolEl = document.getElementById('vol-indicator-bottom');
+      if (botVolEl) botVolEl.textContent = 'VOL ' + data.bottomVolPercent + '%';
+    }
+
     if (data.modeFrac !== undefined && !isModeDragging) {
       document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
     }
@@ -1777,6 +1820,8 @@ local function executeControlAction(act, code)
     octaveShift = 0
     topRowOctaveOffset = 0
     transposeShift = 0
+    topRowVolume = 100
+    bottomRowVolume = 100
     currentRoot = 0
     currentScaleIdx = 1
     sustainActive = false
@@ -1857,28 +1902,64 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     updateWebviewHud(spot)
-  elseif act == "volDown" then
-    local currentVal = ccStates[7] or 100
-    local newVal = math.max(0, currentVal - 4)
-    ccStates[7] = newVal
-    sendMidiCC(7, newVal)
+  elseif act == "topVolDown" then
+    topRowVolume = math.max(0, topRowVolume - 4)
     local spot = {
-      title = "MASTER VOLUME",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #7 Level",
+      title = "TOP ROW VOL",
+      value = math.floor((topRowVolume / 127) * 100) .. "%",
+      subtext = "Upper Keys Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "topVolUp" then
+    topRowVolume = math.min(127, topRowVolume + 4)
+    local spot = {
+      title = "TOP ROW VOL",
+      value = math.floor((topRowVolume / 127) * 100) .. "%",
+      subtext = "Upper Keys Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "botVolDown" then
+    bottomRowVolume = math.max(0, bottomRowVolume - 4)
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Lower Keys Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "botVolUp" then
+    bottomRowVolume = math.min(127, bottomRowVolume + 4)
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Lower Keys Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    updateWebviewHud(spot)
+  elseif act == "volDown" then
+    topRowVolume = math.max(0, topRowVolume - 4)
+    bottomRowVolume = math.max(0, bottomRowVolume - 4)
+    local spot = {
+      title = "ROW VOLUMES",
+      value = "TOP " .. math.floor((topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Dual Row Volume Level",
       targetId = "header",
       color = "#d4a359"
     }
     updateWebviewHud(spot)
   elseif act == "volUp" or act == "volume" then
-    local currentVal = ccStates[7] or 100
-    local newVal = math.min(127, currentVal + 4)
-    ccStates[7] = newVal
-    sendMidiCC(7, newVal)
+    topRowVolume = math.min(127, topRowVolume + 4)
+    bottomRowVolume = math.min(127, bottomRowVolume + 4)
     local spot = {
-      title = "MASTER VOLUME",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #7 Level",
+      title = "ROW VOLUMES",
+      value = "TOP " .. math.floor((topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Dual Row Volume Level",
       targetId = "header",
       color = "#d4a359"
     }
@@ -1904,7 +1985,7 @@ local function handleKeyDown(code)
       if arpEnabled and arpBottomEnabled then
         arpAddNote(code, transposedPitch)
       else
-        sendMidiNote("noteOn", transposedPitch, 100)
+        sendMidiNote("noteOn", transposedPitch, getEffectiveRowVelocity(false))
       end
       updateWebviewHud()
     end
@@ -1917,7 +1998,7 @@ local function handleKeyDown(code)
       if arpEnabled and arpTopEnabled then
         arpAddNote(code, transposedPitch)
       else
-        sendMidiNote("noteOn", transposedPitch, 100)
+        sendMidiNote("noteOn", transposedPitch, getEffectiveRowVelocity(true))
       end
       updateWebviewHud()
     end
@@ -2160,6 +2241,9 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
+    topVolPercent = math.floor((topRowVolume / 127) * 100),
+    bottomVolPercent = math.floor((bottomRowVolume / 127) * 100),
+    effectiveTopVolPercent = math.floor((getEffectiveRowVelocity(true) / 127) * 100),
     modeFrac = modeFrac,
     modWheel = modVal,
     zoomLevel = effectiveScale,
@@ -2417,20 +2501,21 @@ activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollW
 
   if deltaY ~= 0 then
     if shiftHeld then
-      -- Volume Scroll when Shift is held
-      local currentVol = ccStates[7] or 100
-      activeWatchers.volAccumulator = activeWatchers.volAccumulator or currentVol
+      -- Volume Scroll when Shift is held: adjusts row volumes
+      local avgVol = (topRowVolume + bottomRowVolume) / 2
+      activeWatchers.volAccumulator = activeWatchers.volAccumulator or avgVol
       local sensitivity = 0.25
       activeWatchers.volAccumulator = math.max(0, math.min(127, activeWatchers.volAccumulator - (deltaY * sensitivity)))
       local newVol = math.floor(activeWatchers.volAccumulator + 0.5)
 
-      if newVol ~= ccStates[7] then
-        ccStates[7] = newVol
-        sendMidiCC(7, newVol)
+      local deltaVol = newVol - math.floor(avgVol + 0.5)
+      if deltaVol ~= 0 then
+        topRowVolume = math.max(0, math.min(127, topRowVolume + deltaVol))
+        bottomRowVolume = math.max(0, math.min(127, bottomRowVolume + deltaVol))
         local spot = {
-          title = "MASTER VOLUME (CC #7)",
-          value = tostring(newVol),
-          subtext = math.floor((newVol / 127) * 100) .. "% Level",
+          title = "ROW VOLUMES",
+          value = "TOP " .. math.floor((topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((bottomRowVolume / 127) * 100) .. "%",
+          subtext = "Dual Row Volume Level",
           targetId = "header",
           color = "#d4a359"
         }
