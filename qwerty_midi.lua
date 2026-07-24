@@ -607,10 +607,9 @@ local function createMidiWebview()
   local rect = { x = hudX, y = hudY, w = width, h = height }
   local wv = hsWebview.new(rect, { developerExtrasEnabled = false }, uc)
   wv:windowTitle("MIDI Controller HUD")
-  wv:styleBits(hsWebview.styleMasks.borderless)
-  wv:level(hsWebview.windowLevels.floating)
-  wv:behavior(hsWebview.windowBehaviors.canJoinAllSpaces)
   wv:html(HTML_UI_CONTENT)
+  wv:level(hs.canvas.windowLevels.floating)
+  wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
 
   wv:windowCallback(function(action, webview)
     if action == "closing" then
