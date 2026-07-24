@@ -41,7 +41,7 @@ local state = {
   arpStepIndex = 1,
   arpStepDirection = 1,
   lastArpMode = 1,
-  arpTopEnabled = true,
+  arpTopEnabled = false,
   arpBottomEnabled = true,
 
   -- BPM Input Mode State

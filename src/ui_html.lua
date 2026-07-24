@@ -559,7 +559,7 @@ local HTML_UI_CONTENT = [[
       <div class="row-with-controls">
         <div id="row-upper" class="keyboard-row upper"></div>
         <div class="row-controls">
-          <button id="arp-top-toggle" class="arp-row-toggle active">ARP</button>
+          <button id="arp-top-toggle" class="arp-row-toggle">ARP</button>
           <div id="octave-indicator-top" class="octave-row-badge draggable-octave" data-row="top">TOP +1</div>
           <div id="vol-indicator-top" class="octave-row-badge" title="Top Row Volume">VOL 79%</div>
         </div>

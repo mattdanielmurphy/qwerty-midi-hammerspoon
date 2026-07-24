@@ -302,31 +302,41 @@ local function createMidiWebview()
       arpeggiator.applyBpmChange()
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
-      if state.arpTopEnabled or not state.arpBottomEnabled then
-        state.arpTopEnabled = not state.arpTopEnabled
-        if not state.arpTopEnabled then
-          for code in pairs(state.arpHeldNotes) do
-            if upperRowKeys[code] then
-              state.arpHeldNotes[code] = nil
-              state.arpKeysCurrentlyHeld[code] = nil
-            end
+      state.arpTopEnabled = not state.arpTopEnabled
+      if not state.arpTopEnabled then
+        for code in pairs(state.arpHeldNotes) do
+          if upperRowKeys[code] then
+            state.arpHeldNotes[code] = nil
+            state.arpKeysCurrentlyHeld[code] = nil
           end
         end
       end
-      updateWebviewHud()
+      local spot = {
+        title = "TOP ROW ARP",
+        value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
+        subtext = arpeggiator.getArpRowTargetSubtext(),
+        targetId = "arp-top-toggle",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
     elseif body.type == "toggleArpBottom" then
-      if state.arpBottomEnabled or not state.arpTopEnabled then
-        state.arpBottomEnabled = not state.arpBottomEnabled
-        if not state.arpBottomEnabled then
-          for code in pairs(state.arpHeldNotes) do
-            if lowerRowKeys[code] then
-              state.arpHeldNotes[code] = nil
-              state.arpKeysCurrentlyHeld[code] = nil
-            end
+      state.arpBottomEnabled = not state.arpBottomEnabled
+      if not state.arpBottomEnabled then
+        for code in pairs(state.arpHeldNotes) do
+          if lowerRowKeys[code] then
+            state.arpHeldNotes[code] = nil
+            state.arpKeysCurrentlyHeld[code] = nil
           end
         end
       end
-      updateWebviewHud()
+      local spot = {
+        title = "BOTTOM ROW ARP",
+        value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
+        subtext = arpeggiator.getArpRowTargetSubtext(),
+        targetId = "arp-bottom-toggle",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
     elseif body.type == "dragOctave" and body.row and body.direction then
       if body.row == "top" then
         state.topRowOctaveOffset = math.max(-36, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
@@ -1489,7 +1499,7 @@ local HTML_UI_CONTENT = [[
       <div class="row-with-controls">
         <div id="row-upper" class="keyboard-row upper"></div>
         <div class="row-controls">
-          <button id="arp-top-toggle" class="arp-row-toggle active">ARP</button>
+          <button id="arp-top-toggle" class="arp-row-toggle">ARP</button>
           <div id="octave-indicator-top" class="octave-row-badge draggable-octave" data-row="top">TOP +1</div>
           <div id="vol-indicator-top" class="octave-row-badge" title="Top Row Volume">VOL 79%</div>
         </div>
@@ -2118,7 +2128,7 @@ local state = {
   arpStepIndex = 1,
   arpStepDirection = 1,
   lastArpMode = 1,
-  arpTopEnabled = true,
+  arpTopEnabled = false,
   arpBottomEnabled = true,
 
   -- BPM Input Mode State
@@ -2412,7 +2422,7 @@ local function executeControlAction(act, code)
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
     state.arpEnabled = false
-    state.arpTopEnabled = true
+    state.arpTopEnabled = false
     state.arpBottomEnabled = true
     midi.sendMidiCC(64, 0)
     midi.sendMidiCC(1, 0)
