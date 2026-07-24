@@ -2872,7 +2872,12 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        if isSustainedNote then
+        if state.shiftHeld then
+          if state.sustainedPitches and state.sustainedPitches[playedPitch] then
+            state.sustainedPitches[playedPitch] = nil
+          end
+          midi.sendMidiNote("noteOff", playedPitch, 0)
+        elseif isSustainedNote then
           state.sustainedPitches = state.sustainedPitches or {}
           state.sustainedPitches[playedPitch] = true
         else
