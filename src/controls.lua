@@ -448,25 +448,27 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "bpmDown" then
-    state.arpBpm = math.max(20.0, state.arpBpm - 5.0)
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.max(20.0, state.arpBpm - step)
     arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(-5)
+    arpeggiator.stepLogicBpm(-step)
     local spot = {
       title = "TEMPO / BPM",
       value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Arpeggiator Speed",
+      subtext = "Step: " .. step .. " BPM",
       targetId = "bpm-value",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "bpmUp" then
-    state.arpBpm = math.min(300.0, state.arpBpm + 5.0)
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.min(300.0, state.arpBpm + step)
     arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(5)
+    arpeggiator.stepLogicBpm(step)
     local spot = {
       title = "TEMPO / BPM",
       value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Arpeggiator Speed",
+      subtext = "Step: " .. step .. " BPM",
       targetId = "bpm-value",
       color = "#d4a359"
     }

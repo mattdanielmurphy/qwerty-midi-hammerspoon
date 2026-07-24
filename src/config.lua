@@ -45,7 +45,8 @@ local state = {
   bpmInputMode = false,
   bpmInputBuffer = "",
   bpmBeforeEdit = 120.0,
-  logicSyncEnabled = true,
+  bpmStepSize = hs.settings.get("qwertyMidi_bpmStepSize") or 10,
+  logicSyncEnabled = (hs.settings.get("qwertyMidi_logicSyncEnabled") == nil) and true or hs.settings.get("qwertyMidi_logicSyncEnabled"),
   logicSyncTimer = nil,
 
   DIGIT_KEYCODES = {

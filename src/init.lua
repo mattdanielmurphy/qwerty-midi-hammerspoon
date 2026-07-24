@@ -131,13 +131,20 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
   end
 end)
 
+local settings_ui = require("settings_ui")
+
 _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
   _G.toggleMidiMode()
+end)
+
+_G.activeWatchers.settingsHotkey = hs.hotkey.bind({ "cmd" }, ",", function()
+  settings_ui.toggleSettingsWindow()
 end)
 
 midi.panicAllChannels()
 _G.toggleMidiMode(true)
 
 return {
-  toggleMidiMode = _G.toggleMidiMode
+  toggleMidiMode = _G.toggleMidiMode,
+  toggleSettingsWindow = settings_ui.toggleSettingsWindow
 }
