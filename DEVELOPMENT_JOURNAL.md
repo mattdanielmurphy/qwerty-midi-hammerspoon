@@ -31,3 +31,6 @@
 
 ## 2026-07-24
 - **Tracked Sustained Notes Release:** Restored working sustain pedal note latching by tracking sustained pitches in state and explicitly dispatching individual `noteOff` commands alongside `CC #64 = 0` and `CC #123` when sustain mode is turned off or window is closed. Link: [2026-07-24_15-17_tracked-sustained-notes-release.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-17_tracked-sustained-notes-release.md)
+
+## 2026-07-24
+- **Preserve Sustain Across Window Toggle:** Preserved `sustainActive` and tracked sustained notes across MIDI controller hide/show toggles so Sustain remains active and visible on reopen, allowing notes to continue ringing until sustain is explicitly toggled off. Link: [2026-07-24_15-19_preserve-sustain-across-window-toggle.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-19_preserve-sustain-across-window-toggle.md)
