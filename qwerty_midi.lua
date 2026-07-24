@@ -413,7 +413,6 @@ function _G.toggleMidiMode(newState)
       _G.activeWatchers.midiWebview:hide()
     end
   end
-  hs.alert.show("🎹 MIDI Mode: " .. (state.midiActive and "ON" or "OFF"))
 end
 
 _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(event)

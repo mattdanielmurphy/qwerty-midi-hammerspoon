@@ -21,4 +21,6 @@
 - **Modular Architecture & Generic `hs-bundler`**: Code split into `src/` modules (`config`, `midi`, `transposer`, `arpeggiator`, `hud`, `controls`, `ui_html`) with a generic Python bundler (`bin/hs-bundler`).
 - **Auto-Bundle Launch Agent Watcher**: System Launch Agent (`com.matt.agent.qwerty-midi-bundler`) watches `src/` files and automatically reloads Hammerspoon with macOS notifications on file save.
 - **Shift Key Sustain & Arpeggiator Bypass**: Holding **Shift** when tapping any note key inverts both current Arpeggiator and Sustain states for that note (e.g. bypasses active Arp/Sustain to play a direct un-sustained note, or triggers an Arp/Sustained note when Arp/Sustain are disabled) across both upper and lower keyboard rows.
+- **Clean HUD Toggle Feedback**: Toggling MIDI Mode shows/hides the floating webview HUD directly without triggering redundant OS-level `hs.alert` notifications.
+
 

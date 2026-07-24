@@ -22,3 +22,5 @@
 
 ## 2026-07-24
 - **Sustain & Panic Cleanup on Close/Disable:** Fixed bug where closing MIDI controller or disabling sustain mode left sustained notes ringing in synths by adding automatic MIDI CC #64 (0) and CC #123 (All Notes Off) cleanup on window close and sustain toggle off. Link: [2026-07-24_15-13_sustain-release-on-window-reopen.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-13_sustain-release-on-window-reopen.md)
+- **Removed Redundant MIDI Mode OS Notifications:** Removed `hs.alert.show` popups when toggling MIDI mode on/off since floating HUD webview visibility provides direct feedback. Link: [2026-07-24_15-14_remove-midi-mode-notifications.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_15-14_remove-midi-mode-notifications.md)
+
