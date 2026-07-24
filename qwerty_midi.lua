@@ -66,7 +66,8 @@ local sustainActive = false      -- Toggle state for sustain pedal (CC64)
 local sustainKeyDownTime = 0     -- Timestamp when sustain key was pressed down
 local sustainWasActiveOnPress = false
 local shiftHeld = false          -- Shift key active state
-local zoomLevel = 1.0            -- HUD Zoom Scale Factor (0.5 to 2.0)
+local zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0  -- HUD Zoom Scale Factor (1.0 = 100%)
+local BASE_HUD_SCALE = 1.4                                         -- 100% zoom maps to 1.4x baseline scale factor
 
 local ccStates = {
   [1] = 0,   -- Mod Wheel default 0
@@ -147,8 +148,8 @@ local homeRowControls = {
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
   [5]  = { key = "G",   name = "Vol -",   action = "volDown",     shiftAction = "volDown",    shiftName = "Vol -" },
   [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "topOctDown", shiftName = "TopOct -" },
-  [38] = { key = "J",   name = "Mod -",   action = "modWheelDown",shiftAction = "modeDown",   shiftName = "Mode -" },
-  [40] = { key = "K",   name = "Mod +",   action = "modWheelUp",  shiftAction = "modeUp",     shiftName = "Mode +" },
+  [38] = { key = "J",   name = "Mode -",  action = "modeDown",    shiftAction = "modWheelDown", shiftName = "Mod -" },
+  [40] = { key = "K",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
   [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "topOctUp",   shiftName = "TopOct +" },
   [41] = { key = ";",   name = "Vol +",   action = "volUp",       shiftAction = "volUp",      shiftName = "Vol +" }
 }
@@ -210,6 +211,7 @@ local HTML_UI_CONTENT = [[
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
     border-radius: 14px;
+    overflow: hidden;
     box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 20px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -228,7 +230,7 @@ local HTML_UI_CONTENT = [[
     background: rgba(20, 18, 16, 0.98);
     border: 1.5px solid #d4a359;
     border-radius: 8px;
-    padding: 3px 14px;
+    padding: 4px 16px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85);
     display: flex;
     flex-direction: row;
@@ -273,19 +275,19 @@ local HTML_UI_CONTENT = [[
     white-space: nowrap;
   }
   
-  /* Dynamic Mod Wheel Glow */
+  /* Dynamic Mod Wheel Glow (High Contrast & Readability at 100% Mod) */
   #hud-container.mod-active {
-    box-shadow: 0 0 calc(10px + var(--mod-intensity) * 25px) rgba(212, 163, 89, calc(0.3 + var(--mod-intensity) * 0.4)),
-                inset 0 0 calc(15px + var(--mod-intensity) * 30px) rgba(212, 163, 89, calc(0.15 + var(--mod-intensity) * 0.3));
-    border-color: rgba(212, 163, 89, calc(0.4 + var(--mod-intensity) * 0.4));
+    box-shadow: 0 0 calc(8px + var(--mod-intensity) * 18px) rgba(212, 163, 89, calc(0.2 + var(--mod-intensity) * 0.25)),
+                inset 0 0 calc(10px + var(--mod-intensity) * 15px) rgba(212, 163, 89, calc(0.08 + var(--mod-intensity) * 0.12));
+    border-color: rgba(212, 163, 89, calc(0.4 + var(--mod-intensity) * 0.35));
   }
 
   .mod-gradient-overlay {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
-    border-radius: 12px;
+    border-radius: inherit;
     pointer-events: none;
-    background: linear-gradient(180deg, rgba(212, 163, 89, calc(var(--mod-intensity) * 0.25)) 0%, rgba(200, 140, 60, 0) 100%);
+    background: linear-gradient(180deg, rgba(212, 163, 89, calc(var(--mod-intensity) * 0.08)) 0%, rgba(200, 140, 60, 0) 100%);
     opacity: 0;
     transition: opacity 0.15s ease;
   }
@@ -305,6 +307,7 @@ local HTML_UI_CONTENT = [[
     margin-bottom: 10px;
     cursor: move;
     -webkit-app-region: drag;
+    gap: 8px;
   }
 
   .badge {
@@ -313,22 +316,24 @@ local HTML_UI_CONTENT = [[
     color: #d4a359;
     font-weight: 700;
     font-size: 13px;
-    padding: 2px 12px;
+    padding: 2px 8px;
     border-radius: 6px;
-    margin-right: 12px;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
     white-space: nowrap;
+    width: 58px;
+    flex-shrink: 0;
   }
 
   .mode-slider-track {
-    flex: 1;
+    width: 100px;
+    flex-shrink: 0;
     height: 8px;
     background: linear-gradient(90deg, #d4a359 0%, #b8860b 40%, #706558 70%, #3a342e 100%);
     border-radius: 4px;
     position: relative;
-    margin: 0 12px;
   }
 
   .mode-slider-thumb {
@@ -349,8 +354,11 @@ local HTML_UI_CONTENT = [[
     font-size: 12px;
     color: #b5aba0;
     font-weight: 600;
-    margin-left: 10px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
   }
 
   /* Keyboard Grid */
@@ -366,6 +374,26 @@ local HTML_UI_CONTENT = [[
     gap: 5px;
   }
 
+  .row-with-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .octave-row-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: #d4a359;
+    background: rgba(36, 32, 28, 0.95);
+    border: 1.5px solid rgba(212, 163, 89, 0.4);
+    border-radius: 6px;
+    padding: 3px 8px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+
   .keyboard-row.number { margin-left: 0px; }
   .keyboard-row.upper { margin-left: 12px; }
   .keyboard-row.home { margin-left: 32px; }
@@ -374,8 +402,8 @@ local HTML_UI_CONTENT = [[
   .key-pad {
     width: 58px;
     height: 44px;
-    background: rgba(36, 32, 28, 0.95);
-    border: 1.5px solid rgba(60, 54, 48, 1.0);
+    background: rgba(26, 23, 20, 0.98);
+    border: 1.5px solid rgba(65, 58, 50, 1.0);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -394,30 +422,41 @@ local HTML_UI_CONTENT = [[
 
   .key-pad .key-code {
     font-size: 12px;
-    font-weight: 600;
-    color: rgba(220, 210, 195, 0.9);
+    font-weight: 700;
+    color: #f2eae1;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   }
 
   .key-pad .key-note {
     font-size: 9.5px;
-    font-weight: 400;
-    color: rgba(165, 155, 140, 0.8);
+    font-weight: 500;
+    color: rgba(200, 190, 175, 0.95);
     margin-top: 1px;
     white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   }
 
-  /* Subtle Key Color Accents (No harsh bright colors) */
-  .key-pad.root-key { border-color: rgba(212, 163, 89, 0.45); }
-  .key-pad.root-key .key-note { color: #d4a359; font-weight: 600; }
-  .key-pad.root-key:active, .key-pad.root-key.pressed { background: rgba(212, 163, 89, 0.25); }
+  /* Glowing Outline Variations for Note Intervals */
+  .key-pad.root-key {
+    border-color: rgba(212, 163, 89, 0.85);
+    box-shadow: 0 0 10px rgba(212, 163, 89, 0.4), inset 0 0 6px rgba(212, 163, 89, 0.2);
+  }
+  .key-pad.root-key .key-note { color: #f0c27b; font-weight: 700; }
+  .key-pad.root-key:active, .key-pad.root-key.pressed { background: rgba(212, 163, 89, 0.3); }
 
-  .key-pad.third-key { border-color: rgba(180, 170, 155, 0.35); }
-  .key-pad.third-key .key-note { color: #c9bfb3; font-weight: 600; }
-  .key-pad.third-key:active, .key-pad.third-key.pressed { background: rgba(180, 170, 155, 0.2); }
+  .key-pad.third-key {
+    border-color: rgba(210, 130, 95, 0.85);
+    box-shadow: 0 0 10px rgba(210, 130, 95, 0.4), inset 0 0 6px rgba(210, 130, 95, 0.2);
+  }
+  .key-pad.third-key .key-note { color: #e89e7c; font-weight: 700; }
+  .key-pad.third-key:active, .key-pad.third-key.pressed { background: rgba(210, 130, 95, 0.25); }
 
-  .key-pad.fifth-key { border-color: rgba(160, 150, 135, 0.3); }
-  .key-pad.fifth-key .key-note { color: #b8aca0; font-weight: 600; }
-  .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(160, 150, 135, 0.18); }
+  .key-pad.fifth-key {
+    border-color: rgba(110, 180, 155, 0.85);
+    box-shadow: 0 0 10px rgba(110, 180, 155, 0.4), inset 0 0 6px rgba(110, 180, 155, 0.2);
+  }
+  .key-pad.fifth-key .key-note { color: #8ecdb5; font-weight: 700; }
+  .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(110, 180, 155, 0.25); }
 
   .key-pad.control-pad {
     background: rgba(30, 26, 23, 0.95);
@@ -449,18 +488,24 @@ local HTML_UI_CONTENT = [[
       <div id="spotlight-sub" class="spotlight-sub"></div>
     </div>
     <div id="header">
-      <div id="root-badge" class="badge">♩ C</div>
+      <div id="root-badge" class="badge">🎵 C</div>
       <div class="mode-slider-track">
         <div id="mode-thumb" class="mode-slider-thumb"></div>
       </div>
-      <div id="status-text" class="status-info">Major / Ionian  •  +0 Oct  •  Top: +1 Oct  •  SUS: OFF</div>
+      <div id="status-text" class="status-info">Major / Ionian  •  +0 Oct  •  Top: +1 Oct</div>
     </div>
     
     <div class="keyboard-grid">
       <div id="row-number" class="keyboard-row number"></div>
-      <div id="row-upper" class="keyboard-row upper"></div>
+      <div class="row-with-indicator">
+        <div id="row-upper" class="keyboard-row upper"></div>
+        <div id="octave-indicator-top" class="octave-row-badge">Oct +1</div>
+      </div>
       <div id="row-home" class="keyboard-row home"></div>
-      <div id="row-lower" class="keyboard-row lower"></div>
+      <div class="row-with-indicator">
+        <div id="row-lower" class="keyboard-row lower"></div>
+        <div id="octave-indicator-bottom" class="octave-row-badge">Oct +0</div>
+      </div>
     </div>
   </div>
 
@@ -639,7 +684,7 @@ local HTML_UI_CONTENT = [[
       spotlightTimer2 = setTimeout(() => {
         card.classList.add('hidden');
       }, 450);
-    }, 350);
+    }, 1000);
   }
 
   function renderHud(data) {
@@ -654,11 +699,21 @@ local HTML_UI_CONTENT = [[
     }
     
     if (data.rootNote) {
-      document.getElementById('root-badge').textContent = '♩ ' + data.rootNote;
+      document.getElementById('root-badge').textContent = '🎵 ' + data.rootNote;
     }
     
     if (data.statusText) {
       document.getElementById('status-text').textContent = data.statusText;
+    }
+
+    if (data.topOctaveStr !== undefined) {
+      const topEl = document.getElementById('octave-indicator-top');
+      if (topEl) topEl.textContent = '⬆️ ' + data.topOctaveStr;
+    }
+
+    if (data.bottomOctaveStr !== undefined) {
+      const botEl = document.getElementById('octave-indicator-bottom');
+      if (botEl) botEl.textContent = '⬇️ ' + data.bottomOctaveStr;
     }
 
     if (data.modeFrac !== undefined) {
@@ -705,8 +760,9 @@ local function updateWebviewHud(spotlightInfo)
 
   -- Dynamically resize window frame to match zoom level for crisp rendering
   local baseW, baseH = 810, 285
-  local newW = math.floor(baseW * zoomLevel)
-  local newH = math.floor(baseH * zoomLevel)
+  local effectiveScale = zoomLevel * BASE_HUD_SCALE
+  local newW = math.floor(baseW * effectiveScale)
+  local newH = math.floor(baseH * effectiveScale)
   local curFrame = activeWatchers.midiWebview:frame()
 
   if curFrame.w ~= newW or curFrame.h ~= newH then
@@ -718,7 +774,13 @@ local function updateWebviewHud(spotlightInfo)
     nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
     ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
     activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+    activeWatchers.hudX = nx
+    activeWatchers.hudY = ny
+    hs.settings.set("qwertyMidi_hudX", nx)
+    hs.settings.set("qwertyMidi_hudY", ny)
   end
+
+  hs.settings.set("qwertyMidi_zoomLevel", zoomLevel)
   
   local modeBrightness = SCALES[currentScaleIdx].brightness or 3
   local modeFrac = 1.0 - (modeBrightness / 6.0)
@@ -729,7 +791,10 @@ local function updateWebviewHud(spotlightInfo)
   local topOctStr = "Top: +" .. topOctVal .. " Oct"
   local shiftStr = shiftHeld and "  •  [SHIFT]" or ""
   local modVal = ccStates[1] or 0
-  local statusStr = SCALES[currentScaleIdx].name .. "  •  " .. octStr .. trnspStr .. "  •  " .. topOctStr .. "  •  SUS: " .. (sustainActive and "ON" or "OFF") .. shiftStr
+  local statusStr = SCALES[currentScaleIdx].name .. "  •  " .. octStr .. trnspStr .. "  •  " .. topOctStr .. shiftStr
+
+  local topOctaveStr = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct"
+  local bottomOctaveStr = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct"
 
   local keyUpdates = {}
 
@@ -745,22 +810,18 @@ local function updateWebviewHud(spotlightInfo)
     local noteNum = getTransposedPitch(kData.baseNote, true)
     local intervalIdx = getIntervalInfo(noteNum)
     local noteName = noteNumToName(noteNum)
-    local noteLabel = noteName
     local typeClass = ""
 
     if intervalIdx == 1 then
-      noteLabel = noteName .. " (R)"
       typeClass = "root-key"
     elseif intervalIdx == 3 then
-      noteLabel = noteName .. " (3rd)"
       typeClass = "third-key"
     elseif intervalIdx == 5 then
-      noteLabel = noteName .. " (5th)"
       typeClass = "fifth-key"
     end
 
     keyUpdates[tostring(code)] = {
-      note = noteLabel,
+      note = noteName,
       typeClass = typeClass,
       pressed = (pressedKeys[code] ~= nil)
     }
@@ -770,22 +831,18 @@ local function updateWebviewHud(spotlightInfo)
     local noteNum = getTransposedPitch(kData.baseNote, false)
     local intervalIdx = getIntervalInfo(noteNum)
     local noteName = noteNumToName(noteNum)
-    local noteLabel = noteName
     local typeClass = ""
 
     if intervalIdx == 1 then
-      noteLabel = noteName .. " (R)"
       typeClass = "root-key"
     elseif intervalIdx == 3 then
-      noteLabel = noteName .. " (3rd)"
       typeClass = "third-key"
     elseif intervalIdx == 5 then
-      noteLabel = noteName .. " (5th)"
       typeClass = "fifth-key"
     end
 
     keyUpdates[tostring(code)] = {
-      note = noteLabel,
+      note = noteName,
       typeClass = typeClass,
       pressed = (pressedKeys[code] ~= nil)
     }
@@ -805,9 +862,11 @@ local function updateWebviewHud(spotlightInfo)
   local payload = {
     rootNote = NOTE_NAMES[currentRoot + 1],
     statusText = statusStr,
+    topOctaveStr = topOctaveStr,
+    bottomOctaveStr = bottomOctaveStr,
     modeFrac = modeFrac,
     modWheel = modVal,
-    zoomLevel = zoomLevel,
+    zoomLevel = effectiveScale,
     spotlight = spotlightInfo,
     keys = keyUpdates
   }
@@ -845,8 +904,8 @@ local function buildLayoutJson()
     { code = 3,  keyLabel = "F", isControl = true, noteLabel = "Oct +" },
     { code = 5,  keyLabel = "G", isControl = true, noteLabel = "Vol -" },
     { code = 4,  keyLabel = "H", isControl = true, noteLabel = "Root -" },
-    { code = 38, keyLabel = "J", isControl = true, noteLabel = "Mod -" },
-    { code = 40, keyLabel = "K", isControl = true, noteLabel = "Mod +" },
+    { code = 38, keyLabel = "J", isControl = true, noteLabel = "Mode -" },
+    { code = 40, keyLabel = "K", isControl = true, noteLabel = "Mode +" },
     { code = 37, keyLabel = "L", isControl = true, noteLabel = "Root +" },
     { code = 41, keyLabel = ";", isControl = true, noteLabel = "Vol +" }
   }
@@ -867,10 +926,13 @@ local function createMidiWebview()
   end
 
   local screen = hs.screen.mainScreen():frame()
-  local width = math.floor(810 * zoomLevel)
-  local height = math.floor(285 * zoomLevel)
-  local hudX = activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
-  local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
+  local effectiveScale = zoomLevel * BASE_HUD_SCALE
+  local width = math.floor(810 * effectiveScale)
+  local height = math.floor(285 * effectiveScale)
+  local savedX = hs.settings.get("qwertyMidi_hudX")
+  local savedY = hs.settings.get("qwertyMidi_hudY")
+  local hudX = savedX or activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
+  local hudY = savedY or activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
 
   local uc = hsUsercontent.new("midiControllerUC")
   uc:setCallback(function(msg)
@@ -886,6 +948,8 @@ local function createMidiWebview()
         activeWatchers.midiWebview:frame({ x = newX, y = newY, w = frame.w, h = frame.h })
         activeWatchers.hudX = newX
         activeWatchers.hudY = newY
+        hs.settings.set("qwertyMidi_hudX", newX)
+        hs.settings.set("qwertyMidi_hudY", newY)
       end
     end
   end)
@@ -909,7 +973,7 @@ local function createMidiWebview()
   activeWatchers.midiWebview = wv
 
   -- Initialize layout after webview loads
-  hs.timer.doAfter(0.1, function()
+  hs.timer.doAfter(0.05, function()
     if activeWatchers.midiWebview then
       updateWebviewHud()
     end
@@ -1076,23 +1140,21 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
 
         if act == "topOctDown" then
           topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
-            title = "UPPER ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
-            targetId = "key-" .. code,
+            title = "TOP ROW OCTAVE",
+            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch",
+            targetId = "octave-indicator-top",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "topOctUp" then
           topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
-            title = "UPPER ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
-            targetId = "key-" .. code,
+            title = "TOP ROW OCTAVE",
+            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch",
+            targetId = "octave-indicator-top",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
@@ -1100,9 +1162,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           transposeShift = math.max(-12, transposeShift - 1)
           local spot = {
             title = "TRANSPOSE",
-            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
-            subtext = "Semitone pitch shift",
-            targetId = "key-" .. code,
+            value = "♭♯ " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+            subtext = "Semitone Shift",
+            targetId = "status-text",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
@@ -1110,33 +1172,29 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           transposeShift = math.min(12, transposeShift + 1)
           local spot = {
             title = "TRANSPOSE",
-            value = (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
-            subtext = "Semitone pitch shift",
-            targetId = "key-" .. code,
+            value = "♭♯ " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. " st",
+            subtext = "Semitone Shift",
+            targetId = "status-text",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "octaveDown" then
           octaveShift = math.max(-36, octaveShift - 12)
-          local lowerOct = 4 + math.floor(octaveShift / 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Lower: Oct " .. lowerOct .. "  •  Upper: Oct " .. upperOct,
-            targetId = "key-" .. code,
+            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Global Pitch Offset",
+            targetId = "octave-indicator-bottom",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "octaveUp" then
           octaveShift = math.min(36, octaveShift + 12)
-          local lowerOct = 4 + math.floor(octaveShift / 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Lower: Oct " .. lowerOct .. "  •  Upper: Oct " .. upperOct,
-            targetId = "key-" .. code,
+            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Global Pitch Offset",
+            targetId = "octave-indicator-bottom",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
@@ -1145,7 +1203,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = scaleInfo.name,
+            value = "🎼 " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1156,7 +1214,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = scaleInfo.name,
+            value = "🎼 " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1167,8 +1225,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           pressedKeys = {}
           local spot = {
             title = "MIDI PANIC",
-            value = "ALL NOTES OFF",
-            subtext = "Reset active notes",
+            value = "🚨 ALL NOTES OFF",
+            subtext = "Reset Active Notes",
             targetId = "key-" .. code,
             color = "#d4a359"
           }
@@ -1186,8 +1244,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, 0)
           local spot = {
             title = "RESET ALL",
-            value = "DEFAULTS RESTORED",
-            subtext = "Octave 0  •  C Major  •  Mod 0",
+            value = "🔄 DEFAULTS RESTORED",
+            subtext = "All Parameters Reset",
             targetId = "key-" .. code,
             color = "#d4a359"
           }
@@ -1196,8 +1254,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           zoomLevel = math.max(0.5, zoomLevel - 0.1)
           local spot = {
             title = "HUD ZOOM",
-            value = math.floor(zoomLevel * 100) .. "%",
-            subtext = "Adjust scale",
+            value = "🔍 " .. math.floor(zoomLevel * 100) .. "%",
+            subtext = "Scale Factor",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1206,8 +1264,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           zoomLevel = math.min(2.0, zoomLevel + 0.1)
           local spot = {
             title = "HUD ZOOM",
-            value = math.floor(zoomLevel * 100) .. "%",
-            subtext = "Adjust scale",
+            value = "🔍 " .. math.floor(zoomLevel * 100) .. "%",
+            subtext = "Scale Factor",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1236,56 +1294,50 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sustainActive = true
           sendMidiCC(64, 127)
           local spot = {
-            title = "SUSTAIN PEDAL (CC #64)",
-            value = "SUSTAIN ON",
-            subtext = "Notes latch & hold",
+            title = "SUSTAIN PEDAL",
+            value = "🦶 SUSTAIN ON",
+            subtext = "CC #64 Latch",
             targetId = "key-0",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "octaveDown" then
           octaveShift = math.max(-36, octaveShift - 12)
-          local lowerOct = 4 + math.floor(octaveShift / 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Lower: Oct " .. lowerOct .. "  •  Upper: Oct " .. upperOct,
-            targetId = "status-text",
+            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Global Pitch Offset",
+            targetId = "octave-indicator-bottom",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "octaveUp" then
           octaveShift = math.min(36, octaveShift + 12)
-          local lowerOct = 4 + math.floor(octaveShift / 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
             title = "GLOBAL OCTAVE",
-            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
-            subtext = "Lower: Oct " .. lowerOct .. "  •  Upper: Oct " .. upperOct,
-            targetId = "status-text",
+            value = "🎹 " .. (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Global Pitch Offset",
+            targetId = "octave-indicator-bottom",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "topOctDown" then
           topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
-            title = "UPPER ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
-            targetId = "status-text",
+            title = "TOP ROW OCTAVE",
+            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch",
+            targetId = "octave-indicator-top",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
         elseif act == "topOctUp" then
           topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
-          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
           local spot = {
-            title = "UPPER ROW OCTAVE",
-            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
-            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
-            targetId = "status-text",
+            title = "TOP ROW OCTAVE",
+            value = "⬆️ " .. (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch",
+            targetId = "octave-indicator-top",
             color = "#d4a359"
           }
           updateWebviewHud(spot)
@@ -1294,8 +1346,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local rootName = NOTE_NAMES[currentRoot + 1]
           local spot = {
             title = "ROOT NOTE",
-            value = "♩ " .. rootName,
-            subtext = "Key: " .. rootName .. " " .. SCALES[currentScaleIdx].name,
+            value = "🎵 " .. rootName,
+            subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
             targetId = "root-badge",
             color = "#d4a359"
           }
@@ -1305,8 +1357,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local rootName = NOTE_NAMES[currentRoot + 1]
           local spot = {
             title = "ROOT NOTE",
-            value = "♩ " .. rootName,
-            subtext = "Key: " .. rootName .. " " .. SCALES[currentScaleIdx].name,
+            value = "🎵 " .. rootName,
+            subtext = rootName .. " " .. SCALES[currentScaleIdx].name,
             targetId = "root-badge",
             color = "#d4a359"
           }
@@ -1316,7 +1368,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = scaleInfo.name,
+            value = "🎼 " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1327,7 +1379,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "SCALE / MODE",
-            value = scaleInfo.name,
+            value = "🎼 " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1340,7 +1392,7 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           local scaleInfo = SCALES[currentScaleIdx]
           local spot = {
             title = "RANDOM SCALE",
-            value = rootName .. " " .. scaleInfo.name,
+            value = "🎲 " .. rootName .. " " .. scaleInfo.name,
             subtext = scaleInfo.brightTag,
             targetId = "mode-thumb",
             color = "#d4a359"
@@ -1359,8 +1411,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sendMidiCC(1, 0)
           local spot = {
             title = "RESET ALL",
-            value = "DEFAULTS RESTORED",
-            subtext = "Octave 0  •  C Major  •  Mod 0",
+            value = "🔄 DEFAULTS RESTORED",
+            subtext = "All Parameters Reset",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1370,8 +1422,8 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           pressedKeys = {}
           local spot = {
             title = "MIDI PANIC",
-            value = "ALL NOTES OFF",
-            subtext = "Reset active notes",
+            value = "🚨 ALL NOTES OFF",
+            subtext = "Reset Active Notes",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1383,9 +1435,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           activeWatchers.modAccumulator = newVal
           sendMidiCC(1, newVal)
           local spot = {
-            title = "MOD WHEEL (CC #1)",
-            value = tostring(newVal),
-            subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
+            title = "MOD WHEEL",
+            value = "🎛️ " .. math.floor((newVal / 127) * 100) .. "%",
+            subtext = "CC #1 Intensity",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1397,9 +1449,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           activeWatchers.modAccumulator = newVal
           sendMidiCC(1, newVal)
           local spot = {
-            title = "MOD WHEEL (CC #1)",
-            value = tostring(newVal),
-            subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
+            title = "MOD WHEEL",
+            value = "🎛️ " .. math.floor((newVal / 127) * 100) .. "%",
+            subtext = "CC #1 Intensity",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1410,9 +1462,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           ccStates[7] = newVal
           sendMidiCC(7, newVal)
           local spot = {
-            title = "MASTER VOLUME (CC #7)",
-            value = tostring(newVal),
-            subtext = math.floor((newVal / 127) * 100) .. "% Level",
+            title = "MASTER VOLUME",
+            value = "🔊 " .. math.floor((newVal / 127) * 100) .. "%",
+            subtext = "CC #7 Level",
             targetId = "header",
             color = "#d4a359"
           }
@@ -1423,9 +1475,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           ccStates[7] = newVal
           sendMidiCC(7, newVal)
           local spot = {
-            title = "MASTER VOLUME (CC #7)",
-            value = tostring(newVal),
-            subtext = math.floor((newVal / 127) * 100) .. "% Level",
+            title = "MASTER VOLUME",
+            value = "🔊 " .. math.floor((newVal / 127) * 100) .. "%",
+            subtext = "CC #7 Level",
             targetId = "header",
             color = "#d4a359"
           }
