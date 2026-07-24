@@ -80,7 +80,7 @@ local arpCurrentPitch = nil
 local arpStepIndex = 1
 local arpStepDirection = 1
 local lastArpMode = 1            -- Last non-OFF arp mode (for toggle restore)
-local arpTopEnabled = true       -- Whether top row feeds arpeggiator
+local arpTopEnabled = false      -- Whether top row feeds arpeggiator (Default: OFF / Bottom row only)
 local arpBottomEnabled = true    -- Whether bottom row feeds arpeggiator
 
 -- BPM Input Mode State
@@ -355,6 +355,29 @@ local function applyBpmChange()
   end
 end
 
+local function updateLatchedArpNotes()
+  if arpMode == 0 or next(arpHeldNotes) == nil then return end
+  for code, _ in pairs(arpHeldNotes) do
+    if lowerRowKeys[code] then
+      arpHeldNotes[code] = getTransposedPitch(lowerRowKeys[code].baseNote, false)
+    elseif upperRowKeys[code] then
+      arpHeldNotes[code] = getTransposedPitch(upperRowKeys[code].baseNote, true)
+    end
+  end
+end
+
+local function getArpRowTargetSubtext()
+  if arpTopEnabled and arpBottomEnabled then
+    return "Top & Bottom Rows"
+  elseif arpTopEnabled then
+    return "Top Row Only"
+  elseif arpBottomEnabled then
+    return "Bottom Row Only"
+  else
+    return "No Rows Active"
+  end
+end
+
 local function cycleArpMode()
   if arpMode > 0 then lastArpMode = arpMode end
   arpMode = (arpMode + 1) % #ARP_MODES
@@ -366,7 +389,7 @@ local function cycleArpMode()
   local spot = {
     title = "ARPEGGIATOR",
     value = "MODE: " .. ARP_MODES[arpMode + 1],
-    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
+    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM • " .. getArpRowTargetSubtext()) or "Arp Disabled",
     targetId = "arp-btn",
     color = "#d4a359"
   }
@@ -386,7 +409,7 @@ local function toggleArp()
   local spot = {
     title = "ARPEGGIATOR",
     value = arpMode > 0 and ("MODE: " .. ARP_MODES[arpMode + 1]) or "ARP OFF",
-    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
+    subtext = arpMode > 0 and ("ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
     targetId = "arp-btn",
     color = "#d4a359"
   }
@@ -1028,6 +1051,15 @@ local HTML_UI_CONTENT = [[
   let octaveDragStartY = 0;
   let octaveDragAccum = 0;
 
+  let bpmBtnTimer = null;
+  let bpmBtnInterval = null;
+  let bpmBtnStartTime = 0;
+  let bpmBtnDirection = 0;
+
+  let isBpmDragging = false;
+  let bpmDragStartY = 0;
+  let bpmDragAccum = 0;
+
   function initGrid(layout) {
     const l = layout || LAYOUT_DATA;
     ['number', 'upper', 'home', 'lower'].forEach(rowName => {
@@ -1147,33 +1179,74 @@ local HTML_UI_CONTENT = [[
     }
 
     // BPM Editor handlers
+    let hasBpmDragged = false;
     const bpmValue = document.getElementById('bpm-value');
     if (bpmValue) {
+      bpmValue.style.cursor = 'ns-resize';
+      bpmValue.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        isBpmDragging = true;
+        hasBpmDragged = false;
+        bpmDragStartY = e.clientY;
+        bpmDragAccum = 0;
+      });
       bpmValue.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'enterBpmEdit' });
+        if (!hasBpmDragged) {
+          if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+            window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'enterBpmEdit' });
+          }
         }
       });
     }
-    const bpmUp = document.getElementById('bpm-up');
-    if (bpmUp) {
-      bpmUp.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'bpmUp' });
-        }
-      });
+
+    function stopBpmRepeat() {
+      if (bpmBtnTimer) { clearTimeout(bpmBtnTimer); bpmBtnTimer = null; }
+      if (bpmBtnInterval) { clearInterval(bpmBtnInterval); bpmBtnInterval = null; }
+      bpmBtnDirection = 0;
     }
-    const bpmDown = document.getElementById('bpm-down');
-    if (bpmDown) {
-      bpmDown.addEventListener('click', (e) => {
-        e.stopPropagation();
+
+    function startBpmRepeat(direction) {
+      stopBpmRepeat();
+      bpmBtnDirection = direction;
+      bpmBtnStartTime = Date.now();
+      const sendStep = () => {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'bpmDown' });
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: bpmBtnDirection > 0 ? 'bpmUp' : 'bpmDown'
+          });
         }
-      });
+      };
+      sendStep();
+
+      bpmBtnTimer = setTimeout(() => {
+        bpmBtnInterval = setInterval(() => {
+          const elapsed = Date.now() - bpmBtnStartTime;
+          let repeats = 1;
+          if (elapsed > 3000) repeats = 5;
+          else if (elapsed > 1500) repeats = 3;
+          else if (elapsed > 700) repeats = 2;
+
+          for (let i = 0; i < repeats; i++) {
+            sendStep();
+          }
+        }, 80);
+      }, 350);
     }
+
+    ['bpm-up', 'bpm-down'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        const dir = id === 'bpm-up' ? 1 : -1;
+        btn.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          startBpmRepeat(dir);
+        });
+        btn.addEventListener('mouseleave', stopBpmRepeat);
+      }
+    });
 
     // Arp Row Toggle handlers
     const arpTopToggle = document.getElementById('arp-top-toggle');
@@ -1208,6 +1281,24 @@ local HTML_UI_CONTENT = [[
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (isBpmDragging) {
+      const dy = bpmDragStartY - e.clientY;
+      bpmDragAccum += dy;
+      bpmDragStartY = e.clientY;
+      const stepThreshold = e.shiftKey ? 3 : 8;
+      if (Math.abs(bpmDragAccum) >= stepThreshold) {
+        hasBpmDragged = true;
+        const steps = Math.trunc(bpmDragAccum / stepThreshold);
+        bpmDragAccum %= stepThreshold;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'dragBpm',
+            delta: steps
+          });
+        }
+      }
+      return;
+    }
     if (octaveDragTarget) {
       const dy = octaveDragStartY - e.clientY;
       octaveDragAccum += dy;
@@ -1243,6 +1334,8 @@ local HTML_UI_CONTENT = [[
     isDragging = false;
     isModeDragging = false;
     octaveDragTarget = null;
+    isBpmDragging = false;
+    stopBpmRepeat();
   });
 
   function showSpotlight(spotlight) {
@@ -1468,6 +1561,7 @@ local function executeControlAction(act, code)
     updateWebviewHud(spot)
   elseif act == "modeDown" then
     currentScaleIdx = (currentScaleIdx - 2) % #SCALES + 1
+    updateLatchedArpNotes()
     local scaleInfo = SCALES[currentScaleIdx]
     local spot = {
       title = "SCALE / MODE",
@@ -1479,6 +1573,7 @@ local function executeControlAction(act, code)
     updateWebviewHud(spot)
   elseif act == "modeUp" then
     currentScaleIdx = (currentScaleIdx % #SCALES) + 1
+    updateLatchedArpNotes()
     local scaleInfo = SCALES[currentScaleIdx]
     local spot = {
       title = "SCALE / MODE",
@@ -1490,6 +1585,7 @@ local function executeControlAction(act, code)
     updateWebviewHud(spot)
   elseif act == "rootDown" then
     currentRoot = (currentRoot - 1) % 12
+    updateLatchedArpNotes()
     local rootName = NOTE_NAMES[currentRoot + 1]
     local spot = {
       title = "ROOT NOTE",
@@ -1501,6 +1597,7 @@ local function executeControlAction(act, code)
     updateWebviewHud(spot)
   elseif act == "rootUp" then
     currentRoot = (currentRoot + 1) % 12
+    updateLatchedArpNotes()
     local rootName = NOTE_NAMES[currentRoot + 1]
     local spot = {
       title = "ROOT NOTE",
@@ -1513,6 +1610,7 @@ local function executeControlAction(act, code)
   elseif act == "randomScale" then
     currentRoot = math.random(0, 11)
     currentScaleIdx = math.random(1, #SCALES)
+    updateLatchedArpNotes()
     local rootName = NOTE_NAMES[currentRoot + 1]
     local scaleInfo = SCALES[currentScaleIdx]
     local spot = {
@@ -2003,6 +2101,7 @@ local function createMidiWebview()
       handleKeyUp(body.code)
     elseif body.type == "setRoot" and body.root ~= nil then
       currentRoot = math.max(0, math.min(11, body.root))
+      updateLatchedArpNotes()
       local rootName = NOTE_NAMES[currentRoot + 1]
       local spot = {
         title = "ROOT NOTE",
@@ -2014,6 +2113,7 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
       currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
+      updateLatchedArpNotes()
       local scaleInfo = SCALES[currentScaleIdx]
       local spot = {
         title = "SCALE / MODE",
@@ -2036,6 +2136,10 @@ local function createMidiWebview()
       updateWebviewHud()
     elseif body.type == "bpmDown" then
       arpBpm = math.max(20, arpBpm - 1)
+      applyBpmChange()
+      updateWebviewHud()
+    elseif body.type == "dragBpm" and body.delta ~= nil then
+      arpBpm = math.max(20.0, math.min(300.0, arpBpm + body.delta))
       applyBpmChange()
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
