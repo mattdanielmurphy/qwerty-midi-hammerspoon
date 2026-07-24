@@ -52,3 +52,6 @@
 
 ### 2026-07-24
 - **MIDI Panic & Gate Range Expansion:** Added automatic MIDI panic and UI pop-up on module load; expanded arpeggiator gate steps from 1% to 150%. See [2026-07-24_16-06_midi-panic-auto-show-gate.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-06_midi-panic-auto-show-gate.md).
+
+### 2026-07-24
+- **Gate Stepper & Key Repeat Controls:** Replaced Gate select dropdown with numeric drag stepper; remapped backtick (` ` `) to Arp toggle and shifted number row rightward; added continuous key repeat for held control keys. See [2026-07-24_16-12_gate-stepper-key-repeat-layout-shift.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-12_gate-stepper-key-repeat-layout-shift.md).

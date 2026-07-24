@@ -545,12 +545,11 @@ local HTML_UI_CONTENT = [[
         <option value="5">1/8T</option>
         <option value="6">1/16T</option>
       </select>
-      <select id="arp-gate-select" class="badge-small" title="Arp Note Length / Gate">
-        <option value="1">25%</option>
-        <option value="2">50%</option>
-        <option value="3" selected>80%</option>
-        <option value="4">100%</option>
-      </select>
+      <div id="gate-editor" class="bpm-editor" title="Arp Note Length / Gate">
+        <button id="gate-down" class="bpm-arrow-btn">&#9662;</button>
+        <span id="gate-value" class="bpm-display">80%</span>
+        <button id="gate-up" class="bpm-arrow-btn">&#9652;</button>
+      </div>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
         <span id="bpm-value" class="bpm-display">120 BPM</span>
@@ -584,19 +583,18 @@ local HTML_UI_CONTENT = [[
 <script>
   const LAYOUT_DATA = {
     number: [
-      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Panic!" },
-      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Arp" },
-      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Top Arp" },
-      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Bot Arp" },
-      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir -" },
-      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Dir +" },
-      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate -" },
-      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Rate +" },
-      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate -" },
-      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Gate +" },
-      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM Set" },
-      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM -" },
-      { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
+      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Top Arp" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Bot Arp" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Dir -" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir +" },
+      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Rate -" },
+      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate +" },
+      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Gate -" },
+      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate +" },
+      { code: 25, keyLabel: "9", isControl: true, noteLabel: "BPM Set" },
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM -" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
       { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
@@ -790,16 +788,63 @@ local HTML_UI_CONTENT = [[
       arpRateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
     }
 
-    const arpGateSelect = document.getElementById('arp-gate-select');
-    if (arpGateSelect) {
-      arpGateSelect.addEventListener('change', (e) => {
-        const val = parseInt(e.target.value);
-        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setArpGate', gateIdx: val });
-        }
+    // Gate Editor handlers
+    let isGateDragging = false;
+    let gateDragStartY = 0;
+    let gateDragAccum = 0;
+    let gateBtnTimer = null;
+    let gateBtnInterval = null;
+    let gateBtnDirection = 0;
+
+    const gateValue = document.getElementById('gate-value');
+    if (gateValue) {
+      gateValue.style.cursor = 'ns-resize';
+      gateValue.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        isGateDragging = true;
+        gateDragStartY = e.clientY;
+        gateDragAccum = 0;
       });
-      arpGateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
     }
+
+    function stopGateRepeat() {
+      if (gateBtnTimer) { clearTimeout(gateBtnTimer); gateBtnTimer = null; }
+      if (gateBtnInterval) { clearInterval(gateBtnInterval); gateBtnInterval = null; }
+      gateBtnDirection = 0;
+    }
+
+    function startGateRepeat(direction) {
+      stopGateRepeat();
+      gateBtnDirection = direction;
+      const sendStep = () => {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: gateBtnDirection > 0 ? 'gateUp' : 'gateDown'
+          });
+        }
+      };
+      sendStep();
+
+      gateBtnTimer = setTimeout(() => {
+        gateBtnInterval = setInterval(() => {
+          sendStep();
+        }, 80);
+      }, 350);
+    }
+
+    ['gate-up', 'gate-down'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        const dir = id === 'gate-up' ? 1 : -1;
+        btn.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          startGateRepeat(dir);
+        });
+        btn.addEventListener('mouseleave', stopGateRepeat);
+      }
+    });
 
     // BPM Editor handlers
     let hasBpmDragged = false;
@@ -904,6 +949,23 @@ local HTML_UI_CONTENT = [[
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (isGateDragging) {
+      const dy = gateDragStartY - e.clientY;
+      gateDragAccum += dy;
+      gateDragStartY = e.clientY;
+      const stepThreshold = e.shiftKey ? 2 : 6;
+      if (Math.abs(gateDragAccum) >= stepThreshold) {
+        const steps = Math.trunc(gateDragAccum / stepThreshold);
+        gateDragAccum %= stepThreshold;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'dragGate',
+            delta: steps
+          });
+        }
+      }
+      return;
+    }
     if (isBpmDragging) {
       const dy = bpmDragStartY - e.clientY;
       bpmDragAccum += dy;
@@ -958,7 +1020,9 @@ local HTML_UI_CONTENT = [[
     isModeDragging = false;
     octaveDragTarget = null;
     isBpmDragging = false;
+    isGateDragging = false;
     stopBpmRepeat();
+    stopGateRepeat();
   });
 
   function showSpotlight(spotlight) {
@@ -1050,9 +1114,9 @@ local HTML_UI_CONTENT = [[
       if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
     }
 
-    if (data.arpGateIdx !== undefined) {
-      const arpGateSelect = document.getElementById('arp-gate-select');
-      if (arpGateSelect) arpGateSelect.value = data.arpGateIdx;
+    if (data.arpGatePercent !== undefined) {
+      const gateVal = document.getElementById('gate-value');
+      if (gateVal) gateVal.textContent = data.arpGatePercent + '%\;
     }
 
     if (data.bpmDisplay !== undefined) {

@@ -14,6 +14,16 @@ local homeRowControls = config.homeRowControls
 
 _G.activeWatchers = _G.activeWatchers or {}
 
+local controlRepeatTimers = {}
+
+local function stopControlRepeat(code)
+  if controlRepeatTimers[code] then
+    if controlRepeatTimers[code].timer then controlRepeatTimers[code].timer:stop() end
+    if controlRepeatTimers[code].interval then controlRepeatTimers[code].interval:stop() end
+    controlRepeatTimers[code] = nil
+  end
+end
+
 local function executeControlAction(act, code)
   if act == "topOctDown" then
     state.topRowOctaveOffset = math.max(-36, state.topRowOctaveOffset - 12)
@@ -418,22 +428,22 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateDown" then
-    state.arpGateIdx = math.max(1, state.arpGateIdx - 1)
+    state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
-      value = state.ARP_GATES[state.arpGateIdx].label,
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
       subtext = "Gate Duration",
-      targetId = "arp-gate-select",
+      targetId = "gate-value",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateUp" then
-    state.arpGateIdx = math.min(#state.ARP_GATES, state.arpGateIdx + 1)
+    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
-      value = state.ARP_GATES[state.arpGateIdx].label,
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
       subtext = "Gate Duration",
-      targetId = "arp-gate-select",
+      targetId = "gate-value",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
@@ -524,6 +534,21 @@ local function handleKeyDown(code)
       state.pressedKeys[code] = true
       local act = state.shiftHeld and cData.shiftAction or cData.action
       executeControlAction(act, code)
+      stopControlRepeat(code)
+      controlRepeatTimers[code] = {
+        timer = hs.timer.doAfter(0.35, function()
+          if state.pressedKeys[code] then
+            controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
+              if state.pressedKeys[code] then
+                local currentAct = state.shiftHeld and cData.shiftAction or cData.action
+                executeControlAction(currentAct, code)
+              else
+                stopControlRepeat(code)
+              end
+            end)
+          end
+        end)
+      }
     end
     return true
   elseif homeRowControls[code] then
@@ -532,6 +557,23 @@ local function handleKeyDown(code)
       state.pressedKeys[code] = true
       local act = state.shiftHeld and cData.shiftAction or cData.action
       executeControlAction(act, code)
+      if act ~= "sustain" and act ~= "latch" then
+        stopControlRepeat(code)
+        controlRepeatTimers[code] = {
+          timer = hs.timer.doAfter(0.35, function()
+            if state.pressedKeys[code] then
+              controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
+                if state.pressedKeys[code] then
+                  local currentAct = state.shiftHeld and cData.shiftAction or cData.action
+                  executeControlAction(currentAct, code)
+                else
+                  stopControlRepeat(code)
+                end
+              end)
+            end
+          end)
+        }
+      end
     end
     return true
   end
@@ -567,11 +609,13 @@ local function handleKeyUp(code)
     hud.updateWebviewHud()
     return true
   elseif numberRowControls[code] then
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
     return true
   elseif homeRowControls[code] then
     local cData = homeRowControls[code]
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     local act = state.shiftHeld and cData.shiftAction or cData.action
     if act == "sustain" then

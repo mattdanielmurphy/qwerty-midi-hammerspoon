@@ -168,7 +168,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
     arpEnabled = state.arpEnabled,
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
-    arpGateIdx = state.arpGateIdx,
+    arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
     arpTopEnabled = state.arpTopEnabled,
@@ -262,13 +262,33 @@ local function createMidiWebview()
         color = "#d4a359"
       }
       updateWebviewHud(spot)
-    elseif body.type == "setArpGate" and body.gateIdx ~= nil then
-      state.arpGateIdx = math.max(1, math.min(#ARP_GATES, body.gateIdx))
+    elseif body.type == "dragGate" and body.delta ~= nil then
+      state.arpGatePercent = math.max(1.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
       local spot = {
         title = "ARP NOTE LENGTH",
-        value = ARP_GATES[state.arpGateIdx].label,
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
         subtext = "Gate Duration",
-        targetId = "arp-gate-select",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateUp" then
+      state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateDown" then
+      state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
         color = "#d4a359"
       }
       updateWebviewHud(spot)

@@ -177,18 +177,16 @@ local function arpTick()
 
   updateHud(nil, nextPitch)
 
-  local gateRatio = ARP_GATES[state.arpGateIdx] and ARP_GATES[state.arpGateIdx].ratio or 0.80
-  if gateRatio < 1.00 then
-    local gateDuration = getArpIntervalSeconds() * gateRatio
-    state.arpGateTimer = hs.timer.doAfter(gateDuration, function()
-      if state.arpCurrentPitch == nextPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-        state.arpCurrentPitch = nil
-        updateHud()
-      end
-      state.arpGateTimer = nil
-    end)
-  end
+  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+  local gateDuration = getArpIntervalSeconds() * gateRatio
+  state.arpGateTimer = hs.timer.doAfter(gateDuration, function()
+    if state.arpCurrentPitch == nextPitch then
+      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+      state.arpCurrentPitch = nil
+      updateHud()
+    end
+    state.arpGateTimer = nil
+  end)
 end
 
 local function startArpTimer(preserveState)

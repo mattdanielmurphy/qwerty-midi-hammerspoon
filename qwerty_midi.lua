@@ -185,7 +185,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
     arpEnabled = state.arpEnabled,
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
-    arpGateIdx = state.arpGateIdx,
+    arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
     arpTopEnabled = state.arpTopEnabled,
@@ -279,13 +279,33 @@ local function createMidiWebview()
         color = "#d4a359"
       }
       updateWebviewHud(spot)
-    elseif body.type == "setArpGate" and body.gateIdx ~= nil then
-      state.arpGateIdx = math.max(1, math.min(#ARP_GATES, body.gateIdx))
+    elseif body.type == "dragGate" and body.delta ~= nil then
+      state.arpGatePercent = math.max(1.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
       local spot = {
         title = "ARP NOTE LENGTH",
-        value = ARP_GATES[state.arpGateIdx].label,
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
         subtext = "Gate Duration",
-        targetId = "arp-gate-select",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateUp" then
+      state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateDown" then
+      state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
         color = "#d4a359"
       }
       updateWebviewHud(spot)
@@ -730,18 +750,16 @@ local function arpTick()
 
   updateHud(nil, nextPitch)
 
-  local gateRatio = ARP_GATES[state.arpGateIdx] and ARP_GATES[state.arpGateIdx].ratio or 0.80
-  if gateRatio < 1.00 then
-    local gateDuration = getArpIntervalSeconds() * gateRatio
-    state.arpGateTimer = hs.timer.doAfter(gateDuration, function()
-      if state.arpCurrentPitch == nextPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-        state.arpCurrentPitch = nil
-        updateHud()
-      end
-      state.arpGateTimer = nil
-    end)
-  end
+  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+  local gateDuration = getArpIntervalSeconds() * gateRatio
+  state.arpGateTimer = hs.timer.doAfter(gateDuration, function()
+    if state.arpCurrentPitch == nextPitch then
+      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+      state.arpCurrentPitch = nil
+      updateHud()
+    end
+    state.arpGateTimer = nil
+  end)
 end
 
 local function startArpTimer(preserveState)
@@ -1544,12 +1562,11 @@ local HTML_UI_CONTENT = [[
         <option value="5">1/8T</option>
         <option value="6">1/16T</option>
       </select>
-      <select id="arp-gate-select" class="badge-small" title="Arp Note Length / Gate">
-        <option value="1">25%</option>
-        <option value="2">50%</option>
-        <option value="3" selected>80%</option>
-        <option value="4">100%</option>
-      </select>
+      <div id="gate-editor" class="bpm-editor" title="Arp Note Length / Gate">
+        <button id="gate-down" class="bpm-arrow-btn">&#9662;</button>
+        <span id="gate-value" class="bpm-display">80%</span>
+        <button id="gate-up" class="bpm-arrow-btn">&#9652;</button>
+      </div>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
         <span id="bpm-value" class="bpm-display">120 BPM</span>
@@ -1583,19 +1600,18 @@ local HTML_UI_CONTENT = [[
 <script>
   const LAYOUT_DATA = {
     number: [
-      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Panic!" },
-      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Arp" },
-      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Top Arp" },
-      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Bot Arp" },
-      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir -" },
-      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Dir +" },
-      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate -" },
-      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Rate +" },
-      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate -" },
-      { code: 25, keyLabel: "9", isControl: true, noteLabel: "Gate +" },
-      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM Set" },
-      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM -" },
-      { code: 24, keyLabel: "=", isControl: true, noteLabel: "BPM +" }
+      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Top Arp" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Bot Arp" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Dir -" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir +" },
+      { code: 23, keyLabel: "5", isControl: true, noteLabel: "Rate -" },
+      { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate +" },
+      { code: 26, keyLabel: "7", isControl: true, noteLabel: "Gate -" },
+      { code: 28, keyLabel: "8", isControl: true, noteLabel: "Gate +" },
+      { code: 25, keyLabel: "9", isControl: true, noteLabel: "BPM Set" },
+      { code: 29, keyLabel: "0", isControl: true, noteLabel: "BPM -" },
+      { code: 27, keyLabel: "-", isControl: true, noteLabel: "BPM +" }
     ],
     upper: [
       { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
@@ -1789,16 +1805,63 @@ local HTML_UI_CONTENT = [[
       arpRateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
     }
 
-    const arpGateSelect = document.getElementById('arp-gate-select');
-    if (arpGateSelect) {
-      arpGateSelect.addEventListener('change', (e) => {
-        const val = parseInt(e.target.value);
-        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setArpGate', gateIdx: val });
-        }
+    // Gate Editor handlers
+    let isGateDragging = false;
+    let gateDragStartY = 0;
+    let gateDragAccum = 0;
+    let gateBtnTimer = null;
+    let gateBtnInterval = null;
+    let gateBtnDirection = 0;
+
+    const gateValue = document.getElementById('gate-value');
+    if (gateValue) {
+      gateValue.style.cursor = 'ns-resize';
+      gateValue.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        isGateDragging = true;
+        gateDragStartY = e.clientY;
+        gateDragAccum = 0;
       });
-      arpGateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
     }
+
+    function stopGateRepeat() {
+      if (gateBtnTimer) { clearTimeout(gateBtnTimer); gateBtnTimer = null; }
+      if (gateBtnInterval) { clearInterval(gateBtnInterval); gateBtnInterval = null; }
+      gateBtnDirection = 0;
+    }
+
+    function startGateRepeat(direction) {
+      stopGateRepeat();
+      gateBtnDirection = direction;
+      const sendStep = () => {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: gateBtnDirection > 0 ? 'gateUp' : 'gateDown'
+          });
+        }
+      };
+      sendStep();
+
+      gateBtnTimer = setTimeout(() => {
+        gateBtnInterval = setInterval(() => {
+          sendStep();
+        }, 80);
+      }, 350);
+    }
+
+    ['gate-up', 'gate-down'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) {
+        const dir = id === 'gate-up' ? 1 : -1;
+        btn.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          startGateRepeat(dir);
+        });
+        btn.addEventListener('mouseleave', stopGateRepeat);
+      }
+    });
 
     // BPM Editor handlers
     let hasBpmDragged = false;
@@ -1903,6 +1966,23 @@ local HTML_UI_CONTENT = [[
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (isGateDragging) {
+      const dy = gateDragStartY - e.clientY;
+      gateDragAccum += dy;
+      gateDragStartY = e.clientY;
+      const stepThreshold = e.shiftKey ? 2 : 6;
+      if (Math.abs(gateDragAccum) >= stepThreshold) {
+        const steps = Math.trunc(gateDragAccum / stepThreshold);
+        gateDragAccum %= stepThreshold;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'dragGate',
+            delta: steps
+          });
+        }
+      }
+      return;
+    }
     if (isBpmDragging) {
       const dy = bpmDragStartY - e.clientY;
       bpmDragAccum += dy;
@@ -1957,7 +2037,9 @@ local HTML_UI_CONTENT = [[
     isModeDragging = false;
     octaveDragTarget = null;
     isBpmDragging = false;
+    isGateDragging = false;
     stopBpmRepeat();
+    stopGateRepeat();
   });
 
   function showSpotlight(spotlight) {
@@ -2049,9 +2131,9 @@ local HTML_UI_CONTENT = [[
       if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
     }
 
-    if (data.arpGateIdx !== undefined) {
-      const arpGateSelect = document.getElementById('arp-gate-select');
-      if (arpGateSelect) arpGateSelect.value = data.arpGateIdx;
+    if (data.arpGatePercent !== undefined) {
+      const gateVal = document.getElementById('gate-value');
+      if (gateVal) gateVal.textContent = data.arpGatePercent + '%\;
     }
 
     if (data.bpmDisplay !== undefined) {
@@ -2186,16 +2268,7 @@ local state = {
     { label = "1/8T", factor = 1.0 / 3.0 },
     { label = "1/16T", factor = 0.5 / 3.0 }
   },
-  arpGateIdx = 20,
-  ARP_GATES = {
-    { label = "1%", ratio = 0.01 }, { label = "5%", ratio = 0.05 }, { label = "10%", ratio = 0.10 }, { label = "15%", ratio = 0.15 }, { label = "20%", ratio = 0.20 },
-    { label = "25%", ratio = 0.25 }, { label = "30%", ratio = 0.30 }, { label = "35%", ratio = 0.35 }, { label = "40%", ratio = 0.40 }, { label = "45%", ratio = 0.45 },
-    { label = "50%", ratio = 0.50 }, { label = "55%", ratio = 0.55 }, { label = "60%", ratio = 0.60 }, { label = "65%", ratio = 0.65 }, { label = "70%", ratio = 0.70 },
-    { label = "75%", ratio = 0.75 }, { label = "80%", ratio = 0.80 }, { label = "85%", ratio = 0.85 }, { label = "90%", ratio = 0.90 }, { label = "95%", ratio = 0.95 },
-    { label = "100%", ratio = 1.00 }, { label = "105%", ratio = 1.05 }, { label = "110%", ratio = 1.10 }, { label = "115%", ratio = 1.15 }, { label = "120%", ratio = 1.20 },
-    { label = "125%", ratio = 1.25 }, { label = "130%", ratio = 1.30 }, { label = "135%", ratio = 1.35 }, { label = "140%", ratio = 1.40 }, { label = "145%", ratio = 1.45 },
-    { label = "150%", ratio = 1.50 }
-  },
+  arpGatePercent = 80.0,
   arpBpm = 120.0,
   arpTimer = nil,
   arpGateTimer = nil,
@@ -2252,19 +2325,18 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
-  [50] = { key = "`", name = "Panic",    action = "panic",          shiftAction = "panic",        shiftName = "Panic!" },
-  [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
-  [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
-  [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
-  [21] = { key = "4", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
-  [23] = { key = "5", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
-  [22] = { key = "6", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
-  [26] = { key = "7", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
-  [28] = { key = "8", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
-  [25] = { key = "9", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
-  [29] = { key = "0", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
-  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
-  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
+  [50] = { key = "`", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
+  [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
+  [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
+  [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
+  [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
+  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
+  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
+  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
+  [25] = { key = "9", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
+  [29] = { key = "0", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
+  [27] = { key = "-", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
 
 local lowerRowKeys = {
@@ -2336,6 +2408,16 @@ local lowerRowKeys = config.lowerRowKeys
 local homeRowControls = config.homeRowControls
 
 _G.activeWatchers = _G.activeWatchers or {}
+
+local controlRepeatTimers = {}
+
+local function stopControlRepeat(code)
+  if controlRepeatTimers[code] then
+    if controlRepeatTimers[code].timer then controlRepeatTimers[code].timer:stop() end
+    if controlRepeatTimers[code].interval then controlRepeatTimers[code].interval:stop() end
+    controlRepeatTimers[code] = nil
+  end
+end
 
 local function executeControlAction(act, code)
   if act == "topOctDown" then
@@ -2741,22 +2823,22 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateDown" then
-    state.arpGateIdx = math.max(1, state.arpGateIdx - 1)
+    state.arpGatePercent = math.max(1.0, (state.arpGatePercent or 80.0) - 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
-      value = state.ARP_GATES[state.arpGateIdx].label,
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
       subtext = "Gate Duration",
-      targetId = "arp-gate-select",
+      targetId = "gate-value",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpGateUp" then
-    state.arpGateIdx = math.min(#state.ARP_GATES, state.arpGateIdx + 1)
+    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
     local spot = {
       title = "ARP NOTE LENGTH",
-      value = state.ARP_GATES[state.arpGateIdx].label,
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
       subtext = "Gate Duration",
-      targetId = "arp-gate-select",
+      targetId = "gate-value",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
@@ -2847,6 +2929,21 @@ local function handleKeyDown(code)
       state.pressedKeys[code] = true
       local act = state.shiftHeld and cData.shiftAction or cData.action
       executeControlAction(act, code)
+      stopControlRepeat(code)
+      controlRepeatTimers[code] = {
+        timer = hs.timer.doAfter(0.35, function()
+          if state.pressedKeys[code] then
+            controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
+              if state.pressedKeys[code] then
+                local currentAct = state.shiftHeld and cData.shiftAction or cData.action
+                executeControlAction(currentAct, code)
+              else
+                stopControlRepeat(code)
+              end
+            end)
+          end
+        end)
+      }
     end
     return true
   elseif homeRowControls[code] then
@@ -2855,6 +2952,23 @@ local function handleKeyDown(code)
       state.pressedKeys[code] = true
       local act = state.shiftHeld and cData.shiftAction or cData.action
       executeControlAction(act, code)
+      if act ~= "sustain" and act ~= "latch" then
+        stopControlRepeat(code)
+        controlRepeatTimers[code] = {
+          timer = hs.timer.doAfter(0.35, function()
+            if state.pressedKeys[code] then
+              controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
+                if state.pressedKeys[code] then
+                  local currentAct = state.shiftHeld and cData.shiftAction or cData.action
+                  executeControlAction(currentAct, code)
+                else
+                  stopControlRepeat(code)
+                end
+              end)
+            end
+          end)
+        }
+      end
     end
     return true
   end
@@ -2890,11 +3004,13 @@ local function handleKeyUp(code)
     hud.updateWebviewHud()
     return true
   elseif numberRowControls[code] then
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
     return true
   elseif homeRowControls[code] then
     local cData = homeRowControls[code]
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     local act = state.shiftHeld and cData.shiftAction or cData.action
     if act == "sustain" then

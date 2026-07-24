@@ -28,16 +28,7 @@ local state = {
     { label = "1/8T", factor = 1.0 / 3.0 },
     { label = "1/16T", factor = 0.5 / 3.0 }
   },
-  arpGateIdx = 20,
-  ARP_GATES = {
-    { label = "1%", ratio = 0.01 }, { label = "5%", ratio = 0.05 }, { label = "10%", ratio = 0.10 }, { label = "15%", ratio = 0.15 }, { label = "20%", ratio = 0.20 },
-    { label = "25%", ratio = 0.25 }, { label = "30%", ratio = 0.30 }, { label = "35%", ratio = 0.35 }, { label = "40%", ratio = 0.40 }, { label = "45%", ratio = 0.45 },
-    { label = "50%", ratio = 0.50 }, { label = "55%", ratio = 0.55 }, { label = "60%", ratio = 0.60 }, { label = "65%", ratio = 0.65 }, { label = "70%", ratio = 0.70 },
-    { label = "75%", ratio = 0.75 }, { label = "80%", ratio = 0.80 }, { label = "85%", ratio = 0.85 }, { label = "90%", ratio = 0.90 }, { label = "95%", ratio = 0.95 },
-    { label = "100%", ratio = 1.00 }, { label = "105%", ratio = 1.05 }, { label = "110%", ratio = 1.10 }, { label = "115%", ratio = 1.15 }, { label = "120%", ratio = 1.20 },
-    { label = "125%", ratio = 1.25 }, { label = "130%", ratio = 1.30 }, { label = "135%", ratio = 1.35 }, { label = "140%", ratio = 1.40 }, { label = "145%", ratio = 1.45 },
-    { label = "150%", ratio = 1.50 }
-  },
+  arpGatePercent = 80.0,
   arpBpm = 120.0,
   arpTimer = nil,
   arpGateTimer = nil,
@@ -94,19 +85,18 @@ local WHITE_KEY_INDEX = {
 }
 
 local numberRowControls = {
-  [50] = { key = "`", name = "Panic",    action = "panic",          shiftAction = "panic",        shiftName = "Panic!" },
-  [18] = { key = "1", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
-  [19] = { key = "2", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
-  [20] = { key = "3", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
-  [21] = { key = "4", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
-  [23] = { key = "5", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
-  [22] = { key = "6", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
-  [26] = { key = "7", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
-  [28] = { key = "8", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
-  [25] = { key = "9", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
-  [29] = { key = "0", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
-  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
-  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
+  [50] = { key = "`", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
+  [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
+  [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
+  [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
+  [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
+  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
+  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
+  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
+  [25] = { key = "9", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
+  [29] = { key = "0", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
+  [27] = { key = "-", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
 
 local lowerRowKeys = {
