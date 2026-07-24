@@ -7,6 +7,7 @@ Improve arpeggiator behavior, target defaults, latched sequence root/scale trans
 3. Fix arpeggiator sequence reset on root/mode changes in Latch mode: when root note or scale/mode changes while arpeggiator is latched, update held pitch values in place so the sequence continues smoothly in the new scale without resetting sequence index or timer.
 4. Accelerate BPM adjustment rate when holding the BPM +/- buttons down continuously.
 5. Enable vertical click-and-drag directly on the BPM display to adjust tempo dynamically up and down (with Shift modifier support for fine tuning).
+6. Preserve arpeggiator sequence position and step state during BPM changes so changing tempo dynamically doesn't restart or reset the sequence.
 
 ## User Feedback & Decisions
 - Default arpeggiator row should be bottom row only.
@@ -14,6 +15,7 @@ Improve arpeggiator behavior, target defaults, latched sequence root/scale trans
 - Root key / scale changes during Latch mode must transpose active arpeggio notes while keeping sequence progression unbroken.
 - BPM +/- buttons should accelerate when held down.
 - Dragging the BPM text vertically should adjust BPM.
+- Changing BPM while arpeggiator is running must not reset the sequence step or restart from note 1.
 
 ## Changes Made
 1. **`qwerty_midi.lua`**:
@@ -23,6 +25,7 @@ Improve arpeggiator behavior, target defaults, latched sequence root/scale trans
    - Integrated `updateLatchedArpNotes()` into scale/mode changes (`modeUp`, `modeDown`, `randomScale`, `setModeIdx`) and root changes (`rootUp`, `rootDown`, `setRoot`).
    - Implemented repeat & acceleration timer logic in JavaScript for `bpm-up` and `bpm-down` buttons (repeats at 80ms, accelerating multiplier after 0.7s, 1.5s, and 3.0s).
    - Implemented vertical drag handler (`mousedown`, `mousemove`, `mouseup`) on `#bpm-value` posting `dragBpm` messages to Lua, updating `arpBpm` seamlessly while keeping click-to-type capability intact when not dragging.
+   - Updated `applyBpmChange()` to use `hs.timer:setNextTrigger()` instead of stopping and restarting the arpeggiator timer, preserving active `arpStepIndex` and step direction seamlessly across tempo adjustments.
 
 ## What Worked
 - Defaulting to bottom-row arpeggiator prevents top-row key overlap when arp is toggled.
