@@ -62,21 +62,20 @@ local currentScaleIdx = 1        -- 1 = Major / Ionian
 local octaveShift = 0            -- Global Octave offset in semitones (-36 to +36)
 local topRowOctaveOffset = 0     -- Independent Top Row Octave Offset
 local transposeShift = 0         -- Transpose offset in semitones (-12 to +12)
-local sustainActive = false      -- Toggle state for sustain pedal (CC64)
-local sustainKeyDownTime = 0     -- Timestamp when sustain key was pressed down
-local sustainWasActiveOnPress = false
+local sustainActive = false      -- Latch / Sustain mode toggle state (CC64)
 local shiftHeld = false          -- Shift key active state
 local zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0  -- HUD Zoom Scale Factor (1.0 = 100%)
 local BASE_HUD_SCALE = 1.4                                         -- 100% zoom maps to 1.4x baseline scale factor
 
--- Arpeggiator State
+-- Arpeggiator & Latch State
 local arpMode = 0                -- 0: OFF, 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
 local ARP_MODES = { "OFF", "UP", "DOWN", "UP-DOWN", "RANDOM" }
 local arpBpmOptions = { 90, 120, 140, 160, 180, 200 }
 local arpBpmIdx = 2              -- Default 120 BPM
 local arpBpm = arpBpmOptions[arpBpmIdx]
 local arpTimer = nil
-local arpHeldNotes = {}          -- [code] = pitch
+local arpHeldNotes = {}          -- [code] = pitch (latched or physically held)
+local arpKeysCurrentlyHeld = {}  -- [code] = true (physically down)
 local arpCurrentPitch = nil
 local arpStepIndex = 1
 local arpStepDirection = 1
@@ -153,8 +152,8 @@ local upperRowKeys = {
 }
 
 local homeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
-  [0]  = { key = "A",   name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+  [48] = { key = "Tab", name = "Latch",   action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+  [0]  = { key = "A",   name = "Latch",   action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
@@ -288,13 +287,35 @@ local function startArpTimer()
 end
 
 local function arpAddNote(code, pitch)
+  -- Count active physical/UI held keys
+  local numPhysicalHeld = 0
+  for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+
+  -- If Latch Mode is ON and starting a new chord (0 keys were down), clear previous latched pattern
+  if sustainActive and numPhysicalHeld == 0 then
+    arpHeldNotes = {}
+    if arpCurrentPitch then
+      sendMidiNote("noteOff", arpCurrentPitch, 0)
+      arpCurrentPitch = nil
+    end
+  end
+
+  arpKeysCurrentlyHeld[code] = true
   arpHeldNotes[code] = pitch
+
   if not arpTimer then
     startArpTimer()
   end
 end
 
 local function arpRemoveNote(code)
+  arpKeysCurrentlyHeld[code] = nil
+
+  -- In Latch mode, releasing keys does not clear the arpeggiated note set
+  if sustainActive then
+    return
+  end
+
   arpHeldNotes[code] = nil
   local count = 0
   for _ in pairs(arpHeldNotes) do count = count + 1 end
@@ -309,6 +330,7 @@ local function cycleArpMode()
   if arpMode == 0 then
     stopArpTimer()
     arpHeldNotes = {}
+    arpKeysCurrentlyHeld = {}
   end
   local spot = {
     title = "ARPEGGIATOR",
@@ -780,7 +802,7 @@ local HTML_UI_CONTENT = [[
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
     ],
     home: [
-      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Sustain" },
+      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Latch" },
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
@@ -1225,6 +1247,7 @@ local function executeControlAction(act, code)
     pressedKeys = {}
     stopArpTimer()
     arpHeldNotes = {}
+    arpKeysCurrentlyHeld = {}
     local spot = {
       title = "MIDI PANIC",
       value = "ALL NOTES OFF",
@@ -1244,6 +1267,7 @@ local function executeControlAction(act, code)
     activeWatchers.modAccumulator = 0
     stopArpTimer()
     arpHeldNotes = {}
+    arpKeysCurrentlyHeld = {}
     arpMode = 0
     sendMidiCC(64, 0)
     sendMidiCC(1, 0)
@@ -1275,17 +1299,23 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     updateWebviewHud(spot)
-  elseif act == "sustain" then
-    sustainKeyDownTime = hs.timer.secondsSinceEpoch()
-    sustainWasActiveOnPress = sustainActive
-    sustainActive = true
-    sendMidiCC(64, 127)
+  elseif act == "sustain" or act == "latch" then
+    sustainActive = not sustainActive
+    sendMidiCC(64, sustainActive and 127 or 0)
+    if not sustainActive and arpMode > 0 then
+      local numPhysicalHeld = 0
+      for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+      if numPhysicalHeld == 0 then
+        stopArpTimer()
+        arpHeldNotes = {}
+      end
+    end
     local spot = {
-      title = "SUSTAIN PEDAL",
-      value = "SUSTAIN ON",
-      subtext = "CC #64 Latch",
+      title = "LATCH MODE (CC #64)",
+      value = sustainActive and "LATCH ON" or "LATCH OFF",
+      subtext = sustainActive and "Notes & Arp pattern hold" or "Damping enabled",
       targetId = "key-0",
-      color = "#d4a359"
+      color = sustainActive and "#d4a359" or "#b5aba0"
     }
     updateWebviewHud(spot)
   elseif act == "modWheelDown" then
@@ -1398,7 +1428,9 @@ local function handleKeyUp(code)
       if arpMode > 0 then
         arpRemoveNote(code)
       else
-        sendMidiNote("noteOff", playedPitch, 0)
+        if not sustainActive then
+          sendMidiNote("noteOff", playedPitch, 0)
+        end
       end
       pressedKeys[code] = nil
     end
@@ -1412,28 +1444,8 @@ local function handleKeyUp(code)
     local cData = homeRowControls[code]
     pressedKeys[code] = nil
     local act = shiftHeld and cData.shiftAction or cData.action
-    if act == "sustain" then
-      local holdDuration = hs.timer.secondsSinceEpoch() - sustainKeyDownTime
-      if holdDuration > 0.25 then
-        sustainActive = false
-        sendMidiCC(64, 0)
-      else
-        if sustainWasActiveOnPress then
-          sustainActive = false
-          sendMidiCC(64, 0)
-        else
-          sustainActive = true
-          sendMidiCC(64, 127)
-        end
-      end
-      local spot = {
-        title = "SUSTAIN PEDAL (CC #64)",
-        value = sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-        subtext = sustainActive and "Notes latch & hold" or "Damping enabled",
-        targetId = "key-0",
-        color = sustainActive and "#d4a359" or "#b5aba0"
-      }
-      updateWebviewHud(spot)
+    if act == "sustain" or act == "latch" then
+      updateWebviewHud()
     else
       updateWebviewHud()
     end
@@ -1475,12 +1487,12 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
   
   local octStr = (octaveShift >= 0 and "+" or "") .. (octaveShift / 12) .. " Oct"
   local trnspStr = (transposeShift ~= 0) and ("Trnsp: " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. "st") or ""
-  local susStr = sustainActive and "SUS: ON" or ""
+  local latchStr = sustainActive and "LATCH: ON" or ""
   local shiftStr = shiftHeld and "[SHIFT]" or ""
 
   local statusParts = {}
   if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
-  if susStr ~= "" then table.insert(statusParts, susStr) end
+  if latchStr ~= "" then table.insert(statusParts, latchStr) end
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
@@ -1609,7 +1621,7 @@ local function buildLayoutJson()
   }
 
   local homeList = {
-    { code = 0,  keyLabel = "A", isControl = true, noteLabel = "Sustain" },
+    { code = 0,  keyLabel = "A", isControl = true, noteLabel = "Latch" },
     { code = 1,  keyLabel = "S", isControl = true, noteLabel = "Random" },
     { code = 2,  keyLabel = "D", isControl = true, noteLabel = "Oct -" },
     { code = 3,  keyLabel = "F", isControl = true, noteLabel = "Oct +" },
@@ -1741,6 +1753,7 @@ function _G.toggleMidiMode(newState)
     pressedKeys = {}
     stopArpTimer()
     arpHeldNotes = {}
+    arpKeysCurrentlyHeld = {}
     if activeWatchers.midiWebview then
       activeWatchers.midiWebview:hide()
     end

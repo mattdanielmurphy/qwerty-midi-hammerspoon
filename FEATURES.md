@@ -6,6 +6,7 @@
 - **Interactive UI Key Clicks**: Clicking on-screen keys (notes or controls) triggers native MIDI notes and parameter adjustments.
 - **Dropdown Root Selection**: Clickable `<select>` badge in HUD header to select root note (C through B) directly from a styled dropdown.
 - **Draggable Mode Slider**: Interactive scale mode slider in HUD header allowing direct drag and click selection across all 9 modes/scales.
+- **Latch Mode & Arpeggiator Integration**: Toggleable Latch Mode (`Tab` / `A` key or HUD control) that holds sustained notes and latches arpeggiated patterns indefinitely until new keys are pressed or Latch is turned off.
 - **Built-in Arpeggiator**: Integrated arpeggiator engine with multiple modes (UP, DOWN, UP-DOWN, RANDOM), selectable BPM speeds, and real-time visual key highlights on active arpeggiated notes.
 - **Jitter-Free Key Rendering**: Fixed-size key pads with non-shifting inset shadow press states to eliminate DOM layout shifts during fast playing.
 - **Subtle Interval Indicators**: Root, 3rd, and 5th intervals highlighted with soft muted tones (`#d4a359`, `#c9bfb3`, `#b8aca0`) rather than bright colors.
