@@ -65,6 +65,7 @@ local sustainActive = false      -- Toggle state for sustain pedal (CC64)
 local sustainKeyDownTime = 0     -- Timestamp when sustain key was pressed down
 local sustainWasActiveOnPress = false
 local shiftHeld = false          -- Shift key active state
+local zoomLevel = 1.0            -- HUD Zoom Scale Factor (0.5 to 2.0)
 
 local ccStates = {
   [1] = 0,   -- Mod Wheel default 0
@@ -185,8 +186,8 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 100%;
-    height: 100%;
+    width: 760px;
+    height: 230px;
     background: rgba(20, 24, 33, 0.95);
     border: 2px solid rgba(50, 65, 90, 0.8);
     border-radius: 14px;
@@ -195,7 +196,60 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     padding: 10px 14px 14px 14px;
     position: relative;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transform-origin: center center;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Central Spotlight Popup */
+  .spotlight-card {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1.4);
+    background: rgba(16, 22, 34, 0.96);
+    border: 2px solid #e6b432;
+    border-radius: 12px;
+    padding: 14px 24px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    pointer-events: none;
+    opacity: 1;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  .spotlight-card.hidden {
+    opacity: 0;
+    display: none;
+  }
+
+  .spotlight-title {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: #9ab0c7;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .spotlight-val {
+    font-size: 26px;
+    font-weight: 900;
+    color: #ffffff;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    margin-bottom: 4px;
+    white-space: nowrap;
+  }
+
+  .spotlight-sub {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e6b432;
+    white-space: nowrap;
   }
   
   /* Dynamic Mod Wheel Glow */
@@ -364,12 +418,17 @@ local HTML_UI_CONTENT = [[
 <body style="--mod-intensity: 0;">
   <div id="hud-container">
     <div class="mod-gradient-overlay"></div>
+    <div id="spotlight-card" class="spotlight-card hidden">
+      <div id="spotlight-title" class="spotlight-title"></div>
+      <div id="spotlight-val" class="spotlight-val"></div>
+      <div id="spotlight-sub" class="spotlight-sub"></div>
+    </div>
     <div id="header">
       <div id="root-badge" class="badge">♩ C</div>
       <div class="mode-slider-track">
         <div id="mode-thumb" class="mode-slider-thumb"></div>
       </div>
-      <div id="status-text" class="status-info">Major / Ionian  •  +0 Oct  •  Top: +1 Oct  •  SUS: OFF  •  MOD: 0</div>
+      <div id="status-text" class="status-info">Major / Ionian  •  +0 Oct  •  Top: +1 Oct  •  SUS: OFF</div>
     </div>
     
     <div class="keyboard-grid">
@@ -380,8 +439,80 @@ local HTML_UI_CONTENT = [[
   </div>
 
 <script>
+  let spotlightTimer1 = null;
+  let spotlightTimer2 = null;
+
+  function showSpotlight(spotlight) {
+    if (!spotlight) return;
+    const card = document.getElementById('spotlight-card');
+    const titleEl = document.getElementById('spotlight-title');
+    const valEl = document.getElementById('spotlight-val');
+    const subEl = document.getElementById('spotlight-sub');
+    if (!card || !valEl) return;
+
+    if (spotlightTimer1) clearTimeout(spotlightTimer1);
+    if (spotlightTimer2) clearTimeout(spotlightTimer2);
+
+    titleEl.textContent = spotlight.title || '';
+    valEl.textContent = spotlight.value || '';
+    subEl.textContent = spotlight.subtext || '';
+
+    const color = spotlight.color || '#e6b432';
+    card.style.borderColor = color;
+    card.style.boxShadow = '0 12px 40px rgba(0,0,0,0.85), 0 0 25px ' + color + '66';
+    subEl.style.color = color;
+
+    card.classList.remove('hidden');
+    card.style.transition = 'none';
+    card.style.left = '50%';
+    card.style.top = '50%';
+    card.style.transform = 'translate(-50%, -50%) scale(1.4)';
+    card.style.opacity = '1';
+
+    card.offsetHeight; // Force layout reflow
+
+    card.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease, left 0.45s cubic-bezier(0.16, 1, 0.3, 1), top 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+
+    spotlightTimer1 = setTimeout(() => {
+      let targetX = '50%';
+      let targetY = '50%';
+      let targetScale = 'scale(0.35)';
+
+      if (spotlight.targetId) {
+        const targetEl = document.getElementById(spotlight.targetId);
+        const container = document.getElementById('hud-container');
+        if (targetEl && container) {
+          const tRect = targetEl.getBoundingClientRect();
+          const cRect = container.getBoundingClientRect();
+          const tCenterX = tRect.left + tRect.width / 2 - cRect.left;
+          const tCenterY = tRect.top + tRect.height / 2 - cRect.top;
+          targetX = tCenterX + 'px';
+          targetY = tCenterY + 'px';
+          targetScale = 'scale(0.25)';
+        }
+      }
+
+      card.style.left = targetX;
+      card.style.top = targetY;
+      card.style.transform = 'translate(-50%, -50%) ' + targetScale;
+      card.style.opacity = '0';
+
+      spotlightTimer2 = setTimeout(() => {
+        card.classList.add('hidden');
+      }, 450);
+    }, 350);
+  }
+
   function renderHud(data) {
     if (!data) return;
+
+    if (data.zoomLevel !== undefined) {
+      document.getElementById('hud-container').style.transform = 'scale(' + data.zoomLevel + ')';
+    }
+
+    if (data.spotlight) {
+      showSpotlight(data.spotlight);
+    }
     
     if (data.rootNote) {
       document.getElementById('root-badge').textContent = '♩ ' + data.rootNote;
@@ -466,7 +597,7 @@ local HTML_UI_CONTENT = [[
 </html>
 ]]
 
-local function updateWebviewHud()
+local function updateWebviewHud(spotlightInfo)
   if not activeWatchers.midiWebview then return end
   
   local modeBrightness = SCALES[currentScaleIdx].brightness or 3
@@ -477,7 +608,7 @@ local function updateWebviewHud()
   local topOctStr = "Top: +" .. topOctVal .. " Oct"
   local shiftStr = shiftHeld and "  •  [SHIFT]" or ""
   local modVal = ccStates[1] or 0
-  local statusStr = SCALES[currentScaleIdx].name .. "  •  " .. octStr .. "  •  " .. topOctStr .. "  •  SUS: " .. (sustainActive and "ON" or "OFF") .. "  •  MOD: " .. modVal .. shiftStr
+  local statusStr = SCALES[currentScaleIdx].name .. "  •  " .. octStr .. "  •  " .. topOctStr .. "  •  SUS: " .. (sustainActive and "ON" or "OFF") .. shiftStr
 
   local keyUpdates = {}
 
@@ -547,6 +678,8 @@ local function updateWebviewHud()
     statusText = statusStr,
     modeFrac = modeFrac,
     modWheel = modVal,
+    zoomLevel = zoomLevel,
+    spotlight = spotlightInfo,
     keys = keyUpdates
   }
 
@@ -590,10 +723,10 @@ local function createMidiWebview()
   end
 
   local screen = hs.screen.mainScreen():frame()
-  local width = 760
-  local height = 230
+  local width = 1200
+  local height = 400
   local hudX = activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
-  local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
+  local hudY = activeWatchers.hudY or math.floor(screen.y + screen.h - height - 30)
 
   local uc = hsUsercontent.new("midiControllerUC")
   uc:setCallback(function(msg)
@@ -674,7 +807,14 @@ activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollW
     if newMod ~= currentMod then
       ccStates[1] = newMod
       sendMidiCC(1, newMod)
-      updateWebviewHud()
+      local spot = {
+        title = "MOD WHEEL (CC #1)",
+        value = tostring(newMod),
+        subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
+        targetId = "hud-container",
+        color = "#ff8c00"
+      }
+      updateWebviewHud(spot)
     end
     return true -- Swallow scroll event so window doesn't scroll underneath
   end
@@ -747,7 +887,36 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
     return true
   end
 
-  -- 3. Check Home Row Controls
+  -- 3. Check Zoom Keys (+ / = is 24, - is 27, Numpad + is 69, Numpad - is 78)
+  if code == 24 or code == 69 then
+    if isDown then
+      zoomLevel = math.min(2.0, zoomLevel + 0.1)
+      local spot = {
+        title = "HUD ZOOM",
+        value = math.floor(zoomLevel * 100) .. "%",
+        subtext = "Press + or - to adjust scale",
+        targetId = "hud-container",
+        color = "#32b4cc"
+      }
+      updateWebviewHud(spot)
+    end
+    return true
+  elseif code == 27 or code == 78 then
+    if isDown then
+      zoomLevel = math.max(0.5, zoomLevel - 0.1)
+      local spot = {
+        title = "HUD ZOOM",
+        value = math.floor(zoomLevel * 100) .. "%",
+        subtext = "Press + or - to adjust scale",
+        targetId = "hud-container",
+        color = "#32b4cc"
+      }
+      updateWebviewHud(spot)
+    end
+    return true
+  end
+
+  -- 4. Check Home Row Controls
   if homeRowControls[code] then
     local cData = homeRowControls[code]
     if isDown then
@@ -761,35 +930,117 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           sustainWasActiveOnPress = sustainActive
           sustainActive = true
           sendMidiCC(64, 127)
-          updateWebviewHud()
+          local spot = {
+            title = "SUSTAIN PEDAL (CC #64)",
+            value = "SUSTAIN ON",
+            subtext = "Notes latch & hold",
+            targetId = "key-0",
+            color = "#e6b432"
+          }
+          updateWebviewHud(spot)
         elseif act == "octaveDown" then
           octaveShift = math.max(-36, octaveShift - 12)
-          updateWebviewHud()
+          local lowerOct = 4 + math.floor(octaveShift / 12)
+          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
+          local spot = {
+            title = "GLOBAL OCTAVE",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Lower: Oct " .. lowerOct .. " (C" .. lowerOct .. ")  •  Upper: Oct " .. upperOct .. " (C" .. upperOct .. ")",
+            targetId = "status-text",
+            color = "#32b4cc"
+          }
+          updateWebviewHud(spot)
         elseif act == "octaveUp" then
           octaveShift = math.min(36, octaveShift + 12)
-          updateWebviewHud()
+          local lowerOct = 4 + math.floor(octaveShift / 12)
+          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
+          local spot = {
+            title = "GLOBAL OCTAVE",
+            value = (octaveShift >= 0 and "+" or "") .. math.floor(octaveShift / 12) .. " Oct",
+            subtext = "Lower: Oct " .. lowerOct .. " (C" .. lowerOct .. ")  •  Upper: Oct " .. upperOct .. " (C" .. upperOct .. ")",
+            targetId = "status-text",
+            color = "#32b4cc"
+          }
+          updateWebviewHud(spot)
         elseif act == "topOctDown" then
           topRowOctaveOffset = math.max(-36, topRowOctaveOffset - 12)
-          updateWebviewHud()
+          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
+          local spot = {
+            title = "UPPER ROW OCTAVE",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
+            targetId = "status-text",
+            color = "#9b80cc"
+          }
+          updateWebviewHud(spot)
         elseif act == "topOctUp" then
           topRowOctaveOffset = math.min(36, topRowOctaveOffset + 12)
-          updateWebviewHud()
+          local upperOct = 5 + math.floor((octaveShift + topRowOctaveOffset) / 12)
+          local spot = {
+            title = "UPPER ROW OCTAVE",
+            value = (topRowOctaveOffset >= 0 and "+" or "") .. math.floor(topRowOctaveOffset / 12) .. " Oct",
+            subtext = "Upper Row Pitch: Oct " .. upperOct .. " (C" .. upperOct .. ")",
+            targetId = "status-text",
+            color = "#9b80cc"
+          }
+          updateWebviewHud(spot)
         elseif act == "rootDown" then
           currentRoot = (currentRoot - 1) % 12
-          updateWebviewHud()
+          local rootName = NOTE_NAMES[currentRoot + 1]
+          local spot = {
+            title = "ROOT NOTE",
+            value = "♩ " .. rootName,
+            subtext = "Key: " .. rootName .. " " .. SCALES[currentScaleIdx].name,
+            targetId = "root-badge",
+            color = "#e6b432"
+          }
+          updateWebviewHud(spot)
         elseif act == "rootUp" then
           currentRoot = (currentRoot + 1) % 12
-          updateWebviewHud()
+          local rootName = NOTE_NAMES[currentRoot + 1]
+          local spot = {
+            title = "ROOT NOTE",
+            value = "♩ " .. rootName,
+            subtext = "Key: " .. rootName .. " " .. SCALES[currentScaleIdx].name,
+            targetId = "root-badge",
+            color = "#e6b432"
+          }
+          updateWebviewHud(spot)
         elseif act == "modeDown" then
           currentScaleIdx = (currentScaleIdx - 2) % #SCALES + 1
-          updateWebviewHud()
+          local scaleInfo = SCALES[currentScaleIdx]
+          local spot = {
+            title = "SCALE / MODE",
+            value = scaleInfo.name,
+            subtext = scaleInfo.brightTag,
+            targetId = "mode-thumb",
+            color = "#ff8c00"
+          }
+          updateWebviewHud(spot)
         elseif act == "modeUp" then
           currentScaleIdx = (currentScaleIdx % #SCALES) + 1
-          updateWebviewHud()
+          local scaleInfo = SCALES[currentScaleIdx]
+          local spot = {
+            title = "SCALE / MODE",
+            value = scaleInfo.name,
+            subtext = scaleInfo.brightTag,
+            targetId = "mode-thumb",
+            color = "#ff8c00"
+          }
+          updateWebviewHud(spot)
         elseif act == "randomScale" then
           currentRoot = math.random(0, 11)
           currentScaleIdx = math.random(1, #SCALES)
-          updateWebviewHud()
+          local rootName = NOTE_NAMES[currentRoot + 1]
+          local scaleInfo = SCALES[currentScaleIdx]
+          local spot = {
+            title = "RANDOM SCALE",
+            value = rootName .. " " .. scaleInfo.name,
+            subtext = scaleInfo.brightTag,
+            targetId = "mode-thumb",
+            color = "#ff8c00"
+          }
+          updateWebviewHud(spot)
         elseif act == "resetAll" then
           octaveShift = 0
           topRowOctaveOffset = 0
@@ -799,35 +1050,77 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
           ccStates[1] = 0
           sendMidiCC(64, 0)
           sendMidiCC(1, 0)
-          updateWebviewHud()
+          local spot = {
+            title = "RESET ALL",
+            value = "DEFAULTS RESTORED",
+            subtext = "Octave 0  •  C Major  •  Mod 0",
+            targetId = "hud-container",
+            color = "#e6b432"
+          }
+          updateWebviewHud(spot)
         elseif act == "panic" then
           sendMidiCC(123, 0)
           pressedKeys = {}
-          updateWebviewHud()
+          local spot = {
+            title = "MIDI PANIC",
+            value = "ALL NOTES OFF",
+            subtext = "Reset active notes",
+            targetId = "hud-container",
+            color = "#ff4444"
+          }
+          updateWebviewHud(spot)
         elseif act == "modWheelDown" then
           local currentVal = ccStates[1] or 0
           local newVal = math.max(0, currentVal - 16)
           ccStates[1] = newVal
           sendMidiCC(1, newVal)
-          updateWebviewHud()
+          local spot = {
+            title = "MOD WHEEL (CC #1)",
+            value = tostring(newVal),
+            subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
+            targetId = "hud-container",
+            color = "#ff8c00"
+          }
+          updateWebviewHud(spot)
         elseif act == "modWheelUp" or act == "modWheel" then
           local currentVal = ccStates[1] or 0
           local newVal = math.min(127, currentVal + 16)
           ccStates[1] = newVal
           sendMidiCC(1, newVal)
-          updateWebviewHud()
+          local spot = {
+            title = "MOD WHEEL (CC #1)",
+            value = tostring(newVal),
+            subtext = math.floor((newVal / 127) * 100) .. "% Intensity",
+            targetId = "hud-container",
+            color = "#ff8c00"
+          }
+          updateWebviewHud(spot)
         elseif act == "volDown" then
           local currentVal = ccStates[7] or 100
           local newVal = math.max(0, currentVal - 16)
           ccStates[7] = newVal
           sendMidiCC(7, newVal)
-          updateWebviewHud()
+          local spot = {
+            title = "MASTER VOLUME (CC #7)",
+            value = tostring(newVal),
+            subtext = math.floor((newVal / 127) * 100) .. "% Level",
+            targetId = "hud-container",
+            color = "#32b4cc"
+          }
+          updateWebviewHud(spot)
         elseif act == "volUp" or act == "volume" then
           local currentVal = ccStates[7] or 100
           local newVal = math.min(127, currentVal + 16)
           ccStates[7] = newVal
           sendMidiCC(7, newVal)
-          updateWebviewHud()
+          local spot = {
+            title = "MASTER VOLUME (CC #7)",
+            value = tostring(newVal),
+            subtext = math.floor((newVal / 127) * 100) .. "% Level",
+            targetId = "hud-container",
+            color = "#32b4cc"
+          }
+          updateWebviewHud(spot)
         end
       end
     else
@@ -848,7 +1141,14 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
             sendMidiCC(64, 127)
           end
         end
-        updateWebviewHud()
+        local spot = {
+          title = "SUSTAIN PEDAL (CC #64)",
+          value = sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+          subtext = sustainActive and "Notes latch & hold" or "Damping enabled",
+          targetId = "key-0",
+          color = sustainActive and "#e6b432" or "#9ab0c7"
+        }
+        updateWebviewHud(spot)
       else
         updateWebviewHud()
       end
