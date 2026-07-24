@@ -27,28 +27,36 @@ local function setControlsModule(m)
   controlsModule = m
 end
 
-local function updateWebviewHud(spotlightInfo, activeArpPitch)
+local pendingSpotlightInfo = nil
+local pendingActiveArpPitch = nil
+local hudUpdateScheduled = false
+local lastFrameScale = nil
+
+local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
   local baseW, baseH = 980, 330
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale)
-  local curFrame = _G.activeWatchers.midiWebview:frame()
 
-  if curFrame.w ~= newW or curFrame.h ~= newH then
-    local screen = hs.screen.mainScreen():frame()
-    local cx = curFrame.x + (curFrame.w / 2)
-    local cy = curFrame.y + (curFrame.h / 2)
-    local nx = math.floor(cx - (newW / 2))
-    local ny = math.floor(cy - (newH / 2))
-    nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
-    ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
-    _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
-    _G.activeWatchers.hudX = nx
-    _G.activeWatchers.hudY = ny
-    hs.settings.set("qwertyMidi_hudX", nx)
-    hs.settings.set("qwertyMidi_hudY", ny)
+  if lastFrameScale ~= effectiveScale then
+    lastFrameScale = effectiveScale
+    local curFrame = _G.activeWatchers.midiWebview:frame()
+    if curFrame.w ~= newW or curFrame.h ~= newH then
+      local screen = hs.screen.mainScreen():frame()
+      local cx = curFrame.x + (curFrame.w / 2)
+      local cy = curFrame.y + (curFrame.h / 2)
+      local nx = math.floor(cx - (newW / 2))
+      local ny = math.floor(cy - (newH / 2))
+      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
+      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
+      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+      _G.activeWatchers.hudX = nx
+      _G.activeWatchers.hudY = ny
+      hs.settings.set("qwertyMidi_hudX", nx)
+      hs.settings.set("qwertyMidi_hudY", ny)
+    end
   end
 
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
@@ -189,6 +197,28 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
 
   local jsonStr = hs.json.encode(payload)
   _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
+end
+
+local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
+  if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
+  if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
+
+  if forceImmediate then
+    performWebviewHudUpdate(pendingSpotlightInfo, pendingActiveArpPitch)
+    pendingSpotlightInfo = nil
+    return
+  end
+
+  if not hudUpdateScheduled then
+    hudUpdateScheduled = true
+    hs.timer.doAfter(0.016, function()
+      hudUpdateScheduled = false
+      local s = pendingSpotlightInfo
+      local a = pendingActiveArpPitch
+      pendingSpotlightInfo = nil
+      performWebviewHudUpdate(s, a)
+    end)
+  end
 end
 
 local function createMidiWebview()

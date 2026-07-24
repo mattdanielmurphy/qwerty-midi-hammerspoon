@@ -63,3 +63,5 @@
 ### 2026-07-24
 ### 2026-07-24
 - **Fixed Arp Latch Chord Transition & Unlimited Polyphony:** Fixed latch mode chord transitions by tracking chord attacks to clear prior latched notes on the first key press of a new chord while allowing full n-note polyphony for all keys in the new chord. See [2026-07-24_16-18_fix-arp-latch-chord-transitions.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-18_fix-arp-latch-chord-transitions.md).
+
+- **Ultra-Low Latency & 60 FPS Batched HUD Rendering:** Decoupled instant CoreMIDI note transmission from WebKit IPC visual updates. Batched HUD webview updates at ~60 FPS (16ms throttle) and converted Logic Pro BPM polling to non-blocking background task execution, eliminating main thread stalls during fast note playing. See [2026-07-24_16-21_eliminate-midi-hiccups-and-optimize-performance.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-21_eliminate-midi-hiccups-and-optimize-performance.md).

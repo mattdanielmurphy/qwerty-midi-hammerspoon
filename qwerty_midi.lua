@@ -44,28 +44,36 @@ local function setControlsModule(m)
   controlsModule = m
 end
 
-local function updateWebviewHud(spotlightInfo, activeArpPitch)
+local pendingSpotlightInfo = nil
+local pendingActiveArpPitch = nil
+local hudUpdateScheduled = false
+local lastFrameScale = nil
+
+local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
   local baseW, baseH = 980, 330
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale)
-  local curFrame = _G.activeWatchers.midiWebview:frame()
 
-  if curFrame.w ~= newW or curFrame.h ~= newH then
-    local screen = hs.screen.mainScreen():frame()
-    local cx = curFrame.x + (curFrame.w / 2)
-    local cy = curFrame.y + (curFrame.h / 2)
-    local nx = math.floor(cx - (newW / 2))
-    local ny = math.floor(cy - (newH / 2))
-    nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
-    ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
-    _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
-    _G.activeWatchers.hudX = nx
-    _G.activeWatchers.hudY = ny
-    hs.settings.set("qwertyMidi_hudX", nx)
-    hs.settings.set("qwertyMidi_hudY", ny)
+  if lastFrameScale ~= effectiveScale then
+    lastFrameScale = effectiveScale
+    local curFrame = _G.activeWatchers.midiWebview:frame()
+    if curFrame.w ~= newW or curFrame.h ~= newH then
+      local screen = hs.screen.mainScreen():frame()
+      local cx = curFrame.x + (curFrame.w / 2)
+      local cy = curFrame.y + (curFrame.h / 2)
+      local nx = math.floor(cx - (newW / 2))
+      local ny = math.floor(cy - (newH / 2))
+      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
+      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
+      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+      _G.activeWatchers.hudX = nx
+      _G.activeWatchers.hudY = ny
+      hs.settings.set("qwertyMidi_hudX", nx)
+      hs.settings.set("qwertyMidi_hudY", ny)
+    end
   end
 
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
@@ -206,6 +214,28 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch)
 
   local jsonStr = hs.json.encode(payload)
   _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
+end
+
+local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
+  if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
+  if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
+
+  if forceImmediate then
+    performWebviewHudUpdate(pendingSpotlightInfo, pendingActiveArpPitch)
+    pendingSpotlightInfo = nil
+    return
+  end
+
+  if not hudUpdateScheduled then
+    hudUpdateScheduled = true
+    hs.timer.doAfter(0.016, function()
+      hudUpdateScheduled = false
+      local s = pendingSpotlightInfo
+      local a = pendingActiveArpPitch
+      pendingSpotlightInfo = nil
+      performWebviewHudUpdate(s, a)
+    end)
+  end
 end
 
 local function createMidiWebview()
@@ -942,20 +972,24 @@ local function handleBpmInput(code, flags)
   return false
 end
 
-local function fetchLogicBpm()
-  local script = 'tell application "System Events" to tell process "Logic Pro" to get value of every UI element of UI element 1 of group 1 of window 1 whose description is "Tempo"'
-  local ok, res, _ = hs.osascript.javascript([[
+local isSyncingLogicBpm = false
+
+local function syncLogicBpm()
+  if not state.logicSyncEnabled or isSyncingLogicBpm then return end
+  isSyncingLogicBpm = true
+
+  local script = [[
     var bpm = null;
     try {
       var se = Application('System Events');
       var logic = se.processes['Logic Pro'];
-      if (logic.exists()) {
+      if (logic && logic.exists()) {
         var win = logic.windows[0];
-        if (win.exists()) {
+        if (win && win.exists()) {
           var grp = win.groups[0];
-          if (grp.exists()) {
+          if (grp && grp.exists()) {
             var ctrlBar = grp.uiElements[0];
-            if (ctrlBar.exists()) {
+            if (ctrlBar && ctrlBar.exists()) {
               var elems = ctrlBar.uiElements();
               for (var i = 0; i < elems.length; i++) {
                 if (elems[i].description() === 'Tempo') {
@@ -969,21 +1003,20 @@ local function fetchLogicBpm()
       }
     } catch(e) {}
     bpm;
-  ]])
-  if ok and res and type(res) == "number" and res >= 20 and res <= 300 then
-    return res
-  end
-  return nil
-end
+  ]]
 
-local function syncLogicBpm()
-  if not state.logicSyncEnabled then return end
-  local logicBpm = fetchLogicBpm()
-  if logicBpm and math.abs(state.arpBpm - logicBpm) > 0.01 then
-    state.arpBpm = logicBpm
-    applyBpmChange()
-    updateHud()
-  end
+  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+    isSyncingLogicBpm = false
+    if exitCode == 0 and stdOut then
+      local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 then
+        state.arpBpm = val
+        applyBpmChange()
+        updateHud()
+      end
+    end
+  end, { "-l", "JavaScript", "-e", script })
+  task:start()
 end
 
 local function toggleLogicSync()

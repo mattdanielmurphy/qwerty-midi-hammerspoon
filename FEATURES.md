@@ -25,7 +25,8 @@
 - **Shift Key Sustain & Arpeggiator Bypass**: Holding **Shift** when tapping any note key inverts both current Arpeggiator and Sustain states for that note (e.g. bypasses active Arp/Sustain to play a direct un-sustained note, or triggers an Arp/Sustained note when Arp/Sustain are disabled) across both upper and lower keyboard rows.
 - **Dedicated Number Row Arp Controls**: Number keys `1` through `=` mapped to comprehensive Arp & BPM controls (`1`: Arp On/Off, `2`: Top Arp, `3`: Bot Arp, `4`/`5`: Dir -/+, `6`/`7`: Rate -/+, `8`/`9`: Gate -/+, `0`: BPM Set, `-`/`=`: BPM -/+). Holding **Shift** accesses alternate controls (Panic, Transpose, Octave, Mode, Zoom, Reset).
 - **Arp Latch Chord Transition Handling**: Improved latch mode chord recognition so transitioning between chords seamlessly replaces the prior chord without restricting subsequent note polyphony or dropping notes.
-- **Logic Pro Session BPM Sync**: Real-time auto-synchronization between active Logic Pro session BPM and the Arpeggiator engine via AppleScript/JSA interface with an interactive header `SYNC: ON/OFF` toggle button.
+- **Logic Pro Session BPM Sync**: Real-time auto-synchronization between active Logic Pro session BPM and the Arpeggiator engine via non-blocking background AppleScript task with an interactive header `SYNC: ON/OFF` toggle button.
+- **Ultra-Low Latency & 60 FPS Batched HUD Rendering**: Decoupled instant CoreMIDI note transmission from WebKit IPC visual updates. Visual HUD rendering is batched at ~60 FPS (16ms throttle) to eliminate main thread stalls and hiccupping during rapid note playing or fast arpeggio ticks.
 
 
 
