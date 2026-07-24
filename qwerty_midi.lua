@@ -62,7 +62,9 @@ local currentScaleIdx = 1        -- 1 = Major / Ionian
 local octaveShift = 0            -- Global Octave offset in semitones (-36 to +36)
 local topRowOctaveOffset = 0     -- Independent Top Row Octave Offset
 local transposeShift = 0         -- Transpose offset in semitones (-12 to +12)
-local sustainActive = false      -- Latch / Sustain mode toggle state (CC64)
+local sustainActive = false      -- Sustain / Latch mode toggle state (CC64)
+local sustainKeyDownTime = 0     -- Timestamp when sustain key was pressed down
+local sustainWasActiveOnPress = false
 local shiftHeld = false          -- Shift key active state
 local zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0  -- HUD Zoom Scale Factor (1.0 = 100%)
 local BASE_HUD_SCALE = 1.4                                         -- 100% zoom maps to 1.4x baseline scale factor
@@ -163,8 +165,8 @@ local upperRowKeys = {
 }
 
 local homeRowControls = {
-  [48] = { key = "Tab", name = "Latch",   action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
-  [0]  = { key = "A",   name = "Latch",   action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+  [0]  = { key = "A",   name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
@@ -302,7 +304,7 @@ local function arpAddNote(code, pitch)
   local numPhysicalHeld = 0
   for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
 
-  -- If Latch Mode is ON and starting a new chord (0 keys were down), clear previous latched pattern
+  -- If Sustain / Latch Mode is ON and starting a new chord (0 keys were down), clear previous latched pattern
   if sustainActive and numPhysicalHeld == 0 then
     arpHeldNotes = {}
     if arpCurrentPitch then
@@ -322,7 +324,7 @@ end
 local function arpRemoveNote(code)
   arpKeysCurrentlyHeld[code] = nil
 
-  -- In Latch mode, releasing keys does not clear the arpeggiated note set
+  -- In Sustain / Latch mode, releasing keys does not clear the arpeggiated note set
   if sustainActive then
     return
   end
@@ -681,6 +683,97 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
+  .bpm-editor {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    -webkit-app-region: no-drag;
+    flex-shrink: 0;
+  }
+
+  .bpm-arrow-btn {
+    background: rgba(212, 163, 89, 0.12);
+    border: 1px solid rgba(212, 163, 89, 0.4);
+    color: #d4a359;
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+    line-height: 1;
+    transition: background 0.15s ease;
+    -webkit-app-region: no-drag;
+  }
+
+  .bpm-arrow-btn:hover {
+    background: rgba(212, 163, 89, 0.3);
+  }
+
+  .bpm-display {
+    font-size: 11px;
+    font-weight: 700;
+    color: #d4a359;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: text;
+    min-width: 60px;
+    text-align: center;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .bpm-display:hover {
+    background: rgba(212, 163, 89, 0.1);
+  }
+
+  .bpm-display.editing {
+    background: rgba(212, 163, 89, 0.2);
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
+    outline: 1.5px solid #d4a359;
+  }
+
+  .row-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .arp-row-toggle {
+    font-size: 8px;
+    font-weight: 700;
+    color: #706558;
+    background: rgba(36, 32, 28, 0.8);
+    border: 1px solid rgba(112, 101, 88, 0.4);
+    border-radius: 4px;
+    padding: 1px 6px;
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+    -webkit-app-region: no-drag;
+  }
+
+  .arp-row-toggle.active {
+    color: #d4a359;
+    border-color: rgba(212, 163, 89, 0.6);
+    background: rgba(212, 163, 89, 0.15);
+    box-shadow: 0 0 4px rgba(212, 163, 89, 0.2);
+  }
+
+  .arp-row-toggle:hover {
+    background: rgba(212, 163, 89, 0.25);
+  }
+
+  .draggable-octave {
+    cursor: ns-resize;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
   .status-info {
     font-size: 12px;
     color: #b5aba0;
@@ -822,97 +915,6 @@ local HTML_UI_CONTENT = [[
     color: #d4a359;
     font-weight: 600;
   }
-
-  .bpm-editor {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    -webkit-app-region: no-drag;
-    flex-shrink: 0;
-  }
-
-  .bpm-arrow-btn {
-    background: rgba(212, 163, 89, 0.12);
-    border: 1px solid rgba(212, 163, 89, 0.4);
-    color: #d4a359;
-    font-size: 10px;
-    padding: 2px 5px;
-    border-radius: 4px;
-    cursor: pointer;
-    outline: none;
-    font-family: inherit;
-    line-height: 1;
-    transition: background 0.15s ease;
-    -webkit-app-region: no-drag;
-  }
-
-  .bpm-arrow-btn:hover {
-    background: rgba(212, 163, 89, 0.3);
-  }
-
-  .bpm-display {
-    font-size: 11px;
-    font-weight: 700;
-    color: #d4a359;
-    padding: 3px 6px;
-    border-radius: 4px;
-    cursor: text;
-    min-width: 60px;
-    text-align: center;
-    transition: background 0.15s ease, box-shadow 0.15s ease;
-    white-space: nowrap;
-  }
-
-  .bpm-display:hover {
-    background: rgba(212, 163, 89, 0.1);
-  }
-
-  .bpm-display.editing {
-    background: rgba(212, 163, 89, 0.2);
-    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
-    outline: 1.5px solid #d4a359;
-  }
-
-  .row-controls {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    flex-shrink: 0;
-  }
-
-  .arp-row-toggle {
-    font-size: 8px;
-    font-weight: 700;
-    color: #706558;
-    background: rgba(36, 32, 28, 0.8);
-    border: 1px solid rgba(112, 101, 88, 0.4);
-    border-radius: 4px;
-    padding: 1px 6px;
-    cursor: pointer;
-    outline: none;
-    font-family: inherit;
-    letter-spacing: 0.5px;
-    transition: all 0.15s ease;
-    -webkit-app-region: no-drag;
-  }
-
-  .arp-row-toggle.active {
-    color: #d4a359;
-    border-color: rgba(212, 163, 89, 0.6);
-    background: rgba(212, 163, 89, 0.15);
-    box-shadow: 0 0 4px rgba(212, 163, 89, 0.2);
-  }
-
-  .arp-row-toggle:hover {
-    background: rgba(212, 163, 89, 0.25);
-  }
-
-  .draggable-octave {
-    cursor: ns-resize;
-    user-select: none;
-    -webkit-user-select: none;
-  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -995,7 +997,7 @@ local HTML_UI_CONTENT = [[
       { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
     ],
     home: [
-      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Latch" },
+      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Sustain" },
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
@@ -1107,7 +1109,7 @@ local HTML_UI_CONTENT = [[
     const container = document.getElementById('hud-container');
     if (container) {
       container.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.key-pad') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.mode-center-block')) return;
+        if (e.target.closest('.key-pad') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.mode-center-block') || e.target.closest('.bpm-editor')) return;
         isDragging = true;
         dragStartX = e.screenX;
         dragStartY = e.screenY;
@@ -1579,22 +1581,16 @@ local function executeControlAction(act, code)
     }
     updateWebviewHud(spot)
   elseif act == "sustain" or act == "latch" then
-    sustainActive = not sustainActive
-    sendMidiCC(64, sustainActive and 127 or 0)
-    if not sustainActive and arpMode > 0 then
-      local numPhysicalHeld = 0
-      for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-      if numPhysicalHeld == 0 then
-        stopArpTimer()
-        arpHeldNotes = {}
-      end
-    end
+    sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    sustainWasActiveOnPress = sustainActive
+    sustainActive = true
+    sendMidiCC(64, 127)
     local spot = {
-      title = "LATCH MODE (CC #64)",
-      value = sustainActive and "LATCH ON" or "LATCH OFF",
-      subtext = sustainActive and "Notes & Arp pattern hold" or "Damping enabled",
+      title = "SUSTAIN / LATCH (CC #64)",
+      value = "SUSTAIN ON",
+      subtext = "Notes & Arp pattern hold",
       targetId = "key-0",
-      color = sustainActive and "#d4a359" or "#b5aba0"
+      color = "#d4a359"
     }
     updateWebviewHud(spot)
   elseif act == "modWheelDown" then
@@ -1742,7 +1738,39 @@ local function handleKeyUp(code)
     pressedKeys[code] = nil
     local act = shiftHeld and cData.shiftAction or cData.action
     if act == "sustain" or act == "latch" then
-      updateWebviewHud()
+      local holdDuration = hs.timer.secondsSinceEpoch() - sustainKeyDownTime
+      if holdDuration > 0.25 then
+        -- Momentary release when held > 0.25s
+        sustainActive = false
+        sendMidiCC(64, 0)
+      else
+        -- Quick tap toggle
+        if sustainWasActiveOnPress then
+          sustainActive = false
+          sendMidiCC(64, 0)
+        else
+          sustainActive = true
+          sendMidiCC(64, 127)
+        end
+      end
+
+      if not sustainActive and arpMode > 0 then
+        local numPhysicalHeld = 0
+        for _ in pairs(arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+        if numPhysicalHeld == 0 then
+          stopArpTimer()
+          arpHeldNotes = {}
+        end
+      end
+
+      local spot = {
+        title = "SUSTAIN / LATCH (CC #64)",
+        value = sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+        subtext = sustainActive and "Notes & Arp pattern hold" or "Damping enabled",
+        targetId = "key-0",
+        color = sustainActive and "#d4a359" or "#b5aba0"
+      }
+      updateWebviewHud(spot)
     else
       updateWebviewHud()
     end
@@ -1783,12 +1811,12 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
   
   local octStr = (octaveShift >= 0 and "+" or "") .. (octaveShift / 12) .. " Oct"
   local trnspStr = (transposeShift ~= 0) and ("Trnsp: " .. (transposeShift >= 0 and "+" or "") .. transposeShift .. "st") or ""
-  local latchStr = sustainActive and "LATCH: ON" or ""
+  local susStr = sustainActive and "SUS: ON" or ""
   local shiftStr = shiftHeld and "[SHIFT]" or ""
 
   local statusParts = {}
   if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
-  if latchStr ~= "" then table.insert(statusParts, latchStr) end
+  if susStr ~= "" then table.insert(statusParts, susStr) end
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
@@ -1927,7 +1955,7 @@ local function buildLayoutJson()
   }
 
   local homeList = {
-    { code = 0,  keyLabel = "A", isControl = true, noteLabel = "Latch" },
+    { code = 0,  keyLabel = "A", isControl = true, noteLabel = "Sustain" },
     { code = 1,  keyLabel = "S", isControl = true, noteLabel = "Random" },
     { code = 2,  keyLabel = "D", isControl = true, noteLabel = "Oct -" },
     { code = 3,  keyLabel = "F", isControl = true, noteLabel = "Oct +" },
@@ -2178,7 +2206,9 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
       return handleBpmInput(code, flags)
     end
     return true -- swallow key ups during BPM mode
-  end  if flags.cmd or flags.alt or flags.ctrl then
+  end
+
+  if flags.cmd or flags.alt or flags.ctrl then
     return false
   end
 
