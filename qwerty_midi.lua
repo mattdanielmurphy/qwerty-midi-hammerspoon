@@ -1002,7 +1002,7 @@ local function setLogicBpmTarget(targetBpm)
     logicBpmDebounceTimer = nil
   end
 
-  logicBpmDebounceTimer = hs.timer.doAfter(0.15, function()
+  logicBpmDebounceTimer = hs.timer.doAfter(0.20, function()
     logicBpmDebounceTimer = nil
     if logicBpmTask then
       logicBpmTask:terminate()
@@ -1077,7 +1077,7 @@ local function stepLogicBpm(delta)
 end
 
 local function syncLogicBpm()
-  if not state.logicSyncEnabled or isSyncingLogicBpm then return end
+  if not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
   isSyncingLogicBpm = true
 
   local script = [[
@@ -1111,7 +1111,7 @@ local function syncLogicBpm()
     isSyncingLogicBpm = false
     if exitCode == 0 and stdOut then
       local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 then
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
         state.arpBpm = val
         applyBpmChange()
         updateHud()
