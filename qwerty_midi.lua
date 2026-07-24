@@ -595,7 +595,7 @@ local function arpTick()
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
     local isTop = upperRowKeys[code] ~= nil
-    local rowArpEnabled = isTop and state.arpTopEnabled or state.arpBottomEnabled
+    local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     if rowArpEnabled then
       table.insert(pitchList, pitch)
     end
@@ -2722,7 +2722,7 @@ local function handleKeyDown(code)
     local kData = isTop and upperRowKeys[code] or lowerRowKeys[code]
     if not state.pressedKeys[code] then
       local transposedPitch = transposer.getTransposedPitch(kData.baseNote, isTop)
-      local arpEnabledForRow = isTop and state.arpTopEnabled or state.arpBottomEnabled
+      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
       local arpActive = state.arpEnabled and arpEnabledForRow
       local sustainActive = state.sustainActive
 

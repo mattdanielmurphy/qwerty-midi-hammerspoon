@@ -475,7 +475,7 @@ local function handleKeyDown(code)
     local kData = isTop and upperRowKeys[code] or lowerRowKeys[code]
     if not state.pressedKeys[code] then
       local transposedPitch = transposer.getTransposedPitch(kData.baseNote, isTop)
-      local arpEnabledForRow = isTop and state.arpTopEnabled or state.arpBottomEnabled
+      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
       local arpActive = state.arpEnabled and arpEnabledForRow
       local sustainActive = state.sustainActive
 
