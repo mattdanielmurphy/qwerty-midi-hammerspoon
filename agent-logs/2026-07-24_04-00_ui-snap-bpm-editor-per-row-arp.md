@@ -1,0 +1,2 @@
+## 2026-07-24
+- **UI Snap, BPM Editor, Spotlight Overlay & Per-Row Arp Controls:** Added mode slider snap positions, fixed spotlight card z-index/positioning above UI buttons, added mod wheel overlay rounded corners, implemented full BPM text input & modifier arrow editing (±1, ±10, ±0.1), added backtick (` ` `) arp toggle key, per-row ARP filters next to octave indicators, and draggable octave badges. Link: [2026-07-24_04-00_ui-snap-bpm-editor-per-row-arp.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_04-00_ui-snap-bpm-editor-per-row-arp.md)

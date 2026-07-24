@@ -70,15 +70,26 @@ local BASE_HUD_SCALE = 1.4                                         -- 100% zoom 
 -- Arpeggiator & Latch State
 local arpMode = 0                -- 0: OFF, 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
 local ARP_MODES = { "OFF", "UP", "DOWN", "UP-DOWN", "RANDOM" }
-local arpBpmOptions = { 90, 120, 140, 160, 180, 200 }
-local arpBpmIdx = 2              -- Default 120 BPM
-local arpBpm = arpBpmOptions[arpBpmIdx]
+local arpBpm = 120.0             -- Free-form BPM value (20.0-300.0)
 local arpTimer = nil
 local arpHeldNotes = {}          -- [code] = pitch (latched or physically held)
 local arpKeysCurrentlyHeld = {}  -- [code] = true (physically down)
 local arpCurrentPitch = nil
 local arpStepIndex = 1
 local arpStepDirection = 1
+local lastArpMode = 1            -- Last non-OFF arp mode (for toggle restore)
+local arpTopEnabled = true       -- Whether top row feeds arpeggiator
+local arpBottomEnabled = true    -- Whether bottom row feeds arpeggiator
+
+-- BPM Input Mode State
+local bpmInputMode = false       -- When true, keyboard routes to BPM editor
+local bpmInputBuffer = ""        -- Text buffer for typing BPM value
+local bpmBeforeEdit = 120.0      -- Value before entering edit mode (for cancel)
+
+local DIGIT_KEYCODES = {
+  [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
+  [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
+}
 
 local ccStates = {
   [1] = 0,   -- Mod Wheel default 0
@@ -325,8 +336,26 @@ local function arpRemoveNote(code)
   end
 end
 
+local function formatBpm(bpm)
+  if bpm == math.floor(bpm) then
+    return tostring(math.floor(bpm))
+  else
+    return string.format("%.1f", bpm)
+  end
+end
+
+local function applyBpmChange()
+  if arpTimer then
+    stopArpTimer()
+    if next(arpHeldNotes) ~= nil then
+      startArpTimer()
+    end
+  end
+end
+
 local function cycleArpMode()
-  arpMode = (arpMode + 1) % #ARP_MODES -- 0, 1, 2, 3, 4 -> 0
+  if arpMode > 0 then lastArpMode = arpMode end
+  arpMode = (arpMode + 1) % #ARP_MODES
   if arpMode == 0 then
     stopArpTimer()
     arpHeldNotes = {}
@@ -335,30 +364,92 @@ local function cycleArpMode()
   local spot = {
     title = "ARPEGGIATOR",
     value = "MODE: " .. ARP_MODES[arpMode + 1],
-    subtext = arpMode > 0 and (arpBpm .. " BPM") or "Arp Disabled",
+    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
     targetId = "arp-btn",
     color = "#d4a359"
   }
   if updateWebviewHud then updateWebviewHud(spot) end
 end
 
-local function cycleArpBpm()
-  arpBpmIdx = (arpBpmIdx % #arpBpmOptions) + 1
-  arpBpm = arpBpmOptions[arpBpmIdx]
-  if arpTimer then
+local function toggleArp()
+  if arpMode == 0 then
+    arpMode = lastArpMode > 0 and lastArpMode or 1
+  else
+    lastArpMode = arpMode
+    arpMode = 0
     stopArpTimer()
-    if next(arpHeldNotes) ~= nil then
-      startArpTimer()
-    end
+    arpHeldNotes = {}
+    arpKeysCurrentlyHeld = {}
   end
   local spot = {
-    title = "ARP TEMPO",
-    value = arpBpm .. " BPM",
-    subtext = "8th Note Speed",
-    targetId = "arp-rate-btn",
+    title = "ARPEGGIATOR",
+    value = arpMode > 0 and ("MODE: " .. ARP_MODES[arpMode + 1]) or "ARP OFF",
+    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
+    targetId = "arp-btn",
     color = "#d4a359"
   }
   if updateWebviewHud then updateWebviewHud(spot) end
+end
+
+local function handleBpmInput(code, flags)
+  if code == 53 then -- Escape: cancel
+    arpBpm = bpmBeforeEdit
+    bpmInputMode = false
+    bpmInputBuffer = ""
+    updateWebviewHud()
+    return true
+  elseif code == 36 then -- Return: commit
+    if bpmInputBuffer ~= "" then
+      local val = tonumber(bpmInputBuffer)
+      if val and val >= 20 and val <= 300 then
+        arpBpm = val
+      end
+    end
+    bpmInputMode = false
+    bpmInputBuffer = ""
+    applyBpmChange()
+    updateWebviewHud()
+    return true
+  elseif code == 126 then -- Arrow Up
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    arpBpm = math.min(300, arpBpm + delta)
+    bpmInputBuffer = ""
+    applyBpmChange()
+    updateWebviewHud()
+    return true
+  elseif code == 125 then -- Arrow Down
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    arpBpm = math.max(20, arpBpm - delta)
+    bpmInputBuffer = ""
+    applyBpmChange()
+    updateWebviewHud()
+    return true
+  elseif code == 51 then -- Backspace
+    if #bpmInputBuffer > 0 then
+      bpmInputBuffer = bpmInputBuffer:sub(1, -2)
+    end
+    updateWebviewHud()
+    return true
+  elseif DIGIT_KEYCODES[code] then
+    bpmInputBuffer = bpmInputBuffer .. DIGIT_KEYCODES[code]
+    updateWebviewHud()
+    return true
+  elseif code == 47 then -- Period "."
+    if not bpmInputBuffer:find("%.") then
+      bpmInputBuffer = bpmInputBuffer .. "."
+    end
+    updateWebviewHud()
+    return true
+  end
+  -- Any other key: exit BPM mode and pass through
+  bpmInputMode = false
+  bpmInputBuffer = ""
+  updateWebviewHud()
+  return false
 end
 
 -- ── HTML UI Engine ─────────────────────────────────────────────────────────────
@@ -389,7 +480,7 @@ local HTML_UI_CONTENT = [[
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
     border-radius: 14px;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 20px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
@@ -403,9 +494,9 @@ local HTML_UI_CONTENT = [[
   /* Top Header Spotlight Notification Card */
   .spotlight-card {
     position: absolute;
-    top: 36px;
+    top: -5px;
     left: 50%;
-    transform: translate(-50%, -50%) scale(1.0);
+    transform: translate(-50%, -100%) scale(1.0);
     background: rgba(20, 18, 16, 0.98);
     border: 1.5px solid #d4a359;
     border-radius: 8px;
@@ -416,7 +507,7 @@ local HTML_UI_CONTENT = [[
     align-items: center;
     justify-content: center;
     gap: 10px;
-    z-index: 1000;
+    z-index: 9999;
     pointer-events: none;
     opacity: 1;
     backdrop-filter: blur(10px);
@@ -464,7 +555,8 @@ local HTML_UI_CONTENT = [[
   .mod-gradient-overlay {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
-    border-radius: inherit;
+    border-radius: 14px;
+    overflow: hidden;
     pointer-events: none;
     background: linear-gradient(180deg, rgba(212, 163, 89, calc(var(--mod-intensity) * 0.08)) 0%, rgba(200, 140, 60, 0) 100%);
     opacity: 0;
@@ -730,6 +822,97 @@ local HTML_UI_CONTENT = [[
     color: #d4a359;
     font-weight: 600;
   }
+
+  .bpm-editor {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    -webkit-app-region: no-drag;
+    flex-shrink: 0;
+  }
+
+  .bpm-arrow-btn {
+    background: rgba(212, 163, 89, 0.12);
+    border: 1px solid rgba(212, 163, 89, 0.4);
+    color: #d4a359;
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+    line-height: 1;
+    transition: background 0.15s ease;
+    -webkit-app-region: no-drag;
+  }
+
+  .bpm-arrow-btn:hover {
+    background: rgba(212, 163, 89, 0.3);
+  }
+
+  .bpm-display {
+    font-size: 11px;
+    font-weight: 700;
+    color: #d4a359;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: text;
+    min-width: 60px;
+    text-align: center;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .bpm-display:hover {
+    background: rgba(212, 163, 89, 0.1);
+  }
+
+  .bpm-display.editing {
+    background: rgba(212, 163, 89, 0.2);
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
+    outline: 1.5px solid #d4a359;
+  }
+
+  .row-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+  }
+
+  .arp-row-toggle {
+    font-size: 8px;
+    font-weight: 700;
+    color: #706558;
+    background: rgba(36, 32, 28, 0.8);
+    border: 1px solid rgba(112, 101, 88, 0.4);
+    border-radius: 4px;
+    padding: 1px 6px;
+    cursor: pointer;
+    outline: none;
+    font-family: inherit;
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+    -webkit-app-region: no-drag;
+  }
+
+  .arp-row-toggle.active {
+    color: #d4a359;
+    border-color: rgba(212, 163, 89, 0.6);
+    background: rgba(212, 163, 89, 0.15);
+    box-shadow: 0 0 4px rgba(212, 163, 89, 0.2);
+  }
+
+  .arp-row-toggle:hover {
+    background: rgba(212, 163, 89, 0.25);
+  }
+
+  .draggable-octave {
+    cursor: ns-resize;
+    user-select: none;
+    -webkit-user-select: none;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -762,7 +945,11 @@ local HTML_UI_CONTENT = [[
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
       <button id="arp-btn" class="arp-btn">ARP: OFF</button>
-      <button id="arp-rate-btn" class="arp-btn">120 BPM</button>
+      <div id="bpm-editor" class="bpm-editor">
+        <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
+        <span id="bpm-value" class="bpm-display">120 BPM</span>
+        <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
+      </div>
       <div id="status-text" class="status-info"></div>
     </div>
     
@@ -770,12 +957,18 @@ local HTML_UI_CONTENT = [[
       <div id="row-number" class="keyboard-row number"></div>
       <div class="row-with-indicator">
         <div id="row-upper" class="keyboard-row upper"></div>
-        <div id="octave-indicator-top" class="octave-row-badge">TOP +1</div>
+        <div class="row-controls">
+          <button id="arp-top-toggle" class="arp-row-toggle active">ARP</button>
+          <div id="octave-indicator-top" class="octave-row-badge draggable-octave" data-row="top">TOP +1</div>
+        </div>
       </div>
       <div id="row-home" class="keyboard-row home"></div>
       <div class="row-with-indicator">
         <div id="row-lower" class="keyboard-row lower"></div>
-        <div id="octave-indicator-bottom" class="octave-row-badge">OCT 0</div>
+        <div class="row-controls">
+          <button id="arp-bottom-toggle" class="arp-row-toggle active">ARP</button>
+          <div id="octave-indicator-bottom" class="octave-row-badge draggable-octave" data-row="bottom">OCT 0</div>
+        </div>
       </div>
     </div>
   </div>
@@ -828,6 +1021,10 @@ local HTML_UI_CONTENT = [[
   let dragStartY = 0;
 
   const activeClickedPads = new Set();
+  
+  let octaveDragTarget = null;
+  let octaveDragStartY = 0;
+  let octaveDragAccum = 0;
 
   function initGrid(layout) {
     const l = layout || LAYOUT_DATA;
@@ -890,8 +1087,9 @@ local HTML_UI_CONTENT = [[
     
     const modeIdx = Math.min(SCALES_COUNT, Math.max(1, Math.floor(frac * SCALES_COUNT) + 1));
     
+    const snappedFrac = (modeIdx - 0.5) / SCALES_COUNT;
     const thumb = document.getElementById('mode-thumb');
-    if (thumb) thumb.style.left = (frac * 100) + '%';
+    if (thumb) thumb.style.left = (snappedFrac * 100) + '%';
     
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setModeIdx', modeIdx: modeIdx });
@@ -946,35 +1144,103 @@ local HTML_UI_CONTENT = [[
       });
     }
 
-    const arpRateBtn = document.getElementById('arp-rate-btn');
-    if (arpRateBtn) {
-      arpRateBtn.addEventListener('click', (e) => {
+    // BPM Editor handlers
+    const bpmValue = document.getElementById('bpm-value');
+    if (bpmValue) {
+      bpmValue.addEventListener('click', (e) => {
         e.stopPropagation();
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'cycleArpBpm' });
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'enterBpmEdit' });
         }
       });
     }
+    const bpmUp = document.getElementById('bpm-up');
+    if (bpmUp) {
+      bpmUp.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'bpmUp' });
+        }
+      });
+    }
+    const bpmDown = document.getElementById('bpm-down');
+    if (bpmDown) {
+      bpmDown.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'bpmDown' });
+        }
+      });
+    }
+
+    // Arp Row Toggle handlers
+    const arpTopToggle = document.getElementById('arp-top-toggle');
+    if (arpTopToggle) {
+      arpTopToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'toggleArpTop' });
+        }
+      });
+    }
+    const arpBottomToggle = document.getElementById('arp-bottom-toggle');
+    if (arpBottomToggle) {
+      arpBottomToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'toggleArpBottom' });
+        }
+      });
+    }
+
+    // Draggable Octave Indicators
+    document.querySelectorAll('.draggable-octave').forEach(el => {
+      el.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        octaveDragTarget = el.dataset.row;
+        octaveDragStartY = e.clientY;
+        octaveDragAccum = 0;
+      });
+    });
   });
 
   window.addEventListener('mousemove', (e) => {
+    if (octaveDragTarget) {
+      const dy = octaveDragStartY - e.clientY;
+      octaveDragAccum += dy;
+      octaveDragStartY = e.clientY;
+      if (Math.abs(octaveDragAccum) >= 30) {
+        const direction = octaveDragAccum > 0 ? 1 : -1;
+        octaveDragAccum = 0;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'dragOctave',
+            row: octaveDragTarget,
+            direction: direction
+          });
+        }
+      }
+      return;
+    }
     if (isModeDragging) {
       handleModeSliderEvent(e);
       return;
     }
     if (!isDragging) return;
     const dx = e.screenX - dragStartX;
-    const dy = e.screenY - dragStartY;
+    const dy2 = e.screenY - dragStartY;
     dragStartX = e.screenX;
     dragStartY = e.screenY;
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'dragWindow', dx: dx, dy: dy });
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'dragWindow', dx: dx, dy: dy2 });
     }
   });
 
   window.addEventListener('mouseup', () => {
     isDragging = false;
     isModeDragging = false;
+    octaveDragTarget = null;
   });
 
   function showSpotlight(spotlight) {
@@ -999,42 +1265,22 @@ local HTML_UI_CONTENT = [[
 
     card.classList.remove('hidden');
     card.style.transition = 'none';
-    card.style.left = '50%';
-    card.style.top = '26px';
-    card.style.transform = 'translate(-50%, -50%) scale(1.0)';
     card.style.opacity = '1';
+    card.style.transform = 'translate(-50%, -100%) scale(1.0)';
+    card.style.left = '50%';
+    card.style.top = '-5px';
 
-    card.offsetHeight; // Force layout reflow
+    card.offsetHeight;
 
-    card.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease, left 0.45s cubic-bezier(0.16, 1, 0.3, 1), top 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+    card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
 
     spotlightTimer1 = setTimeout(() => {
-      let targetX = '50%';
-      let targetY = '26px';
-      let targetScale = 'scale(0.3)';
-
-      if (spotlight.targetId) {
-        const targetEl = document.getElementById(spotlight.targetId);
-        const container = document.getElementById('hud-container');
-        if (targetEl && container) {
-          const tRect = targetEl.getBoundingClientRect();
-          const cRect = container.getBoundingClientRect();
-          const tCenterX = tRect.left + tRect.width / 2 - cRect.left;
-          const tCenterY = tRect.top + tRect.height / 2 - cRect.top;
-          targetX = tCenterX + 'px';
-          targetY = tCenterY + 'px';
-          targetScale = 'scale(0.2)';
-        }
-      }
-
-      card.style.left = targetX;
-      card.style.top = targetY;
-      card.style.transform = 'translate(-50%, -50%) ' + targetScale;
       card.style.opacity = '0';
+      card.style.transform = 'translate(-50%, -100%) scale(0.85)';
 
       spotlightTimer2 = setTimeout(() => {
         card.classList.add('hidden');
-      }, 450);
+      }, 400);
     }, 1000);
   }
 
@@ -1076,9 +1322,32 @@ local HTML_UI_CONTENT = [[
       }
     }
 
-    if (data.arpBpmStr !== undefined) {
-      const arpRateBtn = document.getElementById('arp-rate-btn');
-      if (arpRateBtn) arpRateBtn.textContent = data.arpBpmStr;
+    if (data.bpmDisplay !== undefined) {
+      const bpmVal = document.getElementById('bpm-value');
+      if (bpmVal) {
+        bpmVal.textContent = data.bpmDisplay;
+        if (data.bpmEditing) {
+          bpmVal.classList.add('editing');
+        } else {
+          bpmVal.classList.remove('editing');
+        }
+      }
+    }
+
+    if (data.arpTopEnabled !== undefined) {
+      const topToggle = document.getElementById('arp-top-toggle');
+      if (topToggle) {
+        if (data.arpTopEnabled) topToggle.classList.add('active');
+        else topToggle.classList.remove('active');
+      }
+    }
+
+    if (data.arpBottomEnabled !== undefined) {
+      const botToggle = document.getElementById('arp-bottom-toggle');
+      if (botToggle) {
+        if (data.arpBottomEnabled) botToggle.classList.add('active');
+        else botToggle.classList.remove('active');
+      }
     }
 
     if (data.statusText !== undefined) {
@@ -1386,12 +1655,21 @@ local function executeControlAction(act, code)
 end
 
 local function handleKeyDown(code)
+  -- Backtick: Arp toggle
+  if code == 50 then
+    if not pressedKeys[code] then
+      pressedKeys[code] = true
+      toggleArp()
+    end
+    return true
+  end
+
   if lowerRowKeys[code] then
     local kData = lowerRowKeys[code]
     if not pressedKeys[code] then
       local transposedPitch = getTransposedPitch(kData.baseNote, false)
       pressedKeys[code] = transposedPitch
-      if arpMode > 0 then
+      if arpMode > 0 and arpBottomEnabled then
         arpAddNote(code, transposedPitch)
       else
         sendMidiNote("noteOn", transposedPitch, 100)
@@ -1404,7 +1682,7 @@ local function handleKeyDown(code)
     if not pressedKeys[code] then
       local transposedPitch = getTransposedPitch(kData.baseNote, true)
       pressedKeys[code] = transposedPitch
-      if arpMode > 0 then
+      if arpMode > 0 and arpTopEnabled then
         arpAddNote(code, transposedPitch)
       else
         sendMidiNote("noteOn", transposedPitch, 100)
@@ -1432,10 +1710,19 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
+  -- Backtick
+  if code == 50 then
+    pressedKeys[code] = nil
+    updateWebviewHud()
+    return true
+  end
+
   if lowerRowKeys[code] or upperRowKeys[code] then
     local playedPitch = pressedKeys[code]
     if playedPitch then
-      if arpMode > 0 then
+      local isTop = upperRowKeys[code] ~= nil
+      local arpEnabledForRow = isTop and arpTopEnabled or arpBottomEnabled
+      if arpMode > 0 and arpEnabledForRow then
         arpRemoveNote(code)
       else
         if not sustainActive then
@@ -1491,8 +1778,7 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
 
   hs.settings.set("qwertyMidi_zoomLevel", zoomLevel)
   
-  local modeBrightness = SCALES[currentScaleIdx].brightness or 3
-  local modeFrac = 1.0 - (modeBrightness / 6.0)
+  local modeFrac = (currentScaleIdx - 0.5) / #SCALES
   local modeName = SCALES[currentScaleIdx].name
   
   local octStr = (octaveShift >= 0 and "+" or "") .. (octaveShift / 12) .. " Oct"
@@ -1589,11 +1875,21 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
 
   local modVal = ccStates[1] or 0
 
+  local bpmDisplayStr
+  if bpmInputMode then
+    bpmDisplayStr = bpmInputBuffer .. "\226\150\140"
+  else
+    bpmDisplayStr = formatBpm(arpBpm) .. " BPM"
+  end
+
   local payload = {
     rootIdx = currentRoot,
     modeName = modeName,
     arpModeStr = ARP_MODES[arpMode + 1],
-    arpBpmStr = arpBpm .. " BPM",
+    bpmDisplay = bpmDisplayStr,
+    bpmEditing = bpmInputMode,
+    arpTopEnabled = arpTopEnabled,
+    arpBottomEnabled = arpBottomEnabled,
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
@@ -1701,8 +1997,36 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "cycleArpMode" then
       cycleArpMode()
-    elseif body.type == "cycleArpBpm" then
-      cycleArpBpm()
+    elseif body.type == "enterBpmEdit" then
+      bpmInputMode = true
+      bpmBeforeEdit = arpBpm
+      bpmInputBuffer = ""
+      updateWebviewHud()
+    elseif body.type == "bpmUp" then
+      arpBpm = math.min(300, arpBpm + 1)
+      applyBpmChange()
+      updateWebviewHud()
+    elseif body.type == "bpmDown" then
+      arpBpm = math.max(20, arpBpm - 1)
+      applyBpmChange()
+      updateWebviewHud()
+    elseif body.type == "toggleArpTop" then
+      if arpTopEnabled or not arpBottomEnabled then
+        arpTopEnabled = not arpTopEnabled
+      end
+      updateWebviewHud()
+    elseif body.type == "toggleArpBottom" then
+      if arpBottomEnabled or not arpTopEnabled then
+        arpBottomEnabled = not arpBottomEnabled
+      end
+      updateWebviewHud()
+    elseif body.type == "dragOctave" and body.row and body.direction then
+      if body.row == "top" then
+        topRowOctaveOffset = math.max(-36, math.min(36, topRowOctaveOffset + (body.direction * 12)))
+      else
+        octaveShift = math.max(-36, math.min(36, octaveShift + (body.direction * 12)))
+      end
+      updateWebviewHud()
     elseif body.type == "dragWindow" and body.dx and body.dy then
       if activeWatchers.midiWebview then
         local frame = activeWatchers.midiWebview:frame()
@@ -1841,7 +2165,20 @@ activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, h
   if not midiActive then return false end
 
   local flags = event:getFlags()
-  if flags.cmd or flags.alt or flags.ctrl then
+
+  -- BPM Input Mode: intercept keys before modifier filtering
+  if bpmInputMode then
+    if event:getType() == hs.eventtap.event.types.flagsChanged then
+      return false
+    end
+    if flags.cmd or flags.ctrl then return false end
+    local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+    local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+    if isDown then
+      return handleBpmInput(code, flags)
+    end
+    return true -- swallow key ups during BPM mode
+  end  if flags.cmd or flags.alt or flags.ctrl then
     return false
   end
 
