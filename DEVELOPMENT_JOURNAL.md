@@ -55,3 +55,6 @@
 
 ### 2026-07-24
 - **Gate Stepper & Key Repeat Controls:** Replaced Gate select dropdown with numeric drag stepper; remapped backtick (` ` `) to Arp toggle and shifted number row rightward; added continuous key repeat for held control keys. See [2026-07-24_16-12_gate-stepper-key-repeat-layout-shift.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-12_gate-stepper-key-repeat-layout-shift.md).
+
+### 2026-07-24
+- **Fixed Webview Key Rendering:** Resolved JS string escaping syntax error in `ui_html.lua` that blocked key layout rendering. See [2026-07-24_16-12_fix-ui-html-js-syntax-error.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-24_16-12_fix-ui-html-js-syntax-error.md).

@@ -1116,7 +1116,7 @@ local HTML_UI_CONTENT = [[
 
     if (data.arpGatePercent !== undefined) {
       const gateVal = document.getElementById('gate-value');
-      if (gateVal) gateVal.textContent = data.arpGatePercent + '%\;
+      if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
     }
 
     if (data.bpmDisplay !== undefined) {
