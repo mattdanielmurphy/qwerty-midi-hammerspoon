@@ -20,7 +20,7 @@ local HTML_UI_CONTENT = [[
   }
   
   #hud-container {
-    width: 810px;
+    width: 855px;
     height: 330px;
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);

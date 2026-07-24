@@ -30,7 +30,7 @@ end
 local function updateWebviewHud(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
-  local baseW, baseH = 810, 330
+  local baseW, baseH = 855, 330
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale)
@@ -193,7 +193,7 @@ local function createMidiWebview()
 
   local screen = hs.screen.mainScreen():frame()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-  local width = math.floor(810 * effectiveScale)
+  local width = math.floor(855 * effectiveScale)
   local height = math.floor(330 * effectiveScale)
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
