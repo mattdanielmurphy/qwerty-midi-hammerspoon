@@ -70,8 +70,25 @@ local zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0  -- HUD Zoom Sc
 local BASE_HUD_SCALE = 1.4                                         -- 100% zoom maps to 1.4x baseline scale factor
 
 -- Arpeggiator & Latch State
-local arpMode = 0                -- 0: OFF, 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
-local ARP_MODES = { "OFF", "UP", "DOWN", "UP-DOWN", "RANDOM" }
+local arpEnabled = false         -- Arpeggiator On/Off state
+local arpDirectionIdx = 1        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: RANDOM
+local ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "RANDOM" }
+local arpRateIdx = 2             -- Default: 1/8 (1: 1/4, 2: 1/8, 3: 1/16, 4: 1/32, 5: 1/8T, 6: 1/16T)
+local ARP_RATES = {
+  { label = "1/4", factor = 1.0 },
+  { label = "1/8", factor = 0.5 },
+  { label = "1/16", factor = 0.25 },
+  { label = "1/32", factor = 0.125 },
+  { label = "1/8T", factor = 1.0 / 3.0 },
+  { label = "1/16T", factor = 0.5 / 3.0 }
+}
+local arpGateIdx = 3             -- Default: 80% (1: 25%, 2: 50%, 3: 80%, 4: 100%)
+local ARP_GATES = {
+  { label = "25%", ratio = 0.25 },
+  { label = "50%", ratio = 0.50 },
+  { label = "80%", ratio = 0.80 },
+  { label = "100%", ratio = 1.00 }
+}
 local arpBpm = 120.0             -- Free-form BPM value (20.0-300.0)
 local arpTimer = nil
 local arpHeldNotes = {}          -- [code] = pitch (latched or physically held)
@@ -211,7 +228,13 @@ end
 local updateWebviewHud
 
 -- ── Arpeggiator Engine ───────────────────────────────────────────────────────
+local arpGateTimer = nil
+
 local function stopArpTimer()
+  if arpGateTimer then
+    arpGateTimer:stop()
+    arpGateTimer = nil
+  end
   if arpTimer then
     arpTimer:stop()
     arpTimer = nil
@@ -224,6 +247,11 @@ local function stopArpTimer()
   arpStepDirection = 1
 end
 
+local function getArpIntervalSeconds()
+  local rateFactor = ARP_RATES[arpRateIdx] and ARP_RATES[arpRateIdx].factor or 0.5
+  return (60.0 / arpBpm) * rateFactor
+end
+
 local function arpTick()
   local pitchList = {}
   for code, pitch in pairs(arpHeldNotes) do
@@ -232,6 +260,10 @@ local function arpTick()
   table.sort(pitchList)
 
   if #pitchList == 0 then
+    if arpGateTimer then
+      arpGateTimer:stop()
+      arpGateTimer = nil
+    end
     if arpCurrentPitch then
       sendMidiNote("noteOff", arpCurrentPitch, 0)
       arpCurrentPitch = nil
@@ -240,11 +272,11 @@ local function arpTick()
     return
   end
 
-  if arpMode == 1 then -- UP
+  if arpDirectionIdx == 1 then -- UP
     arpStepIndex = ((arpStepIndex - 1) % #pitchList) + 1
-  elseif arpMode == 2 then -- DOWN
+  elseif arpDirectionIdx == 2 then -- DOWN
     arpStepIndex = ((arpStepIndex - 2 + #pitchList) % #pitchList) + 1
-  elseif arpMode == 3 then -- UP-DOWN
+  elseif arpDirectionIdx == 3 then -- UP-DOWN
     if arpStepIndex > #pitchList then
       arpStepIndex = math.max(1, #pitchList - 1)
       arpStepDirection = -1
@@ -252,13 +284,13 @@ local function arpTick()
       arpStepIndex = math.min(#pitchList, 2)
       arpStepDirection = 1
     end
-  elseif arpMode == 4 then -- RANDOM
+  elseif arpDirectionIdx == 4 then -- RANDOM
     arpStepIndex = math.random(1, #pitchList)
   end
 
   local nextPitch = pitchList[arpStepIndex]
 
-  if arpMode == 3 then
+  if arpDirectionIdx == 3 then
     if #pitchList == 1 then
       arpStepIndex = 1
       arpStepDirection = 1
@@ -272,13 +304,18 @@ local function arpTick()
         arpStepDirection = 1
       end
     end
-  elseif arpMode == 1 then
+  elseif arpDirectionIdx == 1 then
     arpStepIndex = arpStepIndex + 1
-  elseif arpMode == 2 then
+  elseif arpDirectionIdx == 2 then
     arpStepIndex = arpStepIndex - 1
   end
 
-  if arpCurrentPitch and arpCurrentPitch ~= nextPitch then
+  if arpGateTimer then
+    arpGateTimer:stop()
+    arpGateTimer = nil
+  end
+
+  if arpCurrentPitch then
     sendMidiNote("noteOff", arpCurrentPitch, 0)
   end
 
@@ -288,11 +325,24 @@ local function arpTick()
   if updateWebviewHud then
     updateWebviewHud(nil, nextPitch)
   end
+
+  local gateRatio = ARP_GATES[arpGateIdx] and ARP_GATES[arpGateIdx].ratio or 0.80
+  if gateRatio < 1.00 then
+    local gateDuration = getArpIntervalSeconds() * gateRatio
+    arpGateTimer = hs.timer.doAfter(gateDuration, function()
+      if arpCurrentPitch == nextPitch then
+        sendMidiNote("noteOff", arpCurrentPitch, 0)
+        arpCurrentPitch = nil
+        if updateWebviewHud then updateWebviewHud() end
+      end
+      arpGateTimer = nil
+    end)
+  end
 end
 
 local function startArpTimer(preserveState)
   if arpTimer then return end
-  local intervalSeconds = (60.0 / arpBpm) / 2.0 -- 8th notes
+  local intervalSeconds = getArpIntervalSeconds()
   if not preserveState then
     arpStepIndex = 1
     arpStepDirection = 1
@@ -350,13 +400,12 @@ end
 
 local function applyBpmChange()
   if arpTimer then
-    local intervalSeconds = (60.0 / arpBpm) / 2.0
-    arpTimer:setNextTrigger(intervalSeconds)
+    arpTimer:setNextTrigger(getArpIntervalSeconds())
   end
 end
 
 local function updateLatchedArpNotes()
-  if arpMode == 0 or next(arpHeldNotes) == nil then return end
+  if not arpEnabled or next(arpHeldNotes) == nil then return end
   for code, _ in pairs(arpHeldNotes) do
     if lowerRowKeys[code] then
       arpHeldNotes[code] = getTransposedPitch(lowerRowKeys[code].baseNote, false)
@@ -378,42 +427,25 @@ local function getArpRowTargetSubtext()
   end
 end
 
-local function cycleArpMode()
-  if arpMode > 0 then lastArpMode = arpMode end
-  arpMode = (arpMode + 1) % #ARP_MODES
-  if arpMode == 0 then
+local function toggleArpPower()
+  arpEnabled = not arpEnabled
+  if not arpEnabled then
     stopArpTimer()
     arpHeldNotes = {}
     arpKeysCurrentlyHeld = {}
   end
   local spot = {
     title = "ARPEGGIATOR",
-    value = "MODE: " .. ARP_MODES[arpMode + 1],
-    subtext = arpMode > 0 and (formatBpm(arpBpm) .. " BPM • " .. getArpRowTargetSubtext()) or "Arp Disabled",
-    targetId = "arp-btn",
+    value = arpEnabled and "ARP: ON" or "ARP: OFF",
+    subtext = arpEnabled and ("ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
+    targetId = "arp-power-btn",
     color = "#d4a359"
   }
   if updateWebviewHud then updateWebviewHud(spot) end
 end
 
 local function toggleArp()
-  if arpMode == 0 then
-    arpMode = lastArpMode > 0 and lastArpMode or 1
-  else
-    lastArpMode = arpMode
-    arpMode = 0
-    stopArpTimer()
-    arpHeldNotes = {}
-    arpKeysCurrentlyHeld = {}
-  end
-  local spot = {
-    title = "ARPEGGIATOR",
-    value = arpMode > 0 and ("MODE: " .. ARP_MODES[arpMode + 1]) or "ARP OFF",
-    subtext = arpMode > 0 and ("ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(arpBpm) .. " BPM") or "Arp Disabled",
-    targetId = "arp-btn",
-    color = "#d4a359"
-  }
-  if updateWebviewHud then updateWebviewHud(spot) end
+  toggleArpPower()
 end
 
 local function handleBpmInput(code, flags)
@@ -628,6 +660,34 @@ local HTML_UI_CONTENT = [[
     font-family: inherit;
     -webkit-app-region: no-drag;
     cursor: pointer;
+  }
+
+  .badge-small {
+    background: rgba(212, 163, 89, 0.15);
+    border: 1.5px solid #d4a359;
+    color: #d4a359;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    flex-shrink: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    text-align: center;
+    text-align-last: center;
+    font-family: inherit;
+    -webkit-app-region: no-drag;
+    cursor: pointer;
+  }
+
+  .badge-small option {
+    background: #181614;
+    color: #d4a359;
   }
   
   .badge option {
@@ -969,7 +1029,27 @@ local HTML_UI_CONTENT = [[
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <button id="arp-btn" class="arp-btn">ARP: OFF</button>
+      <button id="arp-power-btn" class="arp-btn">ARP: OFF</button>
+      <select id="arp-dir-select" class="badge-small" title="Arp Direction">
+        <option value="1">UP</option>
+        <option value="2">DOWN</option>
+        <option value="3">UP-DN</option>
+        <option value="4">RND</option>
+      </select>
+      <select id="arp-rate-select" class="badge-small" title="Arp Time Division">
+        <option value="1">1/4</option>
+        <option value="2" selected>1/8</option>
+        <option value="3">1/16</option>
+        <option value="4">1/32</option>
+        <option value="5">1/8T</option>
+        <option value="6">1/16T</option>
+      </select>
+      <select id="arp-gate-select" class="badge-small" title="Arp Note Length / Gate">
+        <option value="1">25%</option>
+        <option value="2">50%</option>
+        <option value="3" selected>80%</option>
+        <option value="4">100%</option>
+      </select>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
         <span id="bpm-value" class="bpm-display">120 BPM</span>
@@ -1168,14 +1248,47 @@ local HTML_UI_CONTENT = [[
       });
     }
 
-    const arpBtn = document.getElementById('arp-btn');
-    if (arpBtn) {
-      arpBtn.addEventListener('click', (e) => {
+    const arpPowerBtn = document.getElementById('arp-power-btn');
+    if (arpPowerBtn) {
+      arpPowerBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'cycleArpMode' });
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'toggleArpPower' });
         }
       });
+    }
+
+    const arpDirSelect = document.getElementById('arp-dir-select');
+    if (arpDirSelect) {
+      arpDirSelect.addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setArpDirection', directionIdx: val });
+        }
+      });
+      arpDirSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    const arpRateSelect = document.getElementById('arp-rate-select');
+    if (arpRateSelect) {
+      arpRateSelect.addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setArpRate', rateIdx: val });
+        }
+      });
+      arpRateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+    }
+
+    const arpGateSelect = document.getElementById('arp-gate-select');
+    if (arpGateSelect) {
+      arpGateSelect.addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (!isNaN(val) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'setArpGate', gateIdx: val });
+        }
+      });
+      arpGateSelect.addEventListener('mousedown', (e) => e.stopPropagation());
     }
 
     // BPM Editor handlers
@@ -1405,16 +1518,31 @@ local HTML_UI_CONTENT = [[
       document.getElementById('mode-name').textContent = data.modeName;
     }
 
-    if (data.arpModeStr !== undefined) {
-      const arpBtn = document.getElementById('arp-btn');
-      if (arpBtn) {
-        arpBtn.textContent = 'ARP: ' + data.arpModeStr;
-        if (data.arpModeStr !== 'OFF') {
-          arpBtn.classList.add('arp-active');
+    if (data.arpEnabled !== undefined) {
+      const arpPowerBtn = document.getElementById('arp-power-btn');
+      if (arpPowerBtn) {
+        arpPowerBtn.textContent = data.arpEnabled ? 'ARP: ON' : 'ARP: OFF';
+        if (data.arpEnabled) {
+          arpPowerBtn.classList.add('arp-active');
         } else {
-          arpBtn.classList.remove('arp-active');
+          arpPowerBtn.classList.remove('arp-active');
         }
       }
+    }
+
+    if (data.arpDirectionIdx !== undefined) {
+      const arpDirSelect = document.getElementById('arp-dir-select');
+      if (arpDirSelect) arpDirSelect.value = data.arpDirectionIdx;
+    }
+
+    if (data.arpRateIdx !== undefined) {
+      const arpRateSelect = document.getElementById('arp-rate-select');
+      if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
+    }
+
+    if (data.arpGateIdx !== undefined) {
+      const arpGateSelect = document.getElementById('arp-gate-select');
+      if (arpGateSelect) arpGateSelect.value = data.arpGateIdx;
     }
 
     if (data.bpmDisplay !== undefined) {
@@ -1773,7 +1901,7 @@ local function handleKeyDown(code)
     if not pressedKeys[code] then
       local transposedPitch = getTransposedPitch(kData.baseNote, false)
       pressedKeys[code] = transposedPitch
-      if arpMode > 0 and arpBottomEnabled then
+      if arpEnabled and arpBottomEnabled then
         arpAddNote(code, transposedPitch)
       else
         sendMidiNote("noteOn", transposedPitch, 100)
@@ -1786,7 +1914,7 @@ local function handleKeyDown(code)
     if not pressedKeys[code] then
       local transposedPitch = getTransposedPitch(kData.baseNote, true)
       pressedKeys[code] = transposedPitch
-      if arpMode > 0 and arpTopEnabled then
+      if arpEnabled and arpTopEnabled then
         arpAddNote(code, transposedPitch)
       else
         sendMidiNote("noteOn", transposedPitch, 100)
@@ -1958,7 +2086,7 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (pressedKeys[code] ~= nil)
-    if arpMode > 0 and activeArpPitch and noteNum == activeArpPitch then
+    if arpEnabled and activeArpPitch and noteNum == activeArpPitch then
       isPressed = true
     end
 
@@ -1984,7 +2112,7 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (pressedKeys[code] ~= nil)
-    if arpMode > 0 and activeArpPitch and noteNum == activeArpPitch then
+    if arpEnabled and activeArpPitch and noteNum == activeArpPitch then
       isPressed = true
     end
 
@@ -2021,7 +2149,10 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch)
   local payload = {
     rootIdx = currentRoot,
     modeName = modeName,
-    arpModeStr = ARP_MODES[arpMode + 1],
+    arpEnabled = arpEnabled,
+    arpDirectionIdx = arpDirectionIdx,
+    arpRateIdx = arpRateIdx,
+    arpGateIdx = arpGateIdx,
     bpmDisplay = bpmDisplayStr,
     bpmEditing = bpmInputMode,
     arpTopEnabled = arpTopEnabled,
@@ -2133,8 +2264,39 @@ local function createMidiWebview()
         color = "#d4a359"
       }
       updateWebviewHud(spot)
-    elseif body.type == "cycleArpMode" then
-      cycleArpMode()
+    elseif body.type == "toggleArpPower" then
+      toggleArpPower()
+    elseif body.type == "setArpDirection" and body.directionIdx ~= nil then
+      arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+      local spot = {
+        title = "ARP DIRECTION",
+        value = ARP_DIRECTIONS[arpDirectionIdx],
+        subtext = arpEnabled and "Active Pattern" or "Arp Disabled",
+        targetId = "arp-dir-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setArpRate" and body.rateIdx ~= nil then
+      arpRateIdx = math.max(1, math.min(#ARP_RATES, body.rateIdx))
+      applyBpmChange()
+      local spot = {
+        title = "ARP RATE",
+        value = ARP_RATES[arpRateIdx].label,
+        subtext = "Note Division",
+        targetId = "arp-rate-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setArpGate" and body.gateIdx ~= nil then
+      arpGateIdx = math.max(1, math.min(#ARP_GATES, body.gateIdx))
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = ARP_GATES[arpGateIdx].label,
+        subtext = "Gate Duration",
+        targetId = "arp-gate-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
     elseif body.type == "enterBpmEdit" then
       bpmInputMode = true
       bpmBeforeEdit = arpBpm
