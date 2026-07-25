@@ -293,6 +293,24 @@ local function toggleArpPower()
     state.arpLatchClearedForNewChord = false
   elseif state.arpLatchActive then
     state.arpLatchActive = false
+    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
+    local newHeld = {}
+    for code, pitch in pairs(state.arpHeldNotes) do
+      if state.arpKeysCurrentlyHeld[code] then
+        newHeld[code] = pitch
+      end
+    end
+    state.arpHeldNotes = newHeld
+    
+    local count = 0
+    for _ in pairs(state.arpHeldNotes) do count = count + 1 end
+    if count == 0 then
+      stopArpTimer()
+      if state.arpCurrentPitch then
+        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        state.arpCurrentPitch = nil
+      end
+    end
   else
     state.arpEnabled = false
     state.arpLatchActive = false

@@ -397,7 +397,6 @@ local function createMidiWebview()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
-      stepLogicBpm(body.delta)
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
       state.arpTopEnabled = not state.arpTopEnabled
@@ -951,6 +950,24 @@ local function toggleArpPower()
     state.arpLatchClearedForNewChord = false
   elseif state.arpLatchActive then
     state.arpLatchActive = false
+    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
+    local newHeld = {}
+    for code, pitch in pairs(state.arpHeldNotes) do
+      if state.arpKeysCurrentlyHeld[code] then
+        newHeld[code] = pitch
+      end
+    end
+    state.arpHeldNotes = newHeld
+    
+    local count = 0
+    for _ in pairs(state.arpHeldNotes) do count = count + 1 end
+    if count == 0 then
+      stopArpTimer()
+      if state.arpCurrentPitch then
+        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        state.arpCurrentPitch = nil
+      end
+    end
   else
     state.arpEnabled = false
     state.arpLatchActive = false
@@ -994,17 +1011,18 @@ local function handleBpmInput(code, flags)
     updateHud()
     config.saveSettings()
     return true
-  elseif code == 36 or code == 76 then -- Return / Numpad Enter
+  elseif code == 36 then -- Return
     if state.bpmInputBuffer ~= "" then
       local val = tonumber(state.bpmInputBuffer)
       if val and val >= 20 and val <= 300 then
         state.arpBpm = val
       end
     end
+    local prevBpm = state.bpmBeforeEdit
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
     applyBpmChange()
-    setLogicBpmTarget(state.arpBpm)
+    setLogicBpmTarget(state.arpBpm, prevBpm)
     updateHud()
     config.saveSettings()
     return true
@@ -2287,6 +2305,7 @@ local HTML_UI_CONTENT = [[
       bpmValue.style.cursor = 'ns-resize';
       bpmValue.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         isBpmDragging = true;
         hasBpmDragged = false;
         bpmDragStartY = e.clientY;
