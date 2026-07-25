@@ -398,6 +398,9 @@ local function createMidiWebview()
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
       updateWebviewHud()
+    elseif body.type == "finishBpmDrag" then
+      arpeggiator.stepLogicBpm(0)
+      config.saveSettings()
     elseif body.type == "toggleArpTop" then
       state.arpTopEnabled = not state.arpTopEnabled
       if not state.arpTopEnabled then
@@ -2464,7 +2467,12 @@ local HTML_UI_CONTENT = [[
     isDragging = false;
     isModeDragging = false;
     octaveDragTarget = null;
-    isBpmDragging = false;
+    if (isBpmDragging) {
+      isBpmDragging = false;
+      if (hasBpmDragged && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'finishBpmDrag' });
+      }
+    }
     isGateDragging = false;
     stopBpmRepeat();
     stopGateRepeat();
