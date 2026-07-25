@@ -397,11 +397,8 @@ local function createMidiWebview()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
-      arpeggiator.stepLogicBpm(0)
+      stepLogicBpm(body.delta)
       updateWebviewHud()
-    elseif body.type == "finishBpmDrag" then
-      arpeggiator.stepLogicBpm(0)
-      config.saveSettings()
     elseif body.type == "toggleArpTop" then
       state.arpTopEnabled = not state.arpTopEnabled
       if not state.arpTopEnabled then
@@ -997,18 +994,17 @@ local function handleBpmInput(code, flags)
     updateHud()
     config.saveSettings()
     return true
-  elseif code == 36 then -- Return
+  elseif code == 36 or code == 76 then -- Return / Numpad Enter
     if state.bpmInputBuffer ~= "" then
       local val = tonumber(state.bpmInputBuffer)
       if val and val >= 20 and val <= 300 then
         state.arpBpm = val
       end
     end
-    local prevBpm = state.bpmBeforeEdit
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
     applyBpmChange()
-    setLogicBpmTarget(state.arpBpm, prevBpm)
+    setLogicBpmTarget(state.arpBpm)
     updateHud()
     config.saveSettings()
     return true
@@ -1196,7 +1192,7 @@ local function syncLogicBpm()
     isSyncingLogicBpm = false
     if exitCode == 0 and stdOut then
       local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer and not state.bpmInputMode then
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
         state.arpBpm = val
         applyBpmChange()
         updateHud()
@@ -2238,6 +2234,7 @@ local HTML_UI_CONTENT = [[
       gateValue.style.cursor = 'ns-resize';
       gateValue.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         isGateDragging = true;
         gateDragStartY = e.clientY;
         gateDragAccum = 0;
@@ -2466,12 +2463,7 @@ local HTML_UI_CONTENT = [[
     isDragging = false;
     isModeDragging = false;
     octaveDragTarget = null;
-    if (isBpmDragging) {
-      isBpmDragging = false;
-      if (hasBpmDragged && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'finishBpmDrag' });
-      }
-    }
+    isBpmDragging = false;
     isGateDragging = false;
     stopBpmRepeat();
     stopGateRepeat();
