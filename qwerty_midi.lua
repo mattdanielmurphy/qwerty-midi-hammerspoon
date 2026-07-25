@@ -1210,7 +1210,7 @@ local function syncLogicBpm()
     isSyncingLogicBpm = false
     if exitCode == 0 and stdOut then
       local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer and not state.bpmInputMode then
         state.arpBpm = val
         applyBpmChange()
         updateHud()
@@ -2305,7 +2305,6 @@ local HTML_UI_CONTENT = [[
       bpmValue.style.cursor = 'ns-resize';
       bpmValue.addEventListener('mousedown', (e) => {
         e.stopPropagation();
-        e.preventDefault();
         isBpmDragging = true;
         hasBpmDragged = false;
         bpmDragStartY = e.clientY;
