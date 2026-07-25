@@ -129,7 +129,8 @@ local lowerRowKeys = {
   [46] = { key = "M", baseNote = 71 },
   [43] = { key = ",", baseNote = 72 },
   [47] = { key = ".", baseNote = 74 },
-  [44] = { key = "/", baseNote = 76 }
+  [44] = { key = "/", baseNote = 76 },
+  [39] = { key = "'", baseNote = 77 }
 }
 
 local upperRowKeys = {
@@ -142,7 +143,9 @@ local upperRowKeys = {
   [32] = { key = "U", baseNote = 83 },
   [34] = { key = "I", baseNote = 84 },
   [31] = { key = "O", baseNote = 86 },
-  [35] = { key = "P", baseNote = 88 }
+  [35] = { key = "P", baseNote = 88 },
+  [33] = { key = "[", baseNote = 89 },
+  [30] = { key = "]", baseNote = 91 }
 }
 
 local homeRowControls = {

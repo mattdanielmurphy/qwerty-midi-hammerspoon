@@ -675,7 +675,8 @@ local HTML_UI_CONTENT = [[
       { code: 48, keyLabel: "Tab", isControl: true, noteLabel: "Sustain", width: 85 },
       { code: 12, keyLabel: "Q" }, { code: 13, keyLabel: "W" }, { code: 14, keyLabel: "E" },
       { code: 15, keyLabel: "R" }, { code: 17, keyLabel: "T" }, { code: 16, keyLabel: "Y" },
-      { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" }
+      { code: 32, keyLabel: "U" }, { code: 34, keyLabel: "I" }, { code: 31, keyLabel: "O" }, { code: 35, keyLabel: "P" },
+      { code: 33, keyLabel: "[" }, { code: 30, keyLabel: "]" }
     ],
     home: [
       { code: 57, keyLabel: "Caps", isDummy: true, width: 95 },
@@ -683,12 +684,13 @@ local HTML_UI_CONTENT = [[
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
-      { code: 5,  keyLabel: "G", isControl: true, noteLabel: "Vol -" },
+      { code: 5,  keyLabel: "G", isControl: true, noteLabel: "Mode -" },
       { code: 4,  keyLabel: "H", isControl: true, noteLabel: "Root -" },
-      { code: 38, keyLabel: "J", isControl: true, noteLabel: "Mode -" },
-      { code: 40, keyLabel: "K", isControl: true, noteLabel: "Mode +" },
+      { code: 38, keyLabel: "J", isControl: true, noteLabel: "Trnsp -" },
+      { code: 40, keyLabel: "K", isControl: true, noteLabel: "Trnsp +" },
       { code: 37, keyLabel: "L", isControl: true, noteLabel: "Root +" },
-      { code: 41, keyLabel: ";", isControl: true, noteLabel: "Vol +" }
+      { code: 41, keyLabel: ";", isControl: true, noteLabel: "Mode +" },
+      { code: 39, keyLabel: "\'" }
     ],
     lower: [
       { code: 56, keyLabel: "Shift", isDummy: true, width: 120 },
