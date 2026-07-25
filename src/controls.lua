@@ -492,7 +492,7 @@ local function handleKeyDown(code)
   end
 
   if lowerRowKeys[code] or upperRowKeys[code] then
-    local isTop = upperRowKeys[code] ~= nil
+    local isTop = lowerRowKeys[code] == nil and upperRowKeys[code] ~= nil
     local kData = isTop and upperRowKeys[code] or lowerRowKeys[code]
     if not state.pressedKeys[code] then
       local transposedPitch = transposer.getTransposedPitch(kData.baseNote, isTop)
@@ -586,6 +586,7 @@ local function handleKeyUp(code)
   end
 
   if lowerRowKeys[code] or upperRowKeys[code] then
+    local isTop = lowerRowKeys[code] == nil and upperRowKeys[code] ~= nil
     local keyInfo = state.pressedKeys[code]
     if keyInfo then
       local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo

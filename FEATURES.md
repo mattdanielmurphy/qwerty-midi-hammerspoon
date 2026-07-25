@@ -17,6 +17,7 @@
   - Holding **Shift** while scrolling adjusts Top and Bottom Row Volumes simultaneously.
 - **Separate Row Volume Controls & Split Arp Volume Boost**:
   - Independent volume levels for Top Row (upper keys Q..P) and Bottom Row (lower keys Z../).
+  - Explicit row distinction for overlapping key notes ensuring bottom row key presses accurately resolve to bottom row velocity.
   - Automatic default volume boost (+20 velocity) for Top Row when entering Split Arp mode (bottom row arp active, top row non-arp synth).
   - Dedicated VOL HUD badges displaying row volume levels and split-arp boost status.
 - **Fine Increment Button Controls**: Vol - / Vol + and Mod - / Mod + buttons use smooth 4-step adjustments.
