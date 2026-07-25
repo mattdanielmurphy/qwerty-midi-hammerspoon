@@ -112,6 +112,55 @@ local HTML_UI_CONTENT = [[
     opacity: 1;
   }
 
+  /* Mod Wheel Bar */
+  #mod-wheel-widget {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+    min-width: 68px;
+  }
+
+  #mod-wheel-track {
+    width: 68px;
+    height: 8px;
+    background: rgba(30, 26, 22, 0.9);
+    border: 1px solid rgba(212, 163, 89, 0.35);
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #mod-wheel-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 0%;
+    background: linear-gradient(90deg, #8a5c1a 0%, #c88c28 50%, #f0b83c 100%);
+    border-radius: 4px;
+    transition: width 0.05s linear, box-shadow 0.05s linear;
+  }
+
+  #mod-wheel-fill.hot {
+    box-shadow: 0 0 6px rgba(240, 184, 60, 0.8), 0 0 12px rgba(212, 163, 89, 0.4);
+  }
+
+  #mod-wheel-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(212, 163, 89, 0.6);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    transition: color 0.1s ease;
+  }
+
+  #mod-wheel-widget.active #mod-wheel-label {
+    color: #f0b83c;
+  }
+
+
   /* Header Bar */
   #header {
     height: 48px;
@@ -562,6 +611,10 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
+      <div id="mod-wheel-widget">
+        <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
+        <div id="mod-wheel-label">MOD 0</div>
+      </div>
       <div id="status-text" class="status-info"></div>
     </div>
     
@@ -1218,11 +1271,25 @@ local HTML_UI_CONTENT = [[
       const intensity = (data.modWheel / 127.0).toFixed(2);
       document.body.style.setProperty('--mod-intensity', intensity);
       const container = document.getElementById('hud-container');
+      const fillEl = document.getElementById('mod-wheel-fill');
+      const labelEl = document.getElementById('mod-wheel-label');
+      const widgetEl = document.getElementById('mod-wheel-widget');
       if (data.modWheel > 0) {
         container.classList.add('mod-active');
+        widgetEl.classList.add('active');
       } else {
         container.classList.remove('mod-active');
+        widgetEl.classList.remove('active');
       }
+      if (fillEl) {
+        fillEl.style.width = (intensity * 100) + '%';
+        if (data.modWheel >= 80) {
+          fillEl.classList.add('hot');
+        } else {
+          fillEl.classList.remove('hot');
+        }
+      }
+      if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
     }
 
     if (data.keys) {
