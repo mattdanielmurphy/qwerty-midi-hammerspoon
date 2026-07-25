@@ -436,12 +436,14 @@ local function createMidiWebview()
         hs.settings.set("qwertyMidi_hudX", newX)
         hs.settings.set("qwertyMidi_hudY", newY)
       end
+    elseif body.type == "log" then
+      os.execute("echo '" .. tostring(body.message) .. "' >> /tmp/wv_js.log")
     end
     config.saveSettings()
   end)
 
   local rect = { x = hudX, y = hudY, w = width, h = height }
-  local wv = hsWebview.new(rect, { developerExtrasEnabled = false }, uc)
+  local wv = hsWebview.new(rect, { developerExtrasEnabled = true }, uc)
   wv:windowTitle("MIDI Controller HUD")
   wv:windowStyle({ "borderless", "utility" })
   wv:transparent(true)

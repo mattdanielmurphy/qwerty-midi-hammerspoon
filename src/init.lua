@@ -5,6 +5,11 @@ local arpeggiator = require("arpeggiator")
 local hud = require("hud")
 local controls = require("controls")
 
+local function profileLog(msg)
+  os.execute("echo '" .. os.clock() .. ": " .. msg .. "' >> /tmp/midi_startup.log")
+end
+profileLog("Start init.lua")
+
 local state = config.state
 
 _G.activeWatchers = _G.activeWatchers or {}
@@ -20,10 +25,14 @@ function _G.toggleMidiMode(newState)
   end
 
   if state.midiActive then
+    profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
+    profileLog("Before createMidiWebview")
     local h = hud.createMidiWebview()
+    profileLog("After createMidiWebview, before show")
     h:show()
+    profileLog("After show")
   else
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
@@ -145,8 +154,11 @@ _G.activeWatchers.settingsHotkey = hs.hotkey.bind({ "cmd" }, ",", function()
   settings_ui.toggleSettingsWindow()
 end)
 
+profileLog("Before panicAllChannels")
 midi.panicAllChannels()
+profileLog("Before toggleMidiMode")
 _G.toggleMidiMode(true)
+profileLog("Init complete!")
 
 return {
   toggleMidiMode = _G.toggleMidiMode,

@@ -453,12 +453,14 @@ local function createMidiWebview()
         hs.settings.set("qwertyMidi_hudX", newX)
         hs.settings.set("qwertyMidi_hudY", newY)
       end
+    elseif body.type == "log" then
+      os.execute("echo '" .. tostring(body.message) .. "' >> /tmp/wv_js.log")
     end
     config.saveSettings()
   end)
 
   local rect = { x = hudX, y = hudY, w = width, h = height }
-  local wv = hsWebview.new(rect, { developerExtrasEnabled = false }, uc)
+  local wv = hsWebview.new(rect, { developerExtrasEnabled = true }, uc)
   wv:windowTitle("MIDI Controller HUD")
   wv:windowStyle({ "borderless", "utility" })
   wv:transparent(true)
@@ -505,6 +507,11 @@ local arpeggiator = __require("arpeggiator")
 local hud = __require("hud")
 local controls = __require("controls")
 
+local function profileLog(msg)
+  os.execute("echo '" .. os.clock() .. ": " .. msg .. "' >> /tmp/midi_startup.log")
+end
+profileLog("Start init.lua")
+
 local state = config.state
 
 _G.activeWatchers = _G.activeWatchers or {}
@@ -520,10 +527,14 @@ function _G.toggleMidiMode(newState)
   end
 
   if state.midiActive then
+    profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
+    profileLog("Before createMidiWebview")
     local h = hud.createMidiWebview()
+    profileLog("After createMidiWebview, before show")
     h:show()
+    profileLog("After show")
   else
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
@@ -645,8 +656,11 @@ _G.activeWatchers.settingsHotkey = hs.hotkey.bind({ "cmd" }, ",", function()
   settings_ui.toggleSettingsWindow()
 end)
 
+profileLog("Before panicAllChannels")
 midi.panicAllChannels()
+profileLog("Before toggleMidiMode")
 _G.toggleMidiMode(true)
+profileLog("Init complete!")
 
 return {
   toggleMidiMode = _G.toggleMidiMode,
@@ -1403,8 +1417,6 @@ local HTML_UI_CONTENT = [[
     z-index: 9999;
     pointer-events: none;
     opacity: 1;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     white-space: nowrap;
   }
 
@@ -2709,7 +2721,12 @@ local HTML_UI_CONTENT = [[
   }
 
   // Immediate init execution in case DOM ready state passed
+  const t0 = performance.now();
   initGrid(LAYOUT_DATA);
+  const t1 = performance.now();
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'initGrid took ' + (t1 - t0) + ' ms' });
+  }
 </script>
 </body>
 </html>
@@ -3154,7 +3171,7 @@ local function toggleSettingsWindow()
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
-  settingsWebview = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtras = false }, uc)
+  settingsWebview = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
   settingsWebview:windowTitle("QWERTY MIDI Settings")
   -- Borderless floating panel that sits above the HUD webview
   settingsWebview:windowStyle({ "borderless", "nonactivating" })

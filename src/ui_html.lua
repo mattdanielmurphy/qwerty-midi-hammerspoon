@@ -52,8 +52,6 @@ local HTML_UI_CONTENT = [[
     z-index: 9999;
     pointer-events: none;
     opacity: 1;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     white-space: nowrap;
   }
 
@@ -1358,7 +1356,12 @@ local HTML_UI_CONTENT = [[
   }
 
   // Immediate init execution in case DOM ready state passed
+  const t0 = performance.now();
   initGrid(LAYOUT_DATA);
+  const t1 = performance.now();
+  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'initGrid took ' + (t1 - t0) + ' ms' });
+  }
 </script>
 </body>
 </html>

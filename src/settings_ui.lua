@@ -432,7 +432,7 @@ local function toggleSettingsWindow()
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
-  settingsWebview = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtras = false }, uc)
+  settingsWebview = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
   settingsWebview:windowTitle("QWERTY MIDI Settings")
   -- Borderless floating panel that sits above the HUD webview
   settingsWebview:windowStyle({ "borderless", "nonactivating" })
