@@ -424,6 +424,7 @@ local function createMidiWebview()
         hs.settings.set("qwertyMidi_hudY", newY)
       end
     end
+    config.saveSettings()
   end)
 
   local rect = { x = hudX, y = hudY, w = width, h = height }
@@ -711,12 +712,9 @@ local function arpTick()
       state.arpStepDirection = 1
     end
   elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if state.arpStepIndex > #pitchList then
+    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
       state.arpStepIndex = math.max(1, #pitchList - 1)
       state.arpStepDirection = -1
-    elseif state.arpStepIndex < 1 then
-      state.arpStepIndex = math.min(#pitchList, 2)
-      state.arpStepDirection = 1
     end
   elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
     local pos = (state.arpPos % #pitchList) + 1
@@ -818,8 +816,13 @@ local function startArpTimer(preserveState)
   if state.arpTimer then return end
   local intervalSeconds = getArpIntervalSeconds()
   if not preserveState then
-    state.arpStepIndex = 1
-    state.arpStepDirection = 1
+    if state.arpDirectionIdx == 4 then
+      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = 1
+      state.arpStepDirection = 1
+    end
     state.arpPos = 0
     arpTick()
   end
@@ -946,6 +949,7 @@ local function toggleArpPower()
     color = "#d4a359"
   }
   updateHud(spot)
+  config.saveSettings()
 end
 
 local function toggleArp()
@@ -958,6 +962,7 @@ local function handleBpmInput(code, flags)
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
     updateHud()
+    config.saveSettings()
     return true
   elseif code == 36 then -- Return
     if state.bpmInputBuffer ~= "" then
@@ -972,6 +977,7 @@ local function handleBpmInput(code, flags)
     applyBpmChange()
     setLogicBpmTarget(state.arpBpm, prevBpm)
     updateHud()
+    config.saveSettings()
     return true
   elseif code == 126 then -- Arrow Up
     local delta = 1
@@ -3060,26 +3066,32 @@ return {
 end
 
 __modules["config"] = function()
+local function getSetting(key, default)
+  local val = hs.settings.get("qwertyMidi_" .. key)
+  if val == nil then return default end
+  return val
+end
+
 local state = {
   midiActive = false,
-  currentRoot = 0,            -- 0 = C (0..11)
-  currentScaleIdx = 1,        -- 1 = Major / Ionian
-  octaveShift = 0,            -- Global Octave offset in semitones (-36 to +36)
-  topRowOctaveOffset = 0,     -- Independent Top Row Octave Offset
-  transposeShift = 0,         -- Transpose offset in semitones (-12 to +12)
+  currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
+  currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
+  octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
+  topRowOctaveOffset = getSetting("topRowOctaveOffset", 0), -- Independent Top Row Octave Offset
+  transposeShift = getSetting("transposeShift", 0),     -- Transpose offset in scale degrees (-12 to +12)
   sustainActive = false,      -- Sustain toggle state (CC64)
   sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
   sustainWasActiveOnPress = false,
-  arpLatchActive = false,     -- Arpeggiator Latch mode (part of arp cycle: Off→On→Latch)
+  arpLatchActive = getSetting("arpLatchActive", false),  -- Arpeggiator Latch mode
   shiftHeld = false,          -- Shift key active state
-  zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0,
+  zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
   -- Arpeggiator State
-  arpEnabled = false,
-  arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
+  arpEnabled = getSetting("arpEnabled", false),
+  arpDirectionIdx = getSetting("arpDirectionIdx", 1),    -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
   ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
-  arpRateIdx = 5,
+  arpRateIdx = getSetting("arpRateIdx", 5),
   ARP_RATES = {
     -- Straight rates (slow → fast)
     { label = "4",     factor = 16.0 },
@@ -3102,8 +3114,8 @@ local state = {
     { label = "1/32T", factor = 0.125 / 1.5 },
     { label = "1/64T", factor = 0.0625 / 1.5 }
   },
-  arpGatePercent = 80.0,
-  arpBpm = 120.0,
+  arpGatePercent = getSetting("arpGatePercent", 80.0),
+  arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
   arpHeldNotes = {},          -- [code] = pitch
@@ -3112,28 +3124,28 @@ local state = {
   arpStepIndex = 1,
   arpStepDirection = 1,
   lastArpMode = 1,
-  arpTopEnabled = false,
-  arpBottomEnabled = true,
+  arpTopEnabled = getSetting("arpTopEnabled", false),
+  arpBottomEnabled = getSetting("arpBottomEnabled", true),
 
   -- BPM Input Mode & Sync State
   bpmInputMode = false,
   bpmInputBuffer = "",
   bpmBeforeEdit = 120.0,
-  bpmStepSize = hs.settings.get("qwertyMidi_bpmStepSize") or 10,
+  bpmStepSize = getSetting("bpmStepSize", 10),
   logicSyncEnabled = (hs.settings.get("qwertyMidi_logicSyncEnabled") == nil) and true or hs.settings.get("qwertyMidi_logicSyncEnabled"),
   logicSyncTimer = nil,
 
   -- Scroll / Trackpad
-  scrollSensitivity    = hs.settings.get("qwertyMidi_scrollSensitivity")    or 0.15,
-  scrollMomentumScale  = hs.settings.get("qwertyMidi_scrollMomentumScale")   or 0.3,
+  scrollSensitivity    = getSetting("scrollSensitivity", 0.15),
+  scrollMomentumScale  = getSetting("scrollMomentumScale", 0.3),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
   },
 
-  topRowVolume = 100,
-  bottomRowVolume = 100,
+  topRowVolume = getSetting("topRowVolume", 100),
+  bottomRowVolume = getSetting("bottomRowVolume", 100),
   splitArpTopBoost = 20,
 
   ccStates = {
@@ -3145,6 +3157,29 @@ local state = {
   sustainedPitches = {},
   spotlightInfo = nil
 }
+
+local function saveSettings()
+  hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
+  hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
+  hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
+  hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
+  hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
+  hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled)
+  hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive)
+  hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
+  hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
+  hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
+  hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
+  hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled)
+  hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled)
+  hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
+  hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled)
+  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
+  hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
+  hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
+  hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
+  hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
+end
 
 local SCALES = {
   { name = "Lydian",                  intervals = { 0, 2, 4, 6, 7, 9, 11 }, brightness = 6, brightTag = "BRIGHTEST ☀️" },
@@ -3226,6 +3261,7 @@ local homeRowControls = {
 
 return {
   state = state,
+  saveSettings = saveSettings,
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
   WHITE_KEY_INDEX = WHITE_KEY_INDEX,
@@ -3718,6 +3754,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   end
+
+  config.saveSettings()
 end
 
 local function handleKeyDown(code)

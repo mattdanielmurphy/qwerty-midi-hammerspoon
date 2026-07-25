@@ -84,12 +84,9 @@ local function arpTick()
       state.arpStepDirection = 1
     end
   elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if state.arpStepIndex > #pitchList then
+    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
       state.arpStepIndex = math.max(1, #pitchList - 1)
       state.arpStepDirection = -1
-    elseif state.arpStepIndex < 1 then
-      state.arpStepIndex = math.min(#pitchList, 2)
-      state.arpStepDirection = 1
     end
   elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
     local pos = (state.arpPos % #pitchList) + 1
@@ -191,8 +188,13 @@ local function startArpTimer(preserveState)
   if state.arpTimer then return end
   local intervalSeconds = getArpIntervalSeconds()
   if not preserveState then
-    state.arpStepIndex = 1
-    state.arpStepDirection = 1
+    if state.arpDirectionIdx == 4 then
+      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = 1
+      state.arpStepDirection = 1
+    end
     state.arpPos = 0
     arpTick()
   end
@@ -319,6 +321,7 @@ local function toggleArpPower()
     color = "#d4a359"
   }
   updateHud(spot)
+  config.saveSettings()
 end
 
 local function toggleArp()
@@ -331,6 +334,7 @@ local function handleBpmInput(code, flags)
     state.bpmInputMode = false
     state.bpmInputBuffer = ""
     updateHud()
+    config.saveSettings()
     return true
   elseif code == 36 then -- Return
     if state.bpmInputBuffer ~= "" then
@@ -345,6 +349,7 @@ local function handleBpmInput(code, flags)
     applyBpmChange()
     setLogicBpmTarget(state.arpBpm, prevBpm)
     updateHud()
+    config.saveSettings()
     return true
   elseif code == 126 then -- Arrow Up
     local delta = 1

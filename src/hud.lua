@@ -407,6 +407,7 @@ local function createMidiWebview()
         hs.settings.set("qwertyMidi_hudY", newY)
       end
     end
+    config.saveSettings()
   end)
 
   local rect = { x = hudX, y = hudY, w = width, h = height }

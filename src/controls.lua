@@ -478,6 +478,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   end
+
+  config.saveSettings()
 end
 
 local function handleKeyDown(code)
