@@ -10,8 +10,8 @@ echo "📦 Bundling Hammerspoon modules..."
 python3 "$PROJECT_DIR/bin/hs-bundler" --src "$PROJECT_DIR/src" --entry "init.lua" --output "$PROJECT_DIR/qwerty_midi.lua"
 
 if [ $? -eq 0 ]; then
-  echo "⚡ Reloading Hammerspoon silently..."
-  (hs -c "hs.reload()" >/dev/null 2>&1 &)
+  echo "⚡ Reloading Hammerspoon via AppleScript..."
+  osascript -e 'tell application "Hammerspoon" to execute lua code "hs.reload()"' >/dev/null 2>&1 &
 else
   echo "❌ Bundling failed!"
 fi
