@@ -27,6 +27,6 @@
 - **Arp Latch Chord Transition Handling**: Improved latch mode chord recognition so transitioning between chords seamlessly replaces the prior chord without restricting subsequent note polyphony or dropping notes.
 - **Logic Pro Session BPM Sync**: Real-time auto-synchronization between active Logic Pro session BPM and the Arpeggiator engine via non-blocking background AppleScript task with an interactive header `SYNC: ON/OFF` toggle button.
 - **Ultra-Low Latency & 60 FPS Batched HUD Rendering**: Decoupled instant CoreMIDI note transmission from WebKit IPC visual updates. Visual HUD rendering is batched at ~60 FPS (16ms throttle) to eliminate main thread stalls and hiccupping during rapid note playing or fast arpeggio ticks.
-
+- **Correlated Control Key Pair Styling**: Related control keys (e.g. `J`/`K` Transpose, `H`/`L` Root, `G`/`;` Mode, `D`/`F` Octave, `3`/`4` Dir, `5`/`6` Rate, `7`/`8` Gate, `-`/`=` BPM) share cohesive, understated color accents matching the warm dark HUD theme for effortless visual grouping without dominating note keys.
 
 

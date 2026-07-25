@@ -527,15 +527,48 @@ local HTML_UI_CONTENT = [[
     font-size: 9.5px;
   }
 
-  .key-pad.mode-control {
-    background: rgba(45, 38, 30, 0.95);
-    border-color: rgba(212, 163, 89, 0.55);
-  }
+  /* Correlated Control Pairs & Special Controls */
+  .key-pad.ctrl-trnsp { border-color: rgba(94, 162, 235, 0.45); }
+  .key-pad.ctrl-trnsp .key-note { color: #8abef2; font-weight: 600; }
 
-  .key-pad.mode-control .key-note {
-    color: #d4a359;
-    font-weight: 600;
-  }
+  .key-pad.ctrl-root { border-color: rgba(220, 120, 100, 0.45); }
+  .key-pad.ctrl-root .key-note { color: #e69d90; font-weight: 600; }
+
+  .key-pad.ctrl-mode { border-color: rgba(212, 163, 89, 0.45); }
+  .key-pad.ctrl-mode .key-note { color: #d4a359; font-weight: 600; }
+
+  .key-pad.ctrl-oct { border-color: rgba(82, 180, 150, 0.45); }
+  .key-pad.ctrl-oct .key-note { color: #78c9ad; font-weight: 600; }
+
+  .key-pad.ctrl-topoct { border-color: rgba(160, 130, 220, 0.45); }
+  .key-pad.ctrl-topoct .key-note { color: #beaaeb; font-weight: 600; }
+
+  .key-pad.ctrl-modw { border-color: rgba(220, 140, 180, 0.45); }
+  .key-pad.ctrl-modw .key-note { color: #e3a0c0; font-weight: 600; }
+
+  .key-pad.ctrl-vol { border-color: rgba(200, 170, 100, 0.45); }
+  .key-pad.ctrl-vol .key-note { color: #d8c280; font-weight: 600; }
+
+  .key-pad.ctrl-arpdir { border-color: rgba(100, 175, 210, 0.45); }
+  .key-pad.ctrl-arpdir .key-note { color: #8ec3df; font-weight: 600; }
+
+  .key-pad.ctrl-arprate { border-color: rgba(180, 170, 100, 0.45); }
+  .key-pad.ctrl-arprate .key-note { color: #c9c382; font-weight: 600; }
+
+  .key-pad.ctrl-arpgate { border-color: rgba(120, 185, 130, 0.45); }
+  .key-pad.ctrl-arpgate .key-note { color: #9ed4a8; font-weight: 600; }
+
+  .key-pad.ctrl-bpm { border-color: rgba(215, 145, 110, 0.45); }
+  .key-pad.ctrl-bpm .key-note { color: #e2ab90; font-weight: 600; }
+
+  .key-pad.ctrl-zoom { border-color: rgba(130, 165, 195, 0.45); }
+  .key-pad.ctrl-zoom .key-note { color: #a4c0d8; font-weight: 600; }
+
+  .key-pad.ctrl-arp, .key-pad.ctrl-arptop, .key-pad.ctrl-arpbot { border-color: rgba(212, 163, 89, 0.45); }
+  .key-pad.ctrl-arp .key-note, .key-pad.ctrl-arptop .key-note, .key-pad.ctrl-arpbot .key-note { color: #d4a359; font-weight: 600; }
+
+  .key-pad.ctrl-bpmedit, .key-pad.ctrl-rand, .key-pad.ctrl-panic, .key-pad.ctrl-reset { border-color: rgba(150, 140, 130, 0.4); }
+  .key-pad.ctrl-bpmedit .key-note, .key-pad.ctrl-rand .key-note, .key-pad.ctrl-panic .key-note, .key-pad.ctrl-reset .key-note { color: #b5aba0; font-weight: 500; }
 
   .key-pad.dummy-pad {
     opacity: 0.45;

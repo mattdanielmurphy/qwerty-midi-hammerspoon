@@ -82,18 +82,40 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
   local keyUpdates = {}
 
+  local actionTypeClass = {
+    -- Home row pairs
+    trnspDown = "ctrl-trnsp", trnspUp = "ctrl-trnsp",
+    rootDown = "ctrl-root", rootUp = "ctrl-root",
+    modeDown = "ctrl-mode", modeUp = "ctrl-mode",
+    octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
+    topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
+    modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
+    volDown = "ctrl-vol", volUp = "ctrl-vol",
+    
+    -- Number row pairs
+    arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
+    arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
+    arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
+    bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
+    zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
+    
+    -- Singletons / Toggles
+    arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
+    bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset"
+  }
+
   for code, cData in pairs(numberRowControls) do
     local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
     local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local isArpControl = (act:find("arp") ~= nil) or (act:find("bpm") ~= nil)
     local isMainArp = (code == 50)
     local isTopArp = (code == 18)
     local isBotArp = (code == 19)
     local isArpActive = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
+    local pairedClass = actionTypeClass[act] or ""
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
-      typeClass = isArpControl and "mode-control" or "",
+      typeClass = pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
       sustainActive = isArpActive
     }
@@ -156,11 +178,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     local act = state.shiftHeld and cData.shiftAction or cData.action
     local isSustain = (code == 48)
     local isLatch = (code == 0)
-    local isMode = (act == "modeDown" or act == "modeUp")
+    local pairedClass = actionTypeClass[act] or ""
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
-      typeClass = isMode and "mode-control" or (isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or ""),
+      typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
       sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
     }
