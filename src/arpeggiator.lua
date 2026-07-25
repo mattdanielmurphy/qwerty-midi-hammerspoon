@@ -37,6 +37,7 @@ local function stopArpTimer()
   end
   state.arpStepIndex = 1
   state.arpStepDirection = 1
+  state.arpPos = 0
 end
 
 local function getArpIntervalSeconds()
@@ -69,9 +70,11 @@ local function arpTick()
   end
 
   if state.arpDirectionIdx == 1 then -- UP
-    state.arpStepIndex = ((state.arpStepIndex - 1) % #pitchList) + 1
+    local pos = (state.arpPos % #pitchList) + 1
+    state.arpStepIndex = pos
   elseif state.arpDirectionIdx == 2 then -- DOWN
-    state.arpStepIndex = ((state.arpStepIndex - 2 + #pitchList) % #pitchList) + 1
+    local pos = (state.arpPos % #pitchList) + 1
+    state.arpStepIndex = #pitchList - pos + 1
   elseif state.arpDirectionIdx == 3 then -- UP-DOWN
     if state.arpStepIndex > #pitchList then
       state.arpStepIndex = math.max(1, #pitchList - 1)
@@ -88,8 +91,8 @@ local function arpTick()
       state.arpStepIndex = math.min(#pitchList, 2)
       state.arpStepDirection = 1
     end
-  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In: 1, N, 2, N-1, 3, N-2, ...)
-    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
+    local pos = (state.arpPos % #pitchList) + 1
     local idx
     if pos % 2 == 1 then
       idx = math.floor(pos / 2) + 1
@@ -97,21 +100,18 @@ local function arpTick()
       idx = #pitchList - math.floor(pos / 2) + 1
     end
     state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out: Middle, Middle+1, Middle-1, Middle+2, ...)
-    local pos = ((state.arpStepIndex - 1) % #pitchList) + 1
+  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out)
+    local pos = (state.arpPos % #pitchList) + 1
     local mid = math.floor((#pitchList + 1) / 2)
     local idx
     if pos == 1 then
       idx = mid
     elseif pos % 2 == 0 then
-      local offset = math.floor(pos / 2)
-      idx = mid + offset
+      idx = mid + math.floor(pos / 2)
     else
-      local offset = math.floor(pos / 2)
-      idx = mid - offset
+      idx = mid - math.floor(pos / 2)
     end
     if idx < 1 or idx > #pitchList then
-      -- Fallback modulo bounce to stay inside valid range
       idx = ((pos - 1) % #pitchList) + 1
     end
     state.arpStepIndex = idx
@@ -149,10 +149,8 @@ local function arpTick()
         state.arpStepDirection = -1
       end
     end
-  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
-    state.arpStepIndex = state.arpStepIndex + 1
-  elseif state.arpDirectionIdx == 2 then
-    state.arpStepIndex = state.arpStepIndex - 1
+  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
+    state.arpPos = (state.arpPos or 0) + 1
   end
 
   if state.arpGateTimer then
@@ -195,6 +193,7 @@ local function startArpTimer(preserveState)
   if not preserveState then
     state.arpStepIndex = 1
     state.arpStepDirection = 1
+    state.arpPos = 0
     arpTick()
   end
   state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
@@ -285,12 +284,13 @@ local function getArpRowTargetSubtext()
 end
 
 local function toggleArpPower()
+  -- Cycle: Off → Latch+On → On (no latch) → Off
   if not state.arpEnabled then
     state.arpEnabled = true
-    state.arpLatchActive = false
-  elseif not state.arpLatchActive then
     state.arpLatchActive = true
     state.arpLatchClearedForNewChord = false
+  elseif state.arpLatchActive then
+    state.arpLatchActive = false
   else
     state.arpEnabled = false
     state.arpLatchActive = false

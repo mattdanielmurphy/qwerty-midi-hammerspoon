@@ -595,12 +595,24 @@ local HTML_UI_CONTENT = [[
         <option value="7">RND</option>
       </select>
       <select id="arp-rate-select" class="badge-small" title="Arp Time Division">
-        <option value="1">1/4</option>
-        <option value="2" selected>1/8</option>
-        <option value="3">1/16</option>
-        <option value="4">1/32</option>
-        <option value="5">1/8T</option>
-        <option value="6">1/16T</option>
+        <option value="1">4</option>
+        <option value="2">2</option>
+        <option value="3">1</option>
+        <option value="4">1/2</option>
+        <option value="5" selected>1/4</option>
+        <option value="6">1/8</option>
+        <option value="7">1/16</option>
+        <option value="8">1/32</option>
+        <option value="9">1/64</option>
+        <option value="10">4T</option>
+        <option value="11">2T</option>
+        <option value="12">1T</option>
+        <option value="13">1/2T</option>
+        <option value="14">1/4T</option>
+        <option value="15">1/8T</option>
+        <option value="16">1/16T</option>
+        <option value="17">1/32T</option>
+        <option value="18">1/64T</option>
       </select>
       <div id="gate-editor" class="bpm-editor" title="Arp Note Length / Gate">
         <button id="gate-down" class="bpm-arrow-btn">&#9662;</button>
@@ -905,6 +917,7 @@ local HTML_UI_CONTENT = [[
           e.preventDefault();
           startGateRepeat(dir);
         });
+        btn.addEventListener('mouseup', stopGateRepeat);
         btn.addEventListener('mouseleave', stopGateRepeat);
       }
     });
@@ -975,6 +988,7 @@ local HTML_UI_CONTENT = [[
           e.preventDefault();
           startBpmRepeat(dir);
         });
+        btn.addEventListener('mouseup', stopBpmRepeat);
         btn.addEventListener('mouseleave', stopBpmRepeat);
       }
     });
