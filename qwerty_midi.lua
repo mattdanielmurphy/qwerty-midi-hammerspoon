@@ -511,17 +511,15 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
   end
 
-  -- Ignore momentum (inertia) events — only process active finger-contact scrolls
+  -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
   local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-  if phase == 0 and deltaY ~= 0 then
-    return false
-  end
+  local inertiaScale = (phase == 0) and 0.3 or 1.0
 
   if deltaY ~= 0 then
     if state.shiftHeld then
       local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
       _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
-      local sensitivity = 0.25
+      local sensitivity = 0.25 * inertiaScale
       _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
       local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
 
@@ -541,7 +539,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     else
       local currentMod = state.ccStates[1] or 0
       _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-      local sensitivity = 0.15
+      local sensitivity = 0.15 * inertiaScale
       _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
       local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
 
