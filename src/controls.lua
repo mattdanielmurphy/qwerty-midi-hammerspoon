@@ -187,6 +187,7 @@ local function executeControlAction(act, code)
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
     state.arpEnabled = false
+    state.arpLatchActive = false
     state.arpTopEnabled = false
     state.arpBottomEnabled = true
     midi.sendMidiCC(64, 0)
@@ -244,19 +245,8 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "latch" then
-    state.arpLatchKeyDownTime = hs.timer.secondsSinceEpoch()
-    state.arpLatchWasActiveOnPress = state.arpLatchActive
-    state.arpLatchActive = true
-
-    local spot = {
-      title = "ARP LATCH",
-      value = "LATCH ON",
-      subtext = "Arp chord patterns held",
-      targetId = code and ("key-" .. code) or "key-0",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
   elseif act == "modWheelDown" then
     local currentVal = state.ccStates[1] or 0
     local newVal = math.max(0, currentVal - 4)
@@ -561,7 +551,7 @@ local function handleKeyDown(code)
       state.pressedKeys[code] = true
       local act = state.shiftHeld and cData.shiftAction or cData.action
       executeControlAction(act, code)
-      if act ~= "sustain" and act ~= "latch" then
+      if act ~= "sustain" then
         stopControlRepeat(code)
         controlRepeatTimers[code] = {
           timer = hs.timer.doAfter(0.35, function()
@@ -654,35 +644,6 @@ local function handleKeyUp(code)
         subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
         targetId = "key-48",
         color = state.sustainActive and "#d4a359" or "#b5aba0"
-      }
-      hud.updateWebviewHud(spot)
-    elseif act == "latch" then
-      local holdDuration = hs.timer.secondsSinceEpoch() - state.arpLatchKeyDownTime
-      if holdDuration > 0.25 then
-        state.arpLatchActive = false
-      else
-        if state.arpLatchWasActiveOnPress then
-          state.arpLatchActive = false
-        else
-          state.arpLatchActive = true
-        end
-      end
-
-      if not state.arpLatchActive then
-        local numPhysicalHeld = 0
-        for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-        if numPhysicalHeld == 0 then
-          arpeggiator.stopArpTimer()
-          state.arpHeldNotes = {}
-        end
-      end
-
-      local spot = {
-        title = "ARP LATCH",
-        value = state.arpLatchActive and "LATCH ON" or "LATCH OFF",
-        subtext = state.arpLatchActive and "Arp chord patterns held" or "Latch disabled",
-        targetId = "key-0",
-        color = state.arpLatchActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
     else

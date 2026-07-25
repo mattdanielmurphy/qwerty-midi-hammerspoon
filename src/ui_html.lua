@@ -254,6 +254,12 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
+  .arp-btn.arp-latch {
+    background: rgba(212, 163, 89, 0.6);
+    box-shadow: 0 0 12px rgba(212, 163, 89, 0.8), inset 0 0 4px rgba(212, 163, 89, 0.3);
+    color: #fff;
+  }
+
   .bpm-editor {
     display: flex;
     align-items: center;
@@ -1107,11 +1113,17 @@ local HTML_UI_CONTENT = [[
     if (data.arpEnabled !== undefined) {
       const arpPowerBtn = document.getElementById('arp-power-btn');
       if (arpPowerBtn) {
-        arpPowerBtn.textContent = data.arpEnabled ? 'ARP: ON' : 'ARP: OFF';
-        if (data.arpEnabled) {
-          arpPowerBtn.classList.add('arp-active');
+        const latch = data.arpLatchActive;
+        if (!data.arpEnabled) {
+          arpPowerBtn.textContent = 'ARP: OFF';
+          arpPowerBtn.classList.remove('arp-active', 'arp-latch');
+        } else if (latch) {
+          arpPowerBtn.textContent = 'ARP: LATCH';
+          arpPowerBtn.classList.add('arp-active', 'arp-latch');
         } else {
-          arpPowerBtn.classList.remove('arp-active');
+          arpPowerBtn.textContent = 'ARP: ON';
+          arpPowerBtn.classList.add('arp-active');
+          arpPowerBtn.classList.remove('arp-latch');
         }
       }
     }

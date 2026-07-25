@@ -285,16 +285,36 @@ local function getArpRowTargetSubtext()
 end
 
 local function toggleArpPower()
-  state.arpEnabled = not state.arpEnabled
   if not state.arpEnabled then
+    state.arpEnabled = true
+    state.arpLatchActive = false
+  elseif not state.arpLatchActive then
+    state.arpLatchActive = true
+    state.arpLatchClearedForNewChord = false
+  else
+    state.arpEnabled = false
+    state.arpLatchActive = false
     stopArpTimer()
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
   end
+
+  local valStr = "ARP: OFF"
+  local subStr = "Arp Disabled"
+  if state.arpEnabled then
+    if state.arpLatchActive then
+      valStr = "ARP: LATCH"
+      subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    else
+      valStr = "ARP: ON"
+      subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    end
+  end
+
   local spot = {
     title = "ARPEGGIATOR",
-    value = state.arpEnabled and "ARP: ON" or "ARP: OFF",
-    subtext = state.arpEnabled and ("ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM") or "Arp Disabled",
+    value = valStr,
+    subtext = subStr,
     targetId = "arp-power-btn",
     color = "#d4a359"
   }

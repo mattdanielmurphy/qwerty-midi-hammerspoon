@@ -67,13 +67,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local octStr = (state.octaveShift >= 0 and "+" or "") .. (state.octaveShift / 12) .. " Oct"
   local trnspStr = (state.transposeShift ~= 0) and ("Trnsp: " .. (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. "st") or ""
   local susStr = state.sustainActive and "SUS: ON" or ""
-  local latchStr = state.arpLatchActive and "LATCH: ON" or ""
+  local latchStr = state.arpLatchActive and "LATCH" or (state.arpEnabled and "" or "")
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
 
   local statusParts = {}
   if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
   if susStr ~= "" then table.insert(statusParts, susStr) end
-  if latchStr ~= "" then table.insert(statusParts, latchStr) end
+  if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
@@ -160,9 +160,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     keyUpdates[tostring(code)] = {
       note = label,
       isControl = true,
-      typeClass = isMode and "mode-control" or (isLatch and state.arpLatchActive and "latch-active" or ""),
+      typeClass = isMode and "mode-control" or (isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or ""),
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpLatchActive)
+      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
     }
   end
 
@@ -179,6 +179,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     rootIdx = state.currentRoot,
     modeName = modeName,
     arpEnabled = state.arpEnabled,
+    arpLatchActive = state.arpLatchActive,
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),

@@ -8,9 +8,7 @@ local state = {
   sustainActive = false,      -- Sustain toggle state (CC64)
   sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
   sustainWasActiveOnPress = false,
-  arpLatchActive = false,     -- Arpeggiator Latch mode toggle state
-  arpLatchKeyDownTime = 0,    -- Timestamp when arp latch key was pressed down
-  arpLatchWasActiveOnPress = false,
+  arpLatchActive = false,     -- Arpeggiator Latch mode (part of arp cycle: Off→On→Latch)
   shiftHeld = false,          -- Shift key active state
   zoomLevel = hs.settings.get("qwertyMidi_zoomLevel") or 1.0,
   BASE_HUD_SCALE = 1.4,
@@ -131,7 +129,7 @@ local upperRowKeys = {
 
 local homeRowControls = {
   [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
-  [0]  = { key = "A",   name = "Latch",   action = "latch",       shiftAction = "resetAll",   shiftName = "Reset" },
+  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
