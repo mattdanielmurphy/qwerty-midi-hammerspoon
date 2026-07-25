@@ -90,11 +90,13 @@ local HTML_UI_CONTENT = [[
     white-space: nowrap;
   }
   
-  /* Dynamic Mod Wheel Glow */
-  #hud-container.mod-active {
-    box-shadow: 0 0 calc(8px + var(--mod-intensity) * 18px) rgba(212, 163, 89, calc(0.2 + var(--mod-intensity) * 0.25)),
-                inset 0 0 calc(10px + var(--mod-intensity) * 15px) rgba(212, 163, 89, calc(0.08 + var(--mod-intensity) * 0.12));
-    border-color: rgba(212, 163, 89, calc(0.4 + var(--mod-intensity) * 0.35));
+  /* Dynamic Mod Wheel Glow — always driven by --mod-intensity (0.00–1.00) */
+  #hud-container {
+    box-shadow:
+      0 0 calc(var(--mod-intensity) * 56px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.9)),
+      inset 0 0 calc(var(--mod-intensity) * 30px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.35));
+    border-color: rgba(212, 163, 89, calc(0.25 + var(--mod-intensity) * 0.6));
+    transition: box-shadow 0.08s ease, border-color 0.08s ease;
   }
 
   .mod-gradient-overlay {
@@ -103,14 +105,14 @@ local HTML_UI_CONTENT = [[
     border-radius: 14px;
     overflow: hidden;
     pointer-events: none;
-    background: linear-gradient(180deg, rgba(212, 163, 89, calc(var(--mod-intensity) * 0.08)) 0%, rgba(200, 140, 60, 0) 100%);
-    opacity: 0;
-    transition: opacity 0.15s ease;
+    background: linear-gradient(
+      180deg,
+      rgba(212, 163, 89, calc(var(--mod-intensity) * var(--mod-intensity) * 0.28)) 0%,
+      rgba(200, 140, 60, 0) 60%
+    );
+    transition: background 0.08s ease;
   }
 
-  #hud-container.mod-active .mod-gradient-overlay {
-    opacity: 1;
-  }
 
   /* Mod Wheel Bar */
   #mod-wheel-widget {

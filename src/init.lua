@@ -42,6 +42,12 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
   end
 
+  -- Ignore momentum (inertia) events — only process active finger-contact scrolls
+  local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
+  if phase == 0 and deltaY ~= 0 then
+    return false
+  end
+
   if deltaY ~= 0 then
     if state.shiftHeld then
       local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
