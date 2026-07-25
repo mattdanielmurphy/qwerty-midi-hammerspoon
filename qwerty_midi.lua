@@ -397,6 +397,7 @@ local function createMidiWebview()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
+      arpeggiator.stepLogicBpm(0)
       updateWebviewHud()
     elseif body.type == "finishBpmDrag" then
       arpeggiator.stepLogicBpm(0)
@@ -1195,7 +1196,7 @@ local function syncLogicBpm()
     isSyncingLogicBpm = false
     if exitCode == 0 and stdOut then
       local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer and not isSyncingLogicBpm and not state.bpmInputMode then
         state.arpBpm = val
         applyBpmChange()
         updateHud()
@@ -2242,12 +2243,6 @@ local HTML_UI_CONTENT = [[
         gateDragStartY = e.clientY;
         gateDragAccum = 0;
       });
-      gateValue.addEventListener('mouseup', (e) => {
-        e.stopPropagation();
-        if (isGateDragging) {
-          isGateDragging = false;
-        }
-      });
     }
 
     function stopGateRepeat() {
@@ -2302,17 +2297,11 @@ local HTML_UI_CONTENT = [[
         bpmDragStartY = e.clientY;
         bpmDragAccum = 0;
       });
-      bpmValue.addEventListener('mouseup', (e) => {
+      bpmValue.addEventListener('click', (e) => {
         e.stopPropagation();
         if (!hasBpmDragged) {
           if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
             window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'enterBpmEdit' });
-          }
-        }
-        if (isBpmDragging) {
-          isBpmDragging = false;
-          if (hasBpmDragged && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-            window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'finishBpmDrag' });
           }
         }
       });
