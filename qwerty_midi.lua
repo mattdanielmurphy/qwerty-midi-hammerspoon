@@ -2242,6 +2242,12 @@ local HTML_UI_CONTENT = [[
         gateDragStartY = e.clientY;
         gateDragAccum = 0;
       });
+      gateValue.addEventListener('mouseup', (e) => {
+        e.stopPropagation();
+        if (isGateDragging) {
+          isGateDragging = false;
+        }
+      });
     }
 
     function stopGateRepeat() {
@@ -2296,11 +2302,17 @@ local HTML_UI_CONTENT = [[
         bpmDragStartY = e.clientY;
         bpmDragAccum = 0;
       });
-      bpmValue.addEventListener('click', (e) => {
+      bpmValue.addEventListener('mouseup', (e) => {
         e.stopPropagation();
         if (!hasBpmDragged) {
           if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
             window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'enterBpmEdit' });
+          }
+        }
+        if (isBpmDragging) {
+          isBpmDragging = false;
+          if (hasBpmDragged && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+            window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'finishBpmDrag' });
           }
         }
       });
