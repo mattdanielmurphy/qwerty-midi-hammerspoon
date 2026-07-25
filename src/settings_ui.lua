@@ -41,15 +41,15 @@ local function generateSettingsHTML()
       font-family: 'Fraunces', Georgia, serif;
       background: #18140f;
       color: #e2d5c0;
-      font-size: 13px;
+      font-size: 15px;
       overflow: hidden;
-      border-radius: 14px;
+      border-radius: 16px;
     }
 
     #panel {
       background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
       border: 1.5px solid rgba(212, 163, 89, 0.4);
-      border-radius: 14px;
+      border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
       padding: 0;
       height: 100vh;
@@ -62,7 +62,7 @@ local function generateSettingsHTML()
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 16px 10px;
+      padding: 14px 20px 12px;
       border-bottom: 1px solid rgba(212, 163, 89, 0.2);
       cursor: move;
       -webkit-app-region: drag;
@@ -71,8 +71,8 @@ local function generateSettingsHTML()
 
     #titlebar-label {
       font-weight: 700;
-      font-size: 13px;
-      letter-spacing: 1.5px;
+      font-size: 15px;
+      letter-spacing: 1.8px;
       text-transform: uppercase;
       color: #d4a359;
       text-shadow: 0 0 12px rgba(212,163,89,0.4);
@@ -82,9 +82,9 @@ local function generateSettingsHTML()
       background: rgba(212,163,89,0.12);
       border: 1px solid rgba(212,163,89,0.35);
       color: #d4a359;
-      width: 22px; height: 22px;
+      width: 26px; height: 26px;
       border-radius: 50%%;
-      font-size: 11px;
+      font-size: 13px;
       cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       transition: background 0.15s, box-shadow 0.15s;
@@ -102,21 +102,21 @@ local function generateSettingsHTML()
     #scroll-area {
       overflow-y: auto;
       flex: 1;
-      padding: 14px 16px 16px;
+      padding: 18px 20px 20px;
     }
 
     /* ── Section ── */
     .section {
-      margin-bottom: 16px;
+      margin-bottom: 20px;
     }
     .section-title {
-      font-size: 9px;
+      font-size: 11px;
       font-weight: 700;
-      letter-spacing: 2px;
+      letter-spacing: 2.2px;
       text-transform: uppercase;
       color: rgba(212,163,89,0.55);
-      margin-bottom: 10px;
-      padding-bottom: 5px;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
       border-bottom: 1px solid rgba(212,163,89,0.12);
     }
 
@@ -125,31 +125,31 @@ local function generateSettingsHTML()
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 12px;
+      gap: 14px;
+      margin-bottom: 14px;
     }
     .row:last-child { margin-bottom: 0; }
 
     .row-label { flex: 1; min-width: 0; }
-    .row-label strong { font-weight: 700; font-size: 12px; color: #e2d5c0; display: block; }
-    .row-label span { font-size: 10px; color: rgba(200,185,160,0.55); display: block; margin-top: 1px; }
+    .row-label strong { font-weight: 700; font-size: 14px; color: #e2d5c0; display: block; }
+    .row-label span { font-size: 12px; color: rgba(200,185,160,0.55); display: block; margin-top: 2px; }
 
     /* ── Select ── */
     select {
       background: rgba(20,16,10,0.9);
       border: 1px solid rgba(212,163,89,0.35);
       color: #d4a359;
-      padding: 5px 8px;
-      border-radius: 6px;
+      padding: 6px 10px;
+      border-radius: 8px;
       outline: none;
-      font-size: 11px;
+      font-size: 13px;
       font-family: inherit;
       font-weight: 700;
       flex-shrink: 0;
       appearance: none;
       -webkit-appearance: none;
       cursor: pointer;
-      min-width: 90px;
+      min-width: 105px;
       text-align: center;
     }
     select:focus { border-color: rgba(212,163,89,0.7); }
@@ -159,12 +159,12 @@ local function generateSettingsHTML()
     .toggle-wrap {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       flex-shrink: 0;
     }
     .toggle {
       position: relative;
-      width: 40px; height: 22px;
+      width: 48px; height: 26px;
     }
     .toggle input { opacity: 0; width: 0; height: 0; }
     .toggle-track {
@@ -172,14 +172,14 @@ local function generateSettingsHTML()
       inset: 0;
       background: rgba(30,24,14,0.9);
       border: 1px solid rgba(212,163,89,0.3);
-      border-radius: 11px;
+      border-radius: 13px;
       cursor: pointer;
       transition: background 0.2s, border-color 0.2s;
     }
     .toggle-thumb {
       position: absolute;
       top: 3px; left: 3px;
-      width: 14px; height: 14px;
+      width: 18px; height: 18px;
       background: rgba(212,163,89,0.45);
       border-radius: 50%%;
       transition: transform 0.2s, background 0.2s;
@@ -190,7 +190,7 @@ local function generateSettingsHTML()
       border-color: rgba(212,163,89,0.7);
     }
     .toggle input:checked ~ .toggle-thumb {
-      transform: translateX(18px);
+      transform: translateX(22px);
       background: #d4a359;
     }
 
@@ -198,23 +198,23 @@ local function generateSettingsHTML()
     .slider-row {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
       flex-shrink: 0;
-      width: 160px;
+      width: 190px;
     }
     input[type=range] {
       -webkit-appearance: none;
       appearance: none;
       flex: 1;
-      height: 4px;
+      height: 5px;
       background: rgba(212,163,89,0.18);
-      border-radius: 2px;
+      border-radius: 3px;
       outline: none;
       cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 14px; height: 14px;
+      width: 16px; height: 16px;
       border-radius: 50%%;
       background: #d4a359;
       border: 1px solid rgba(0,0,0,0.4);
@@ -222,10 +222,10 @@ local function generateSettingsHTML()
       cursor: pointer;
     }
     .slider-val {
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 700;
       color: #d4a359;
-      min-width: 32px;
+      min-width: 38px;
       text-align: right;
       font-variant-numeric: tabular-nums;
     }
@@ -235,19 +235,19 @@ local function generateSettingsHTML()
       background: rgba(20,16,10,0.9);
       border: 1px solid rgba(212,163,89,0.35);
       color: #d4a359;
-      padding: 5px 8px;
-      border-radius: 6px;
+      padding: 6px 10px;
+      border-radius: 8px;
       outline: none;
-      font-size: 11px;
+      font-size: 13px;
       font-family: inherit;
       font-weight: 700;
-      width: 70px;
+      width: 84px;
       text-align: center;
     }
     input[type=number]:focus { border-color: rgba(212,163,89,0.7); }
 
     /* ── Divider ── */
-    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 4px 0 16px; }
+    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 6px 0 20px; }
   </style>
 </head>
 <body>
@@ -355,7 +355,9 @@ local function generateSettingsHTML()
 
 <script>
   function send(type, value) {
-    webkit.messageHandlers.settingsHandler.postMessage({ type: type, value: value });
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.settingsUserContent) {
+      window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
+    }
   }
   function onSensitivity(v) {
     document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
@@ -392,10 +394,6 @@ local function toggleSettingsWindow()
   end
 
   local uc = hsUsercontent.new("settingsUserContent")
-  uc:injectScript({
-    source = "window.settingsHandler = webkit.messageHandlers.settingsHandler;",
-    injectionPoint = "documentStart"
-  })
 
   uc:setCallback(function(message)
     local body = message.body
@@ -426,12 +424,13 @@ local function toggleSettingsWindow()
       return
     end
 
+    config.saveSettings()
     local hud = require("hud")
     hud.updateWebviewHud()
   end)
 
   local screen = hs.screen.mainScreen():frame()
-  local w, h = 440, 510
+  local w, h = 528, 612
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
