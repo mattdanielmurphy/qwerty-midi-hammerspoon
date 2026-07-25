@@ -44,7 +44,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
   -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
   local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-  local inertiaScale = (phase == 0) and 0.3 or 1.0
+  local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
 
   if deltaY ~= 0 then
     if state.shiftHeld then
@@ -70,7 +70,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     else
       local currentMod = state.ccStates[1] or 0
       _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-      local sensitivity = 0.15 * inertiaScale
+      local sensitivity = state.scrollSensitivity * inertiaScale
       _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
       local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
 

@@ -61,6 +61,10 @@ local state = {
   logicSyncEnabled = (hs.settings.get("qwertyMidi_logicSyncEnabled") == nil) and true or hs.settings.get("qwertyMidi_logicSyncEnabled"),
   logicSyncTimer = nil,
 
+  -- Scroll / Trackpad
+  scrollSensitivity    = hs.settings.get("qwertyMidi_scrollSensitivity")    or 0.15,
+  scrollMomentumScale  = hs.settings.get("qwertyMidi_scrollMomentumScale")   or 0.3,
+
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
