@@ -55,11 +55,6 @@ local function panicAllChannels()
     dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
-
-    -- Send explicit note off for all pitch numbers 0..127
-    for note = 0, 127 do
-      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
-    end
   end
 end
 

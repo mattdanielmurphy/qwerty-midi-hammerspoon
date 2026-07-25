@@ -380,6 +380,7 @@ local function createMidiWebview()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
+      if arpeggiator.setLogicBpmTarget then arpeggiator.setLogicBpmTarget(state.arpBpm) end
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
       state.arpTopEnabled = not state.arpTopEnabled

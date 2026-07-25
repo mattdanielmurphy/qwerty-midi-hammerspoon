@@ -465,7 +465,16 @@ local function setLogicBpmTarget(targetBpm)
         
         tell application "System Events"
           tell process "Logic Pro"
-            set tempoSlider to slider 1 of group 1 of group 1 of window 1
+            set tempoSlider to missing value
+            set allSliders to sliders of group 1 of group 1 of window 1
+            repeat with s in allSliders
+              if description of s is "Tempo" then
+                set tempoSlider to s
+                exit repeat
+              end if
+            end repeat
+            
+            if tempoSlider is missing value then return targetBPM
             
             repeat 20 times
               set currentBPM to (value of tempoSlider) as integer
@@ -519,7 +528,7 @@ local function stepLogicBpm(delta)
 end
 
 local function syncLogicBpm()
-  if not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
+  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
   isSyncingLogicBpm = true
 
   local script = [[

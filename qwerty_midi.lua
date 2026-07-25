@@ -397,6 +397,7 @@ local function createMidiWebview()
     elseif body.type == "dragBpm" and body.delta ~= nil then
       state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
       arpeggiator.applyBpmChange()
+      if arpeggiator.setLogicBpmTarget then arpeggiator.setLogicBpmTarget(state.arpBpm) end
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
       state.arpTopEnabled = not state.arpTopEnabled
@@ -1122,7 +1123,16 @@ local function setLogicBpmTarget(targetBpm)
         
         tell application "System Events"
           tell process "Logic Pro"
-            set tempoSlider to slider 1 of group 1 of group 1 of window 1
+            set tempoSlider to missing value
+            set allSliders to sliders of group 1 of group 1 of window 1
+            repeat with s in allSliders
+              if description of s is "Tempo" then
+                set tempoSlider to s
+                exit repeat
+              end if
+            end repeat
+            
+            if tempoSlider is missing value then return targetBPM
             
             repeat 20 times
               set currentBPM to (value of tempoSlider) as integer
@@ -1176,7 +1186,7 @@ local function stepLogicBpm(delta)
 end
 
 local function syncLogicBpm()
-  if not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
+  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
   isSyncingLogicBpm = true
 
   local script = [[
@@ -2311,7 +2321,7 @@ local HTML_UI_CONTENT = [[
         bpmDragStartY = e.clientY;
         bpmDragAccum = 0;
       });
-      bpmValue.addEventListener('click', (e) => {
+      bpmValue.addEventListener('mouseup', (e) => {
         e.stopPropagation();
         if (!hasBpmDragged) {
           if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
@@ -4100,11 +4110,6 @@ local function panicAllChannels()
     dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
-
-    -- Send explicit note off for all pitch numbers 0..127
-    for note = 0, 127 do
-      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
-    end
   end
 end
 

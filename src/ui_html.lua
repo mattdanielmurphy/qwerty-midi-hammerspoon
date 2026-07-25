@@ -970,7 +970,7 @@ local HTML_UI_CONTENT = [[
         bpmDragStartY = e.clientY;
         bpmDragAccum = 0;
       });
-      bpmValue.addEventListener('click', (e) => {
+      bpmValue.addEventListener('mouseup', (e) => {
         e.stopPropagation();
         if (!hasBpmDragged) {
           if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
