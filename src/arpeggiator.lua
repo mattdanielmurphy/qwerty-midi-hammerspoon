@@ -373,17 +373,38 @@ local function handleBpmInput(code, flags)
     if #state.bpmInputBuffer > 0 then
       state.bpmInputBuffer = state.bpmInputBuffer:sub(1, -2)
     end
-    updateHud()
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer ~= "" and (state.bpmInputBuffer .. " BPM") or "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
     return true
   elseif DIGIT_KEYCODES[code] then
     state.bpmInputBuffer = state.bpmInputBuffer .. DIGIT_KEYCODES[code]
-    updateHud()
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
     return true
   elseif code == 47 then -- Period "."
     if not state.bpmInputBuffer:find("%.") then
       state.bpmInputBuffer = state.bpmInputBuffer .. "."
     end
-    updateHud()
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
     return true
   end
 

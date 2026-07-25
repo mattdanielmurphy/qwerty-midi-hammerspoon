@@ -355,7 +355,14 @@ local function createMidiWebview()
       state.bpmInputMode = true
       state.bpmBeforeEdit = state.arpBpm
       state.bpmInputBuffer = ""
-      updateWebviewHud()
+      local spot = {
+        title = "EDIT BPM",
+        value = "TYPE TEMPO",
+        subtext = "Type digits & press Enter",
+        targetId = "bpm-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
     elseif body.type == "bpmUp" then
       local step = state.bpmStepSize or 10
       state.arpBpm = math.min(300, state.arpBpm + step)
