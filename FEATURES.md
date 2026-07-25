@@ -30,3 +30,4 @@
 - **Correlated Control Key Pair Styling**: Related control keys (e.g. `J`/`K` Transpose, `H`/`L` Root, `G`/`;` Mode, `D`/`F` Octave, `3`/`4` Dir, `5`/`6` Rate, `7`/`8` Gate, `-`/`=` BPM) share cohesive, understated color accents matching the warm dark HUD theme for effortless visual grouping without dominating note keys.
 
 
+- **Instant BPM Type-Tempo Mode & Drag Persistence**: Clicking the BPM display immediately opens 'Type tempo' input mode on mouse release. Dragging the BPM up/down dynamically adjusts tempo and commits the target BPM to both the Arpeggiator and active Logic Pro session on mouse release.
