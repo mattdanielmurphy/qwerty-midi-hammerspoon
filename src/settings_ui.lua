@@ -32,13 +32,11 @@ local function generateSettingsHTML()
 <html>
 <head>
   <meta charset="utf-8"/>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
 
     body {
-      font-family: 'Fraunces', Georgia, serif;
+      font-family: Georgia, serif;
       background: #18140f;
       color: #e2d5c0;
       font-size: 15px;
