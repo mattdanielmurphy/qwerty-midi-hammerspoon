@@ -17,14 +17,28 @@ local state = {
   arpEnabled = false,
   arpDirectionIdx = 1,        -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
   ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
-  arpRateIdx = 2,
+  arpRateIdx = 5,
   ARP_RATES = {
-    { label = "1/4", factor = 1.0 },
-    { label = "1/8", factor = 0.5 },
-    { label = "1/16", factor = 0.25 },
-    { label = "1/32", factor = 0.125 },
-    { label = "1/8T", factor = 1.0 / 3.0 },
-    { label = "1/16T", factor = 0.5 / 3.0 }
+    -- Straight rates (slow → fast)
+    { label = "4",     factor = 16.0 },
+    { label = "2",     factor = 8.0 },
+    { label = "1",     factor = 4.0 },
+    { label = "1/2",   factor = 2.0 },
+    { label = "1/4",   factor = 1.0 },
+    { label = "1/8",   factor = 0.5 },
+    { label = "1/16",  factor = 0.25 },
+    { label = "1/32",  factor = 0.125 },
+    { label = "1/64",  factor = 0.0625 },
+    -- Triplet rates (slow → fast)
+    { label = "4T",    factor = 16.0 / 1.5 },
+    { label = "2T",    factor = 8.0  / 1.5 },
+    { label = "1T",    factor = 4.0  / 1.5 },
+    { label = "1/2T",  factor = 2.0  / 1.5 },
+    { label = "1/4T",  factor = 1.0  / 1.5 },
+    { label = "1/8T",  factor = 0.5  / 1.5 },
+    { label = "1/16T", factor = 0.25 / 1.5 },
+    { label = "1/32T", factor = 0.125 / 1.5 },
+    { label = "1/64T", factor = 0.0625 / 1.5 }
   },
   arpGatePercent = 80.0,
   arpBpm = 120.0,
@@ -133,12 +147,12 @@ local homeRowControls = {
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
-  [5]  = { key = "G",   name = "Vol -",   action = "volDown",     shiftAction = "volDown",    shiftName = "Vol -" },
+  [5]  = { key = "G",   name = "Trnsp -", action = "trnspDown",   shiftAction = "volDown",    shiftName = "Vol -" },
   [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "topOctDown", shiftName = "TopOct -" },
   [38] = { key = "J",   name = "Mode -",  action = "modeDown",    shiftAction = "modWheelDown", shiftName = "Mod -" },
   [40] = { key = "K",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
   [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "topOctUp",   shiftName = "TopOct +" },
-  [41] = { key = ";",   name = "Vol +",   action = "volUp",       shiftAction = "volUp",      shiftName = "Vol +" }
+  [41] = { key = ";",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" }
 }
 
 return {
