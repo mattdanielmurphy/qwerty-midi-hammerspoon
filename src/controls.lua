@@ -46,27 +46,9 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "trnspDown" then
-    state.transposeShift = math.max(-12, state.transposeShift - 1)
-    arpeggiator.updateLatchedArpNotes()
-    local spot = {
-      title = "TRANSPOSE",
-      value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " st",
-      subtext = "Semitone Shift",
-      targetId = "status-text",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    executeControlAction("rootDown", code)
   elseif act == "trnspUp" then
-    state.transposeShift = math.min(12, state.transposeShift + 1)
-    arpeggiator.updateLatchedArpNotes()
-    local spot = {
-      title = "TRANSPOSE",
-      value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " st",
-      subtext = "Semitone Shift",
-      targetId = "status-text",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    executeControlAction("rootUp", code)
   elseif act == "octaveDown" then
     state.octaveShift = math.max(-36, state.octaveShift - 12)
     local spot = {
