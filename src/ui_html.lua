@@ -3564,21 +3564,22 @@ local HTML_UI_CONTENT = [[
             } else {
               halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             }
-          }
-
           el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
           if (k.latched) el.classList.add('latched-key');
           if (k.pressed) el.classList.add('pressed');
           if (k.sustainActive) el.classList.add('sustain-active');
 
+          const isShift = data.shiftHeld || shiftModeActive;
+          const effAction = isShift ? (k.shiftAction || k.action) : k.action;
+
           const iconEl = el.querySelector('.key-row-icon');
           if (iconEl) {
             iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
-            if (k.action === 'topOctDown' || k.action === 'topOctUp' || k.action === 'topVolDown' || k.action === 'topVolUp' || k.action === 'arpTopToggle') {
+            if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
               iconEl.classList.add('top-active');
-            } else if (k.action === 'botVolDown' || k.action === 'botVolUp' || k.action === 'arpBottomToggle' || k.action === 'botOctDown' || k.action === 'botOctUp') {
+            } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
               iconEl.classList.add('bottom-active');
-            } else if (k.action === 'octaveDown' || k.action === 'octaveUp' || k.action === 'volDown' || k.action === 'volUp') {
+            } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
               iconEl.classList.add('both-active');
             }
           }
