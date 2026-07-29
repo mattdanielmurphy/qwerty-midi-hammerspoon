@@ -138,6 +138,7 @@ local function arpTick()
     state.arpStepIndex = math.random(1, #pitchList)
   end
 
+  state.arpStepIndex = math.max(1, math.min(#pitchList, state.arpStepIndex or 1))
   local nextPitch = pitchList[state.arpStepIndex]
 
   if state.arpDirectionIdx == 3 then -- UP-DOWN
@@ -265,10 +266,11 @@ local function arpRemoveNote(code)
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    return
+    -- In latch mode, we DO keep the notes in state.arpHeldNotes for the held chord.
+  else
+    state.arpHeldNotes[code] = nil
   end
 
-  state.arpHeldNotes[code] = nil
   local count = countTableKeys(state.arpHeldNotes)
   if count == 0 then
     stopArpTimer()

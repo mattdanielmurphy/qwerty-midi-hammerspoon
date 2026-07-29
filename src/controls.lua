@@ -705,8 +705,6 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "arpToggle" then
-    arpeggiator.toggleArpPower()
   elseif act == "arpTopToggle" then
     state.arpTopEnabled = not state.arpTopEnabled
     if not state.arpTopEnabled then
