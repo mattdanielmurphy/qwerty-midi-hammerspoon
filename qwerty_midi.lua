@@ -649,10 +649,27 @@ local function createMidiWebview()
   return wv
 end
 
+local function reloadMidiWebview()
+  if not _G.activeWatchers.midiWebview then
+    return createMidiWebview()
+  end
+  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/src/web/index.html", "r")
+  if f then
+    local freshHtml = f:read("*a")
+    f:close()
+    _G.activeWatchers.midiWebview:html(freshHtml)
+    return _G.activeWatchers.midiWebview
+  else
+    print("QWERTY MIDI: failed to read index.html for reload")
+    return _G.activeWatchers.midiWebview
+  end
+end
+
 return {
   setControlsModule = setControlsModule,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
+  reloadMidiWebview = reloadMidiWebview,
   getLastHeartbeat = function() return lastHeartbeat end
 }
 
@@ -937,8 +954,8 @@ end)
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
   if state.midiActive and _G.activeWatchers.midiWebview then
     local ok, err = pcall(function()
-      local h = hud.createMidiWebview()
-      h:show()
+      local h = hud.reloadMidiWebview()
+      if h then h:show() end
     end)
     if not ok then print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err)) end
   end
