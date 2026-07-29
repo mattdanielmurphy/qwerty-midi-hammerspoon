@@ -633,19 +633,14 @@ local function createMidiWebview()
 end
 
 local function reloadMidiWebview()
-  if not _G.activeWatchers.midiWebview then
-    return createMidiWebview()
+  if _G.activeWatchers.midiWebview then
+    pcall(function()
+      _G.activeWatchers.midiWebview:windowCallback(nil)
+      _G.activeWatchers.midiWebview:delete()
+      _G.activeWatchers.midiWebview = nil
+    end)
   end
-  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/src/web/index.html", "r")
-  if f then
-    local freshHtml = f:read("*a")
-    f:close()
-    _G.activeWatchers.midiWebview:html(freshHtml)
-    return _G.activeWatchers.midiWebview
-  else
-    print("QWERTY MIDI: failed to read index.html for reload")
-    return _G.activeWatchers.midiWebview
-  end
+  return createMidiWebview()
 end
 
 return {

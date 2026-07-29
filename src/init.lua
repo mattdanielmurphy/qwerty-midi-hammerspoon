@@ -274,12 +274,16 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
-  if state.midiActive and _G.activeWatchers.midiWebview then
+  if state.midiActive then
     local ok, err = pcall(function()
       local h = hud.reloadMidiWebview()
       if h then h:show() end
     end)
-    if not ok then print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err)) end
+    if ok then
+      hs.notify.new({title="QWERTY MIDI", informativeText="UI refreshed"}):send()
+    else
+      print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err))
+    end
   end
 end)
 
