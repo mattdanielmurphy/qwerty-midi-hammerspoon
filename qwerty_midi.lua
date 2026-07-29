@@ -142,16 +142,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   for code, cData in pairs(numberRowControls) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isMainArp = (code == 50)
     local isTopArp = (code == 18)
     local isBotArp = (code == 19)
     local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
-    local pairedClass = actionTypeClass[act] or ""
+    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
+      note = cData.name,
+      action = cData.action,
+      shiftNote = cData.shiftName or cData.name,
+      shiftAction = cData.shiftAction,
       isControl = true,
       typeClass = pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -182,6 +183,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
     keyUpdates[tostring(code)] = {
       note = noteName,
+      shiftNote = noteName,
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
@@ -190,14 +192,15 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isSustain = (code == 48)
     local isLatch = (code == 0)
-    local pairedClass = actionTypeClass[act] or ""
+    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
+      note = cData.name,
+      action = cData.action,
+      shiftNote = cData.shiftName or cData.name,
+      shiftAction = cData.shiftAction,
       isControl = true,
       typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -215,6 +218,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    shiftHeld = state.shiftHeld,
     rootIdx = state.currentRoot,
     modeName = modeName,
     arpEnabled = state.arpEnabled,
@@ -495,15 +499,17 @@ local function createMidiWebview()
       if _G.activeWatchers.midiWebview then
         local wv = _G.activeWatchers.midiWebview
         local frame = wv:frame()
+        local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+        local editH = math.floor(460 * effectiveScale)
         if body.active then
           _savedNormalHeight = frame.h
-          -- Shift Y up by the height difference so it expands upward instead of off-screen
-          wv:frame({ x = frame.x, y = frame.y - frame.h, w = frame.w, h = frame.h * 2 })
+          local diffH = editH - frame.h
+          wv:frame({ x = frame.x, y = frame.y - diffH, w = frame.w, h = editH })
         else
-          local restoreH = _savedNormalHeight or frame.h
+          local restoreH = _savedNormalHeight or math.floor(330 * effectiveScale)
+          local diffH = frame.h - restoreH
           _savedNormalHeight = nil
-          -- Shift Y back down by the same amount
-          wv:frame({ x = frame.x, y = frame.y + restoreH, w = frame.w, h = restoreH })
+          wv:frame({ x = frame.x, y = frame.y + diffH, w = frame.w, h = restoreH })
         end
       end
     elseif body.type == "getLayoutConfig" then
@@ -923,6 +929,25 @@ end)
 
 _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
   _G.toggleMidiMode()
+end)
+
+_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  if state.midiActive and _G.activeWatchers.midiWebview then
+    local ok, err = pcall(function()
+      local h = hud.createMidiWebview()
+      h:show()
+    end)
+    if not ok then print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err)) end
+    
+    local logContent = "--- HAMMERSPOON CONSOLE ---\n" .. (hs.console.getConsole() or "")
+    local f1 = io.open("/tmp/wv_js.log", "r")
+    if f1 then logContent = "--- JS LOG ---\n" .. f1:read("*all") .. "\n" .. logContent; f1:close() end
+    local f2 = io.open("/tmp/midi_startup.log", "r")
+    if f2 then logContent = "--- STARTUP LOG ---\n" .. f2:read("*all") .. "\n" .. logContent; f2:close() end
+    
+    hs.pasteboard.setContents(logContent)
+    hs.notify.new({title="QWERTY MIDI", informativeText="log file copied to clipboard—paste this to your agent to fix"}):send()
+  end
 end)
 
 if _G.activeWatchers.settingsHotkey then
@@ -1821,7 +1846,7 @@ local HTML_UI_CONTENT = [[
     border-radius: 14px;
   }
   #hud-container.edit-mode-active {
-    height: 660px;
+    height: 460px;
   }
 
   .mod-gradient-overlay {
@@ -2874,6 +2899,11 @@ local HTML_UI_CONTENT = [[
   #hud-container.edit-mode-active .keyboard-grid {
     max-width: calc(980px - 272px);
     transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    gap: 4px;
+  }
+
+  #hud-container.edit-mode-active .keyboard-row {
+    gap: 4px;
   }
 
   #hud-container.edit-mode-active .key-pad {
@@ -2885,13 +2915,16 @@ local HTML_UI_CONTENT = [[
   /* Compact key pads when drawer is open */
   #hud-container.edit-mode-active .key-pad {
     width: 48px;
-    height: 38px;
+    min-width: 48px;
+    flex-shrink: 0;
+    height: 44px;
+    gap: 0;
   }
   #hud-container.edit-mode-active .key-pad .key-code {
-    font-size: 10px;
+    font-size: 8px;
   }
   #hud-container.edit-mode-active .key-pad .key-note {
-    font-size: 8px;
+    font-size: 7.5px;
   }
   #hud-container.edit-mode-active .key-pad[draggable]:not(.dummy-pad) {
     cursor: grab;
@@ -2902,51 +2935,55 @@ local HTML_UI_CONTENT = [[
     max-width: 70px;
   }
 
-  /* ===== VERTICAL SPLIT HALVES FOR EDIT MODE KEYS ===== */
-  /* Hidden by default (performance mode) */
-  .key-pad .key-half {
-    display: none;
-  }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) {
-    height: 76px;
+  /* ===== DUAL-STACKED KEY RENDERING (PERFORMANCE & EDIT MODE) ===== */
+  .key-pad:not(.dummy-pad) {
+    display: flex;
     flex-direction: column;
     justify-content: stretch;
+    align-items: stretch;
     overflow: hidden;
     padding: 0;
     position: relative;
   }
-  /* Hide original key-note in edit mode (replaced by halves) */
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-note {
+  /* Hide original single center key-note label in key pads */
+  .key-pad:not(.dummy-pad) > .key-note {
     display: none;
   }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-code {
+  .key-pad:not(.dummy-pad) > .key-code {
     position: absolute;
     top: 2px;
     left: 3px;
-    z-index: 2;
+    z-index: 3;
     font-size: 8px;
-    background: rgba(0,0,0,0.5);
+    font-weight: 700;
+    color: rgba(242, 234, 225, 0.75);
+    background: rgba(0, 0, 0, 0.5);
     padding: 0 3px;
     border-radius: 3px;
+    pointer-events: none;
   }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-row-icon {
+  .key-pad:not(.dummy-pad) > .key-row-icon {
     display: none !important;
   }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) .key-half {
+  .key-pad .key-half {
     display: flex;
     flex: 1;
     align-items: center;
     justify-content: center;
     width: 100%;
-    cursor: grab;
     min-height: 0;
     position: relative;
+    padding: 0 2px;
+    box-sizing: border-box;
   }
-  #hud-container.edit-mode-active .key-pad .key-half-top {
-    border-bottom: 1px solid rgba(212, 163, 89, 0.25);
+  .key-pad .key-half-top {
+    border-bottom: 1px solid rgba(212, 163, 89, 0.15);
+    background: rgba(138, 190, 242, 0.06);
   }
-  #hud-container.edit-mode-active .key-pad .key-half .key-note {
-    font-size: 7px;
+  .key-pad .key-half-top .key-note {
+    color: #8abef2;
+    font-size: 7.5px;
+    font-weight: 600;
     line-height: 1.1;
     margin: 0;
     white-space: nowrap;
@@ -2955,7 +2992,22 @@ local HTML_UI_CONTENT = [[
     max-width: 95%;
     pointer-events: none;
   }
-  #hud-container.edit-mode-active .key-pad .key-half .half-label {
+  .key-pad .key-half-bottom {
+    background: rgba(242, 234, 225, 0.02);
+  }
+  .key-pad .key-half-bottom .key-note {
+    color: #f2eae1;
+    font-size: 8px;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 95%;
+    pointer-events: none;
+  }
+  .key-pad .key-half .half-label {
     font-size: 5.5px;
     font-weight: 700;
     letter-spacing: 0.5px;
@@ -2963,15 +3015,29 @@ local HTML_UI_CONTENT = [[
     position: absolute;
     right: 2px;
     bottom: 1px;
-    color: rgba(140, 130, 115, 0.5);
+    color: rgba(140, 130, 115, 0.4);
     pointer-events: none;
   }
-  #hud-container.edit-mode-active .key-pad .key-half-top .half-label {
-    color: rgba(94, 162, 235, 0.5);
+  .key-pad .key-half-top .half-label {
+    color: rgba(138, 190, 242, 0.4);
     bottom: auto;
     top: 1px;
-    left: 2px;
-    right: auto;
+    left: auto;
+    right: 2px;
+  }
+  /* Shift Key Illumination / Highlight */
+  #hud-container.shift-active-labels .key-half-top,
+  #hud-container.shift-top-highlight .key-half-top,
+  .key-pad.shift-top-highlight .key-half-top {
+    background: rgba(138, 190, 242, 0.25) !important;
+    box-shadow: inset 0 0 8px rgba(138, 190, 242, 0.4);
+  }
+  #hud-container.shift-active-labels .key-half-top .key-note,
+  #hud-container.shift-top-highlight .key-half-top .key-note,
+  .key-pad.shift-top-highlight .key-half-top .key-note {
+    color: #ffffff !important;
+    text-shadow: 0 0 6px rgba(138, 190, 242, 0.9);
+    font-weight: 700;
   }
   /* Highlight for drop targets on halves */
   #hud-container.edit-mode-active .key-half.drag-over-target {
@@ -3683,10 +3749,6 @@ local HTML_UI_CONTENT = [[
         }
       }
     }
-    // Force re-render from Lua to update labels for non-customized keys
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'getLayoutConfig' });
-    }
   }
 
   function toggleShiftMode() {
@@ -4046,6 +4108,8 @@ local HTML_UI_CONTENT = [[
       currentWorkingLayout[code].typeClass = actionObj.typeClass;
     }
 
+    setHasUnsavedChanges(true);
+
     const pad = document.getElementById('key-' + code);
     if (pad) {
       const noteEl = pad.querySelector(':scope > .key-note');
@@ -4084,6 +4148,7 @@ local HTML_UI_CONTENT = [[
     if (!padA || !padB) return;
 
     recordSnapshot('Swap Keys');
+    setHasUnsavedChanges(true);
 
     const noteA = padA.querySelector(':scope > .key-note');
     const noteB = padB.querySelector(':scope > .key-note');
@@ -4251,11 +4316,15 @@ local HTML_UI_CONTENT = [[
       }
     }
 
+    setHasUnsavedChanges(false);
     closePresetModal();
   }
 
   window.onLayoutConfigLoaded = function(configData) {
     if (!configData) return;
+    if (typeof initGrid === 'function' && typeof LAYOUT_DATA !== 'undefined') {
+      initGrid(LAYOUT_DATA);
+    }
     if (configData.actionCatalog) {
       currentActionCatalog = configData.actionCatalog;
       // Preserve current search query when re-rendering after config load
@@ -4265,8 +4334,8 @@ local HTML_UI_CONTENT = [[
     }
     if (configData.customLayout) {
       currentWorkingLayout = configData.customLayout;
-      if (typeof updateAllKeyLabels === 'function') updateAllKeyLabels();
     }
+    if (typeof updateAllKeyLabels === 'function') updateAllKeyLabels();
     if (configData.presets) {
       updatePresetDropdown(configData.presets, configData.activePresetId);
     }
@@ -6120,18 +6189,39 @@ local function applyCustomLayout(customData)
 
         if targetTable then
           local defaultDef = defaultNumberRowControls[code] or defaultHomeRowControls[code] or defaultUpperRowKeys[code] or defaultLowerRowKeys[code]
-          local actObj = actionIdx[binding.action]
-          local nameVal = binding.name
-          if not nameVal or nameVal == "Ctrl" or nameVal == "" then
-            nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+          local actObj = binding.action and actionIdx[binding.action]
+          local shiftActObj = binding.shiftAction and actionIdx[binding.shiftAction]
+
+          local actionVal, nameVal
+          if binding.action ~= nil then
+            actionVal = binding.action
+            nameVal = binding.name
+            if not nameVal or nameVal == "Ctrl" or nameVal == "" then
+              nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+            end
+          else
+            actionVal = defaultDef and defaultDef.action
+            nameVal = defaultDef and defaultDef.name
+          end
+
+          local shiftActionVal, shiftNameVal
+          if binding.shiftAction ~= nil then
+            shiftActionVal = binding.shiftAction
+            shiftNameVal = binding.shiftName
+            if not shiftNameVal or shiftNameVal == "" then
+              shiftNameVal = (shiftActObj and shiftActObj.name) or (defaultDef and defaultDef.shiftName)
+            end
+          else
+            shiftActionVal = defaultDef and defaultDef.shiftAction
+            shiftNameVal = defaultDef and defaultDef.shiftName
           end
 
           targetTable[code] = {
             key = binding.key or (defaultDef and defaultDef.key),
             name = nameVal,
-            action = binding.action,
-            shiftAction = binding.shiftAction or (defaultDef and defaultDef.shiftAction),
-            shiftName = binding.shiftName or (defaultDef and defaultDef.shiftName)
+            action = actionVal,
+            shiftAction = shiftActionVal,
+            shiftName = shiftNameVal
           }
         end
       elseif binding.baseNote ~= nil then
@@ -6215,9 +6305,12 @@ local function saveCustomLayout(newLayoutData)
     activeId = "default"
   end
 
-  map[activeId].data = newLayoutData or {}
+  local presetObj = map[activeId]
+  if presetObj and not (presetObj.isBuiltin or activeId == "default") then
+    presetObj.data = newLayoutData or {}
+    hs.settings.set("qwertyMidi_layoutPresets", map)
+  end
 
-  hs.settings.set("qwertyMidi_layoutPresets", map)
   hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   applyCustomLayout(newLayoutData)
   saveSettings()
@@ -6242,6 +6335,7 @@ local function savePreset(presetId, name, layoutData)
   }
 
   hs.settings.set("qwertyMidi_layoutPresets", map)
+  hs.settings.set("qwertyMidi_activePresetId", presetId)
   selectPreset(presetId)
   return presetId
 end

@@ -125,16 +125,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   for code, cData in pairs(numberRowControls) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isMainArp = (code == 50)
     local isTopArp = (code == 18)
     local isBotArp = (code == 19)
     local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
-    local pairedClass = actionTypeClass[act] or ""
+    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
+      note = cData.name,
+      action = cData.action,
+      shiftNote = cData.shiftName or cData.name,
+      shiftAction = cData.shiftAction,
       isControl = true,
       typeClass = pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -165,6 +166,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
     keyUpdates[tostring(code)] = {
       note = noteName,
+      shiftNote = noteName,
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
@@ -173,14 +175,15 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isSustain = (code == 48)
     local isLatch = (code == 0)
-    local pairedClass = actionTypeClass[act] or ""
+    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
+      note = cData.name,
+      action = cData.action,
+      shiftNote = cData.shiftName or cData.name,
+      shiftAction = cData.shiftAction,
       isControl = true,
       typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -198,6 +201,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    shiftHeld = state.shiftHeld,
     rootIdx = state.currentRoot,
     modeName = modeName,
     arpEnabled = state.arpEnabled,
@@ -478,15 +482,17 @@ local function createMidiWebview()
       if _G.activeWatchers.midiWebview then
         local wv = _G.activeWatchers.midiWebview
         local frame = wv:frame()
+        local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+        local editH = math.floor(460 * effectiveScale)
         if body.active then
           _savedNormalHeight = frame.h
-          -- Shift Y up by the height difference so it expands upward instead of off-screen
-          wv:frame({ x = frame.x, y = frame.y - frame.h, w = frame.w, h = frame.h * 2 })
+          local diffH = editH - frame.h
+          wv:frame({ x = frame.x, y = frame.y - diffH, w = frame.w, h = editH })
         else
-          local restoreH = _savedNormalHeight or frame.h
+          local restoreH = _savedNormalHeight or math.floor(330 * effectiveScale)
+          local diffH = frame.h - restoreH
           _savedNormalHeight = nil
-          -- Shift Y back down by the same amount
-          wv:frame({ x = frame.x, y = frame.y + restoreH, w = frame.w, h = restoreH })
+          wv:frame({ x = frame.x, y = frame.y + diffH, w = frame.w, h = restoreH })
         end
       end
     elseif body.type == "getLayoutConfig" then

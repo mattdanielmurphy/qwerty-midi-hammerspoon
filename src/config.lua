@@ -334,18 +334,39 @@ local function applyCustomLayout(customData)
 
         if targetTable then
           local defaultDef = defaultNumberRowControls[code] or defaultHomeRowControls[code] or defaultUpperRowKeys[code] or defaultLowerRowKeys[code]
-          local actObj = actionIdx[binding.action]
-          local nameVal = binding.name
-          if not nameVal or nameVal == "Ctrl" or nameVal == "" then
-            nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+          local actObj = binding.action and actionIdx[binding.action]
+          local shiftActObj = binding.shiftAction and actionIdx[binding.shiftAction]
+
+          local actionVal, nameVal
+          if binding.action ~= nil then
+            actionVal = binding.action
+            nameVal = binding.name
+            if not nameVal or nameVal == "Ctrl" or nameVal == "" then
+              nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+            end
+          else
+            actionVal = defaultDef and defaultDef.action
+            nameVal = defaultDef and defaultDef.name
+          end
+
+          local shiftActionVal, shiftNameVal
+          if binding.shiftAction ~= nil then
+            shiftActionVal = binding.shiftAction
+            shiftNameVal = binding.shiftName
+            if not shiftNameVal or shiftNameVal == "" then
+              shiftNameVal = (shiftActObj and shiftActObj.name) or (defaultDef and defaultDef.shiftName)
+            end
+          else
+            shiftActionVal = defaultDef and defaultDef.shiftAction
+            shiftNameVal = defaultDef and defaultDef.shiftName
           end
 
           targetTable[code] = {
             key = binding.key or (defaultDef and defaultDef.key),
             name = nameVal,
-            action = binding.action,
-            shiftAction = binding.shiftAction or (defaultDef and defaultDef.shiftAction),
-            shiftName = binding.shiftName or (defaultDef and defaultDef.shiftName)
+            action = actionVal,
+            shiftAction = shiftActionVal,
+            shiftName = shiftNameVal
           }
         end
       elseif binding.baseNote ~= nil then
@@ -429,9 +450,12 @@ local function saveCustomLayout(newLayoutData)
     activeId = "default"
   end
 
-  map[activeId].data = newLayoutData or {}
+  local presetObj = map[activeId]
+  if presetObj and not (presetObj.isBuiltin or activeId == "default") then
+    presetObj.data = newLayoutData or {}
+    hs.settings.set("qwertyMidi_layoutPresets", map)
+  end
 
-  hs.settings.set("qwertyMidi_layoutPresets", map)
   hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   applyCustomLayout(newLayoutData)
   saveSettings()
@@ -456,6 +480,7 @@ local function savePreset(presetId, name, layoutData)
   }
 
   hs.settings.set("qwertyMidi_layoutPresets", map)
+  hs.settings.set("qwertyMidi_activePresetId", presetId)
   selectPreset(presetId)
   return presetId
 end

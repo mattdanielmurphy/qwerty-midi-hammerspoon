@@ -273,6 +273,25 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
   _G.toggleMidiMode()
 end)
 
+_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  if state.midiActive and _G.activeWatchers.midiWebview then
+    local ok, err = pcall(function()
+      local h = hud.createMidiWebview()
+      h:show()
+    end)
+    if not ok then print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err)) end
+    
+    local logContent = "--- HAMMERSPOON CONSOLE ---\n" .. (hs.console.getConsole() or "")
+    local f1 = io.open("/tmp/wv_js.log", "r")
+    if f1 then logContent = "--- JS LOG ---\n" .. f1:read("*all") .. "\n" .. logContent; f1:close() end
+    local f2 = io.open("/tmp/midi_startup.log", "r")
+    if f2 then logContent = "--- STARTUP LOG ---\n" .. f2:read("*all") .. "\n" .. logContent; f2:close() end
+    
+    hs.pasteboard.setContents(logContent)
+    hs.notify.new({title="QWERTY MIDI", informativeText="log file copied to clipboard—paste this to your agent to fix"}):send()
+  end
+end)
+
 if _G.activeWatchers.settingsHotkey then
   _G.activeWatchers.settingsHotkey:delete()
   _G.activeWatchers.settingsHotkey = nil
