@@ -3363,9 +3363,15 @@ local HTML_UI_CONTENT = [[
   function renderHud(data) {
     if (!data) return;
 
-    if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
-      const container = document.getElementById('hud-container');
-      if (container) {
+    const container = document.getElementById('hud-container');
+    if (container) {
+      if (shiftModeActive || data.shiftHeld) {
+        container.classList.add('shift-active-labels');
+      } else {
+        container.classList.remove('shift-active-labels');
+      }
+
+      if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
         if (data.stackedKeyLabelsInPerformanceMode) {
           container.classList.add('stacked-labels-active');
         } else {
@@ -3532,6 +3538,8 @@ local HTML_UI_CONTENT = [[
             if (shiftModeActive && currentWorkingLayout[code]) {
               const binding = currentWorkingLayout[code];
               noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
+            } else if (data.shiftHeld && k.shiftNote !== undefined) {
+              noteEl.textContent = k.shiftNote;
             } else if (k.note !== undefined) {
               noteEl.textContent = k.note;
             }
