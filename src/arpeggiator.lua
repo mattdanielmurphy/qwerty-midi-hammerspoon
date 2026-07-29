@@ -189,7 +189,8 @@ local function arpTick()
     end
   end
   local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
-  local ch = isTopRowArpNote and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+  local rowCh = isTopRowArpNote and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+  local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
   
   if gateRatio <= 1.0 and state.arpCurrentPitch then
     local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
