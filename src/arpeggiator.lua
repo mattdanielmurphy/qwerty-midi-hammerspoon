@@ -187,9 +187,12 @@ local function arpTick()
 
   local isTopRowArpNote = false
   for code, p in pairs(state.arpHeldNotes) do
-    if p == nextPitch and lowerRowKeys[code] == nil and upperRowKeys[code] then
-      isTopRowArpNote = true
-      break
+    if p == nextPitch then
+      local noteKey = config.getNoteKey(code)
+      if noteKey and noteKey.isTop then
+        isTopRowArpNote = true
+        break
+      end
     end
   end
   local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
