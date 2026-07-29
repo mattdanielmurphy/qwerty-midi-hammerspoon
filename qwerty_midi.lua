@@ -14,1628 +14,1122 @@ local function __require(modname)
   return require(modname)
 end
 
-__modules["hud"] = function()
-local hsWebview = require("hs.webview")
-local hsUsercontent = require("hs.webview.usercontent")
-
-local config = __require("config")
-local midi = __require("midi")
-local transposer = __require("transposer")
-local arpeggiator = __require("arpeggiator")
-
-local state = config.state
-local SCALES = config.SCALES
-local NOTE_NAMES = config.NOTE_NAMES
-local numberRowControls = config.numberRowControls
-local ARP_DIRECTIONS = state.ARP_DIRECTIONS
-local ARP_RATES = state.ARP_RATES
-local ARP_GATES = state.ARP_GATES
-
-local HTML_UI_CONTENT = __require("ui_html")
-local webviewGeneration = 0
-local lastHeartbeat = 0
-local evalFailCount = 0
-
-_G.activeWatchers = _G.activeWatchers or {}
-
-local controlsModule = nil
-
-local function setControlsModule(m)
-  controlsModule = m
-end
-
-state.textInputActive = false
-
-local pendingSpotlightInfo = nil
-local pendingActiveArpPitch = nil
-local hudUpdateScheduled = false
-local lastFrameScale = nil
-local _savedNormalHeight = nil
-
-local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
-  if not _G.activeWatchers.midiWebview then return end
-
-  local baseW, baseH = 980, 280
-  local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-  local NOTIF_BAND = math.floor(50 * effectiveScale)
-  local newW = math.floor(baseW * effectiveScale)
-  local newH = math.floor(baseH * effectiveScale) + NOTIF_BAND
-
-  if lastFrameScale ~= effectiveScale then
-    lastFrameScale = effectiveScale
-    local curFrame = _G.activeWatchers.midiWebview:frame()
-    if curFrame.w ~= newW or curFrame.h ~= newH then
-      local screen = hs.screen.mainScreen():frame()
-      local cx = curFrame.x + (curFrame.w / 2)
-      local cy = curFrame.y + (curFrame.h / 2)
-      local nx = math.floor(cx - (newW / 2))
-      local ny = math.floor(cy - (newH / 2))
-      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
-      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
-      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
-      _G.activeWatchers.hudX = nx
-      _G.activeWatchers.hudY = ny
-      hs.settings.set("qwertyMidi_hudX", nx)
-      hs.settings.set("qwertyMidi_hudY", ny)
-    end
-  end
-
-  hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
-  
-  local currentScaleIdx = tonumber(state.currentScaleIdx) or 1
-  local modeFrac = (currentScaleIdx - 0.5) / #SCALES
-  local modeName = SCALES[currentScaleIdx].name
-  
-  local octVal = tonumber(state.octaveShift) or 0
-  local topOctVal = tonumber(state.topRowOctaveOffset) or 0
-  local trnspVal = tonumber(state.transposeShift) or 0
-
-  local octStr = (octVal >= 0 and "+" or "") .. (octVal / 12) .. " Oct"
-  local trnspStr = (trnspVal ~= 0) and ("Trnsp: " .. (trnspVal >= 0 and "+" or "") .. trnspVal .. "st") or ""
-  local susStr = state.sustainActive and "SUS: ON" or ""
-  local latchStr = state.arpLatchActive and "LATCH" or (state.arpEnabled and "" or "")
-  local shiftStr = state.shiftHeld and "[SHIFT]" or ""
-
-  local statusParts = {}
-  if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
-  if susStr ~= "" then table.insert(statusParts, susStr) end
-  if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
-  if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
-  local statusStr = table.concat(statusParts, "  •  ")
-
-  local topOctaveStr = (topOctVal >= 0 and "+" or "") .. math.floor(topOctVal / 12)
-  local bottomOctaveStr = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12)
-
-  local keyUpdates = {}
-
-  local actionTypeClass = {
-    -- Home row pairs
-    trnspDown = "ctrl-trnsp", trnspUp = "ctrl-trnsp",
-    rootDown = "ctrl-root", rootUp = "ctrl-root",
-    modeDown = "ctrl-mode", modeUp = "ctrl-mode",
-    octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
-    topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
-    topVolDown = "ctrl-vol", topVolUp = "ctrl-vol",
-    modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
-    volDown = "ctrl-vol", volUp = "ctrl-vol",
-    
-    -- Number row pairs
-    arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
-    arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
-    arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
-    relDown = "ctrl-rel", relUp = "ctrl-rel", releaseDown = "ctrl-rel", releaseUp = "ctrl-rel",
-    bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
-    zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
-    
-    -- Singletons / Toggles
-    arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
-    bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset",
-    undoState = "ctrl-reset", redoState = "ctrl-reset"
-  }
-
-  for code, cData in pairs(numberRowControls) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local isMainArp = (code == 50)
-    local isTopArp = (code == 18)
-    local isBotArp = (code == 19)
-    local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
-    local pairedClass = actionTypeClass[act] or ""
-    keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
-      isControl = true,
-      typeClass = pairedClass,
-      pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = isArpActive
-    }
-  end
-
-  for code, kData in pairs(config.getActiveNoteKeysMap()) do
-    local noteNum = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
-    local intervalIdx = transposer.getIntervalInfo(noteNum)
-    local noteName = transposer.noteNumToName(noteNum)
-    local typeClass = ""
-
-    if intervalIdx == 1 then
-      typeClass = "root-key"
-    elseif intervalIdx == 3 then
-      typeClass = "third-key"
-    elseif intervalIdx == 5 then
-      typeClass = "fifth-key"
-    end
-
-    local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and state.arpCurrentPitch and noteNum == state.arpCurrentPitch then
-      isPressed = true
-    end
-
-    local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
-
-    keyUpdates[tostring(code)] = {
-      note = noteName,
-      typeClass = typeClass,
-      pressed = isPressed,
-      latched = isLatched,
-      outOfBounds = (noteNum < 0 or noteNum > 127)
-    }
-  end
-
-  for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
-    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local isSustain = (code == 48)
-    local isLatch = (code == 0)
-    local pairedClass = actionTypeClass[act] or ""
-    keyUpdates[tostring(code)] = {
-      note = label,
-      action = act,
-      isControl = true,
-      typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
-      pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
-    }
-  end
-
-  local modVal = state.ccStates[1] or 0
-
-  local bpmDisplayStr
-  if state.bpmInputMode then
-    bpmDisplayStr = state.bpmInputBuffer .. "\226\150\140"
-  else
-    bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
-  end
-
-  local payload = {
-    rootIdx = state.currentRoot,
-    modeName = modeName,
-    arpEnabled = state.arpEnabled,
-    arpLatchActive = state.arpLatchActive,
-    arpDirectionIdx = state.arpDirectionIdx,
-    arpRateIdx = state.arpRateIdx,
-    arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
-    bpmDisplay = bpmDisplayStr,
-    bpmEditing = state.bpmInputMode,
-    logicSyncEnabled = state.logicSyncEnabled,
-    arpTopEnabled = state.arpTopEnabled,
-    arpBottomEnabled = state.arpBottomEnabled,
-    statusText = statusStr,
-    topOctaveStr = topOctaveStr,
-    bottomOctaveStr = bottomOctaveStr,
-    topVolPercent = math.floor((state.topRowVolume / 127) * 100),
-    bottomVolPercent = math.floor((state.bottomRowVolume / 127) * 100),
-    effectiveTopVolPercent = math.floor((transposer.getEffectiveRowVelocity(true) / 127) * 100),
-    modeFrac = modeFrac,
-    modWheel = modVal,
-    zoomLevel = effectiveScale,
-    spotlight = spotlightInfo,
-    keys = keyUpdates
-  }
-
-  local jsonStr = hs.json.encode(payload)
-  local ok, err = pcall(function()
-    _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
-  end)
-  if ok then
-    evalFailCount = 0
-  else
-    evalFailCount = evalFailCount + 1
-    if evalFailCount >= 3 then
-      print("QWERTY MIDI: webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
-      evalFailCount = 0
-      hs.timer.doAfter(0.1, function()
-        if state.midiActive then
-          local rok, rerr = pcall(function()
-            local h = createMidiWebview()
-            h:show()
-          end)
-          if not rok then
-            print("QWERTY MIDI: webview recreate failed: " .. tostring(rerr))
-          end
-        end
-      end)
-    end
-  end
-end
-
-local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
-  if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
-  if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
-
-  if forceImmediate then
-    performWebviewHudUpdate(pendingSpotlightInfo, pendingActiveArpPitch)
-    pendingSpotlightInfo = nil
-    return
-  end
-
-  if not hudUpdateScheduled then
-    hudUpdateScheduled = true
-    hs.timer.doAfter(0.016, function()
-      hudUpdateScheduled = false
-      local s = pendingSpotlightInfo
-      local a = pendingActiveArpPitch
-      pendingSpotlightInfo = nil
-      performWebviewHudUpdate(s, a)
-    end)
-  end
-end
-
-local function createMidiWebview()
-  webviewGeneration = webviewGeneration + 1
-  local myGen = webviewGeneration
-  if _G.activeWatchers.midiWebview then
-    -- Clear callback BEFORE delete to prevent async race nuking new webview ref
-    _G.activeWatchers.midiWebview:windowCallback(nil)
-    _G.activeWatchers.midiWebview:delete()
-    _G.activeWatchers.midiWebview = nil
-  end
-
-  local screen = hs.screen.mainScreen():frame()
-  local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-  local NOTIF_BAND = math.floor(50 * effectiveScale)
-  local width = math.floor(980 * effectiveScale)
-  local height = math.floor(280 * effectiveScale) + NOTIF_BAND
-  local savedX = hs.settings.get("qwertyMidi_hudX")
-  local savedY = hs.settings.get("qwertyMidi_hudY")
-  local hudX = savedX or _G.activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
-  local hudY = savedY or _G.activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
-
-  local uc = hsUsercontent.new("midiControllerUC")
-  uc:setCallback(function(msg)
-    if not msg or not msg.body then return end
-    local body = msg.body
-    if body.type == "domReady" then
-      lastHeartbeat = os.time()
-      evalFailCount = 0
-      updateWebviewHud()
-    elseif body.type == "heartbeat" then
-      lastHeartbeat = os.time()
-    elseif body.type == "keyDown" and body.code then
-      if controlsModule then controlsModule.handleKeyDown(body.code) end
-    elseif body.type == "keyUp" and body.code then
-      if controlsModule then controlsModule.handleKeyUp(body.code) end
-    elseif body.type == "setRoot" and body.root ~= nil then
-      state.currentRoot = math.max(0, math.min(11, body.root))
-      arpeggiator.updateLatchedArpNotes()
-      local rootName = NOTE_NAMES[state.currentRoot + 1]
-      local spot = {
-        title = "ROOT NOTE",
-        value = rootName,
-        subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-        targetId = "root-select",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
-      state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
-      arpeggiator.updateLatchedArpNotes()
-      local scaleInfo = SCALES[state.currentScaleIdx]
-      local spot = {
-        title = "SCALE / MODE",
-        value = scaleInfo.name,
-        subtext = scaleInfo.brightTag,
-        targetId = "mode-thumb",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "toggleArpPower" then
-      arpeggiator.toggleArpPower()
-    elseif body.type == "setArpDirection" and body.directionIdx ~= nil then
-      state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
-      local spot = {
-        title = "ARP DIRECTION",
-        value = ARP_DIRECTIONS[state.arpDirectionIdx],
-        subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
-        targetId = "arp-dir-select",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "setArpRate" and body.rateIdx ~= nil then
-      state.arpRateIdx = math.max(1, math.min(#ARP_RATES, body.rateIdx))
-      arpeggiator.applyBpmChange()
-      local spot = {
-        title = "ARP RATE",
-        value = ARP_RATES[state.arpRateIdx].label,
-        subtext = "Note Division",
-        targetId = "arp-rate-select",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "dragGate" and body.delta ~= nil then
-      state.arpGatePercent = math.max(5.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
-      arpeggiator.applyGatePercentChange()
-      local spot = {
-        title = "ARP NOTE LENGTH",
-        value = math.floor(state.arpGatePercent + 0.5) .. "%",
-        subtext = "Gate Duration",
-        targetId = "gate-value",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "gateUp" then
-      state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
-      arpeggiator.applyGatePercentChange()
-      local spot = {
-        title = "ARP NOTE LENGTH",
-        value = math.floor(state.arpGatePercent + 0.5) .. "%",
-        subtext = "Gate Duration",
-        targetId = "gate-value",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "gateDown" then
-      state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
-      arpeggiator.applyGatePercentChange()
-      local spot = {
-        title = "ARP NOTE LENGTH",
-        value = math.floor(state.arpGatePercent + 0.5) .. "%",
-        subtext = "Gate Duration",
-        targetId = "gate-value",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "enterBpmEdit" then
-      state.bpmInputMode = true
-      state.bpmBeforeEdit = state.arpBpm
-      state.bpmInputBuffer = ""
-      local spot = {
-        title = "EDIT BPM",
-        value = "TYPE TEMPO",
-        subtext = "Type digits & press Enter",
-        targetId = "bpm-value",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "bpmUp" then
-      local step = state.bpmStepSize or 10
-      state.arpBpm = math.min(300, state.arpBpm + step)
-      arpeggiator.applyBpmChange()
-      arpeggiator.stepLogicBpm(step)
-      updateWebviewHud()
-    elseif body.type == "bpmDown" then
-      local step = state.bpmStepSize or 10
-      state.arpBpm = math.max(20, state.arpBpm - step)
-      arpeggiator.applyBpmChange()
-      arpeggiator.stepLogicBpm(-step)
-      updateWebviewHud()
-    elseif body.type == "toggleLogicSync" then
-      arpeggiator.toggleLogicSync()
-    elseif body.type == "dragBpm" and body.delta ~= nil then
-      state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
-      arpeggiator.applyBpmChange()
-      if arpeggiator.setLogicBpmTarget then arpeggiator.setLogicBpmTarget(state.arpBpm) end
-      updateWebviewHud()
-    elseif body.type == "toggleArpTop" then
-      state.arpTopEnabled = not state.arpTopEnabled
-      if not state.arpTopEnabled then
-        for code in pairs(state.arpHeldNotes) do
-          if upperRowKeys[code] then
-            state.arpHeldNotes[code] = nil
-            state.arpKeysCurrentlyHeld[code] = nil
-          end
-        end
-      end
-      local spot = {
-        title = "TOP ROW ARP",
-        value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
-        subtext = arpeggiator.getArpRowTargetSubtext(),
-        targetId = "arp-top-toggle",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "toggleArpBottom" then
-      state.arpBottomEnabled = not state.arpBottomEnabled
-      if not state.arpBottomEnabled then
-        for code in pairs(state.arpHeldNotes) do
-          if lowerRowKeys[code] then
-            state.arpHeldNotes[code] = nil
-            state.arpKeysCurrentlyHeld[code] = nil
-          end
-        end
-      end
-      local spot = {
-        title = "BOTTOM ROW ARP",
-        value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
-        subtext = arpeggiator.getArpRowTargetSubtext(),
-        targetId = "arp-bottom-toggle",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
-    elseif body.type == "dragOctave" and body.row and body.direction then
-      if body.row == "top" then
-        state.topRowOctaveOffset = math.max(-48, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
-        hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
-      else
-        state.bottomRowOctaveOffset = math.max(-48, math.min(36, state.bottomRowOctaveOffset + (body.direction * 12)))
-        hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
-      end
-      updateWebviewHud()
-    elseif body.type == "dragWindow" and body.dx and body.dy then
-      if _G.activeWatchers.midiWebview then
-        local frame = _G.activeWatchers.midiWebview:frame()
-        local newX = math.floor(frame.x + body.dx)
-        local newY = math.floor(frame.y + body.dy)
-        _G.activeWatchers.midiWebview:frame({ x = newX, y = newY, w = frame.w, h = frame.h })
-        _G.activeWatchers.hudX = newX
-        _G.activeWatchers.hudY = newY
-        hs.settings.set("qwertyMidi_hudX", newX)
-        hs.settings.set("qwertyMidi_hudY", newY)
-      end
-    elseif body.type == "toggleEditMode" then
-      if _G.activeWatchers.midiWebview then
-        local wv = _G.activeWatchers.midiWebview
-        local frame = wv:frame()
-        if body.active then
-          _savedNormalHeight = frame.h
-          -- Shift Y up by the height difference so it expands upward instead of off-screen
-          wv:frame({ x = frame.x, y = frame.y - frame.h, w = frame.w, h = frame.h * 2 })
-        else
-          local restoreH = _savedNormalHeight or frame.h
-          _savedNormalHeight = nil
-          -- Shift Y back down by the same amount
-          wv:frame({ x = frame.x, y = frame.y + restoreH, w = frame.w, h = restoreH })
-        end
-      end
-    elseif body.type == "getLayoutConfig" then
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "saveCustomLayout" then
-      config.saveCustomLayout(body.layout or body.data)
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "selectPreset" then
-      config.selectPreset(body.id)
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "savePreset" then
-      config.savePreset(body.id, body.name, body.layout or body.data)
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "renamePreset" then
-      config.renamePreset(body.id, body.newName)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "deletePreset" then
-      config.deletePreset(body.id)
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "duplicatePreset" then
-      config.duplicatePreset(body.id, body.newName)
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "resetLayout" then
-      config.resetLayout()
-      updateWebviewHud(nil, nil, true)
-      if _G.activeWatchers.midiWebview then
-        local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
-      end
-    elseif body.type == "updateKeyMapping" then
-      if body.code and body.binding then
-        config.updateKeyMapping(body.code, body.binding)
-        updateWebviewHud(nil, nil, true)
-      end
-    elseif body.type == "textInputFocus" then
-      state.textInputActive = (body.focused == true)
-    elseif body.type == "log" then    elseif body.type == "hoverScrollable" then
-      _G.activeWatchers.isHoveringScrollable = body.state
-      os.execute("echo '" .. tostring(body.message) .. "' >> /tmp/wv_js.log")
-    end
-    config.saveSettings()
-  end)
-
-  local rect = { x = hudX, y = hudY, w = width, h = height }
-  local wv = hsWebview.new(rect, { developerExtrasEnabled = true }, uc)
-  wv:windowTitle("MIDI Controller HUD")
-  wv:windowStyle({ "borderless", "utility" })
-  wv:transparent(true)
-
-  wv:html(HTML_UI_CONTENT)
-  wv:level(hs.canvas.windowLevels.floating)
-  wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
-  wv:show()
-
-  wv:windowCallback(function(action, webview)
-    if action == "closing" then
-      -- Ignore stale callbacks from old webview generations
-      if myGen ~= webviewGeneration then return end
-      _G.activeWatchers.midiWebview = nil
-      -- If midiActive is still true, the webview crashed unexpectedly — auto-respawn
-      if state.midiActive then
-        print("QWERTY MIDI: webview closed unexpectedly — respawning in 0.5s")
-        hs.timer.doAfter(0.5, function()
-          if state.midiActive and myGen == webviewGeneration then
-            local ok, err = pcall(function()
-              local h = createMidiWebview()
-              h:show()
-            end)
-            if not ok then
-              print("QWERTY MIDI: webview respawn failed: " .. tostring(err))
-            end
-          end
-        end)
-      end
-    end
-  end)
-
-  _G.activeWatchers.midiWebview = wv
-
-  hs.timer.doAfter(0.05, function()
-    if _G.activeWatchers.midiWebview then
-      updateWebviewHud()
-    end
-  end)
-  hs.timer.doAfter(0.25, function()
-    if _G.activeWatchers.midiWebview then
-      updateWebviewHud()
-    end
-  end)
-  hs.timer.doAfter(1.0, function()
-    if _G.activeWatchers.midiWebview and myGen == webviewGeneration then
-      updateWebviewHud()
-    end
-  end)
-
-  return wv
-end
-
-return {
-  setControlsModule = setControlsModule,
-  updateWebviewHud = updateWebviewHud,
-  createMidiWebview = createMidiWebview,
-  getLastHeartbeat = function() return lastHeartbeat end
-}
-
-end
-
-__modules["init"] = function()
+__modules["controls"] = function()
 local config = __require("config")
 local midi = __require("midi")
 local transposer = __require("transposer")
 local arpeggiator = __require("arpeggiator")
 local hud = __require("hud")
-local controls = __require("controls")
-local settings_ui = __require("settings_ui")
 
-local function profileLog(msg)
-  os.execute("echo '" .. os.clock() .. ": " .. msg .. "' >> /tmp/midi_startup.log")
-end
-profileLog("Start init.lua")
-
-local state = config.state
-
-_G.activeWatchers = _G.activeWatchers or {}
-
-arpeggiator.setHudModule(hud)
-hud.setControlsModule(controls)
-
-function _G.toggleMidiMode(newState)
-  if newState == nil then
-    state.midiActive = not state.midiActive
-  else
-    state.midiActive = newState
-  end
-
-  -- Persist window-open state so reload can auto-reopen if needed
-  hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
-
-  if state.midiActive then
-    profileLog("Starting midiActive logic")
-    _G.activeWatchers.midiKeyTap:start()
-    _G.activeWatchers.midiScrollTap:start()
-    profileLog("Before createMidiWebview")
-    local h = hud.createMidiWebview()
-    profileLog("After createMidiWebview, before show")
-    h:show()
-    profileLog("After show")
-  else
-    -- Stop all key repeats before tearing down
-    if controls.stopAllControlRepeats then
-      controls.stopAllControlRepeats()
-    end
-    _G.activeWatchers.midiKeyTap:stop()
-    _G.activeWatchers.midiScrollTap:stop()
-    state.pressedKeys = {}
-    state.sustainKeyDownTime = nil
-    if _G.activeWatchers.midiWebview then
-      _G.activeWatchers.midiWebview:hide()
-    end
-  end
-end
-
-_G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(event)
-  if not state.midiActive then return false end
-
-  local ok, result = pcall(function()
-    local deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventDeltaAxis1) or 0
-    if deltaY == 0 then
-      deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
-    end
-
-    -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
-    local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
-
-    -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
-    if _G.activeWatchers.isHoveringScrollable then
-      return false
-    end
-
-        if deltaY ~= 0 then
-      if state.shiftHeld then
-        local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
-        _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
-        local sensitivity = 0.25 * inertiaScale
-        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
-        local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
-
-        local deltaVol = newVol - math.floor(avgVol + 0.5)
-        if deltaVol ~= 0 then
-          state.topRowVolume = math.max(0, math.min(127, state.topRowVolume + deltaVol))
-          state.bottomRowVolume = math.max(0, math.min(127, state.bottomRowVolume + deltaVol))
-          local spot = {
-            title = "ROW VOLUMES",
-            value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-            subtext = "Dual Row Volume Level",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          hud.updateWebviewHud(spot)
-        end
-      else
-        local currentMod = state.ccStates[1] or 0
-        _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-        local sensitivity = state.scrollSensitivity * inertiaScale
-        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
-        local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
-
-        if newMod ~= state.ccStates[1] then
-          state.ccStates[1] = newMod
-          midi.sendMidiCC(1, newMod)
-          local spot = {
-            title = "MOD WHEEL (CC #1)",
-            value = tostring(newMod),
-            subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
-            targetId = "header",
-            color = "#d4a359"
-          }
-          hud.updateWebviewHud(spot)
-        end
-      end
-      return true
-    end
-
-    return false
-  end)
-
-  if not ok then
-    print("QWERTY MIDI: scrollTap error: " .. tostring(result))
-    return false
-  end
-  return result
-end)
-
-_G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp, hs.eventtap.event.types.flagsChanged }, function(event)
-  if not state.midiActive then return false end
-
-  -- Exception: Let text input fields receive keystrokes natively
-  if state.textInputActive then
-    return false
-  end
-
-  -- Exception: Let Delete/Backspace work in the webview's edit mode
-  local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-  local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
-  if code == 51 or code == 117 then -- Delete (51) or Forward Delete (117)
-    if event:getType() == hs.eventtap.event.types.keyDown then
-      return false
-    end
-    return true
-  end
-
-  -- Exception: Pass keys through natively ONLY if Web Inspector or DevTools window is focused
-  local focusedWin = hs.window.focusedWindow()
-  if focusedWin then
-    local title = focusedWin:title() or ""
-    if string.find(title, "Inspector") or string.find(title, "DevTools") then
-      return false
-    end
-  end
-
-  local flags = event:getFlags()
-
-  -- Handle Cmd-, for QWERTY MIDI settings while MIDI controller is enabled
-  if flags.cmd and not flags.alt and not flags.ctrl then
-    local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-    if code == 43 then -- keycode 43 is ','
-      if event:getType() == hs.eventtap.event.types.keyDown then
-        settings_ui.toggleSettingsWindow()
-      end
-      return true
-    end
-  end
-
-  if state.bpmInputMode then
-    if event:getType() == hs.eventtap.event.types.flagsChanged then
-      return false
-    end
-    if flags.cmd or flags.ctrl then return false end
-    local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-    local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
-    if isDown then
-      return arpeggiator.handleBpmInput(code, flags)
-    end
-    return true
-  end
-
-  if flags.cmd or flags.alt or flags.ctrl or flags.capslock then
-    return false
-  end
-
-  local isShiftNow = flags.shift
-  if isShiftNow ~= state.shiftHeld then
-    state.shiftHeld = isShiftNow
-    hud.updateWebviewHud()
-  end
-
-  if event:getType() == hs.eventtap.event.types.flagsChanged then
-    return false
-  end
-
-  local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-  local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
-
-  if isDown then
-    local ok, status = pcall(controls.handleKeyDown, code)
-    if not ok then
-      print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
-      return false
-    end
-    return status
-  else
-    local ok, status = pcall(controls.handleKeyUp, code)
-    if not ok then
-      print("QWERTY MIDI: handleKeyUp error: " .. tostring(status))
-      return false
-    end
-    return status
-  end
-end)
-
--- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
--- Also checks webview liveness via JS heartbeat — if no heartbeat for 6s, web process is dead
-_G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
-  if state.midiActive then
-    if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
-      print("QWERTY MIDI: Watchdog detected dead keyTap, restarting...")
-      _G.activeWatchers.midiKeyTap:start()
-    end
-    if _G.activeWatchers.midiScrollTap and not _G.activeWatchers.midiScrollTap:isEnabled() then
-      print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
-      _G.activeWatchers.midiScrollTap:start()
-    end
-    -- Webview liveness: if heartbeat stopped for 6s, web content process is dead
-    if _G.activeWatchers.midiWebview and hud.getLastHeartbeat() > 0 then
-      local elapsed = os.time() - hud.getLastHeartbeat()
-      if elapsed >= 6 then
-        print("QWERTY MIDI: Watchdog detected dead webview (no heartbeat for " .. elapsed .. "s) — recreating")
-        local ok, err = pcall(function()
-          local h = hud.createMidiWebview()
-          h:show()
-        end)
-        if not ok then
-          print("QWERTY MIDI: Watchdog webview recreate failed: " .. tostring(err))
-        end
-      end
-    end
-  end
-end)
-
-_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
-  _G.toggleMidiMode()
-end)
-
-if _G.activeWatchers.settingsHotkey then
-  _G.activeWatchers.settingsHotkey:delete()
-  _G.activeWatchers.settingsHotkey = nil
-end
-
-profileLog("Before panicAllChannels")
-midi.panicAllChannels()
-
--- Auto-reopen window if it was open when the last reload occurred
-local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
-if wasOpen then
-  profileLog("Auto-reopening controller window (was open before reload)")
-  hs.timer.doAfter(0.3, function()
-    local ok, err = pcall(function()
-      _G.toggleMidiMode(true)
-    end)
-    if not ok then
-      print("QWERTY MIDI: auto-reopen failed: " .. tostring(err))
-    end
-  end)
-end
-
-profileLog("Init complete!")
-
-return {
-  toggleMidiMode = _G.toggleMidiMode,
-  toggleSettingsWindow = settings_ui.toggleSettingsWindow
-}
-
-end
-
-__modules["arpeggiator"] = function()
-local config = __require("config")
-local midi = __require("midi")
-local transposer = __require("transposer")
-
-local state = config.state
-local upperRowKeys = config.upperRowKeys
-local lowerRowKeys = config.lowerRowKeys
-local ARP_DIRECTIONS = state.ARP_DIRECTIONS
-local ARP_RATES = state.ARP_RATES
-local ARP_GATES = state.ARP_GATES
-local DIGIT_KEYCODES = state.DIGIT_KEYCODES
-
-local hudModule = nil
-
-local function setHudModule(m)
-  hudModule = m
-end
-
-local function updateHud(spotlightInfo, activeArpPitch)
-  if hudModule and hudModule.updateWebviewHud then
-    hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
-  end
-end
-
-local function stopArpTimer()
-  if state.arpActiveGateTimers then
-    for pitch, timer in pairs(state.arpActiveGateTimers) do
-      if timer then timer:stop() end
-      midi.sendMidiNote("noteOff", pitch, 0)
-    end
-    state.arpActiveGateTimers = {}
-  end
-  if state.arpGateTimer then
-    state.arpGateTimer:stop()
-    state.arpGateTimer = nil
-  end
-  if state.arpTimer then
-    state.arpTimer:stop()
-    state.arpTimer = nil
-  end
-  if state.arpCurrentPitch then
-    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-    state.arpCurrentPitch = nil
-  end
-  state.arpStepIndex = 1
-  state.arpStepDirection = 1
-  state.arpPos = 0
-end
-
-local function getArpIntervalSeconds()
-  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
-  return (60.0 / state.arpBpm) * rateFactor
-end
-
-local function arpTick()
-  local pitchList = {}
-  for code, pitch in pairs(state.arpHeldNotes) do
-    local noteKey = config.getNoteKey(code)
-    local isTop = noteKey and noteKey.isTop or false
-    local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    if rowArpEnabled then
-      table.insert(pitchList, pitch)
-    end
-  end
-  table.sort(pitchList)
-
-  if #pitchList == 0 then
-    if state.arpActiveGateTimers then
-      for pitch, timer in pairs(state.arpActiveGateTimers) do
-        if timer then timer:stop() end
-        midi.sendMidiNote("noteOff", pitch, 0)
-      end
-      state.arpActiveGateTimers = {}
-    end
-    if state.arpGateTimer then
-      state.arpGateTimer:stop()
-      state.arpGateTimer = nil
-    end
-    if state.arpCurrentPitch then
-      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-      state.arpCurrentPitch = nil
-      updateHud()
-    end
-    return
-  end
-
-  if state.arpDirectionIdx == 1 then -- UP
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = pos
-  elseif state.arpDirectionIdx == 2 then -- DOWN
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = #pitchList - pos + 1
-  elseif state.arpDirectionIdx == 3 then -- UP-DOWN
-    if state.arpStepIndex > #pitchList then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    elseif state.arpStepIndex < 1 then
-      state.arpStepIndex = math.min(#pitchList, 2)
-      state.arpStepDirection = 1
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    end
-  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
-    local pos = (state.arpPos % #pitchList) + 1
-    local idx
-    if pos % 2 == 1 then
-      idx = math.floor(pos / 2) + 1
-    else
-      idx = #pitchList - math.floor(pos / 2) + 1
-    end
-    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out)
-    local pos = (state.arpPos % #pitchList) + 1
-    local mid = math.floor((#pitchList + 1) / 2)
-    local idx
-    if pos == 1 then
-      idx = mid
-    elseif pos % 2 == 0 then
-      idx = mid + math.floor(pos / 2)
-    else
-      idx = mid - math.floor(pos / 2)
-    end
-    if idx < 1 or idx > #pitchList then
-      idx = ((pos - 1) % #pitchList) + 1
-    end
-    state.arpStepIndex = idx
-  elseif state.arpDirectionIdx == 7 then -- RANDOM
-    state.arpStepIndex = math.random(1, #pitchList)
-  end
-
-  local nextPitch = pitchList[state.arpStepIndex]
-
-  if state.arpDirectionIdx == 3 then -- UP-DOWN
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = 1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      elseif state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      end
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = -1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      elseif state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      end
-    end
-  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
-    state.arpPos = (state.arpPos or 0) + 1
-  end
-
-  -- For gate <= 100%, kill any previous step pitch before starting the new pitch.
-  -- For gate > 100%, allow previous notes to remain sounding until their individual gate timer fires.
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  if gateRatio <= 1.0 and state.arpCurrentPitch then
-    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
-      state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
-      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
-    end
-    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-    state.arpCurrentPitch = nil
-  end
-
-  local isTopRowArpNote = false
-  for code, p in pairs(state.arpHeldNotes) do
-    if p == nextPitch and lowerRowKeys[code] == nil and upperRowKeys[code] then
-      isTopRowArpNote = true
-      break
-    end
-  end
-  local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
-  midi.sendMidiNote("noteOn", nextPitch, vel)
-  state.arpCurrentPitch = nextPitch
-
-  updateHud(nil, nextPitch)
-
-  local gateDuration = getArpIntervalSeconds() * gateRatio
-  local pitchToRelease = nextPitch
-  local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0)
-    if state.arpCurrentPitch == pitchToRelease then
-      state.arpCurrentPitch = nil
-      updateHud()
-    end
-    state.arpActiveGateTimers[pitchToRelease] = nil
-  end)
-
-  state.arpActiveGateTimers = state.arpActiveGateTimers or {}
-  if state.arpActiveGateTimers[pitchToRelease] then
-    state.arpActiveGateTimers[pitchToRelease]:stop()
-    state.arpActiveGateTimers[pitchToRelease] = nil
-  end
-  state.arpActiveGateTimers[pitchToRelease] = timer
-  state.arpGateTimer = timer
-end
-
-local function startArpTimer(preserveState)
-  if state.arpTimer then return end
-  local intervalSeconds = getArpIntervalSeconds()
-  if not preserveState then
-    if state.arpDirectionIdx == 4 then
-      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
-      state.arpStepDirection = -1
-    else
-      state.arpStepIndex = 1
-      state.arpStepDirection = 1
-    end
-    state.arpPos = 0
-    arpTick()
-  end
-  state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
-end
-
-local function arpAddNote(code, pitch)
-  local numPhysicalHeld = 0
-  for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-
-  if state.arpLatchActive then
-    if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
-      state.arpHeldNotes = {}
-      state.arpLatchClearedForNewChord = true
-      if state.arpCurrentPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-        state.arpCurrentPitch = nil
-      end
-    end
-  end
-
-  state.arpKeysCurrentlyHeld[code] = true
-  state.arpHeldNotes[code] = pitch
-
-  if not state.arpTimer then
-    startArpTimer()
-  end
-end
-
-local function arpRemoveNote(code)
-  state.arpKeysCurrentlyHeld[code] = nil
-
-  local numPhysicalHeld = 0
-  for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
-
-  if state.arpLatchActive then
-    if numPhysicalHeld == 0 then
-      state.arpLatchClearedForNewChord = false
-    end
-    return
-  end
-
-  state.arpHeldNotes[code] = nil
-  local count = 0
-  for _ in pairs(state.arpHeldNotes) do count = count + 1 end
-  if count == 0 then
-    stopArpTimer()
-    updateHud()
-  end
-end
-
-local function formatBpm(bpm)
-  if bpm == math.floor(bpm) then
-    return tostring(math.floor(bpm))
-  else
-    return string.format("%.1f", bpm)
-  end
-end
-
-local function applyBpmChange()
-  if state.arpTimer then
-    state.arpTimer:stop()
-    state.arpTimer = nil
-    startArpTimer(true)
-  end
-end
-
-local function applyGatePercentChange()
-  if state.arpTimer then
-    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-    if state.arpActiveGateTimers then
-      if gateRatio <= 1.0 then
-        for pitch, timer in pairs(state.arpActiveGateTimers) do
-          if pitch ~= state.arpCurrentPitch then
-            if timer then timer:stop() end
-            midi.sendMidiNote("noteOff", pitch, 0)
-            state.arpActiveGateTimers[pitch] = nil
-          end
-        end
-      end
-    end
-  end
-end
-
-local function updateLatchedArpNotes()
-  if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
-  for code, _ in pairs(state.arpHeldNotes) do
-    if lowerRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(lowerRowKeys[code].baseNote, false)
-    elseif upperRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(upperRowKeys[code].baseNote, true)
-    end
-  end
-end
-
-local function getArpRowTargetSubtext()
-  if state.arpTopEnabled and state.arpBottomEnabled then
-    return "Top & Bottom Rows"
-  elseif state.arpTopEnabled then
-    return "Top Row Only"
-  elseif state.arpBottomEnabled then
-    return "Bottom Row Only"
-  else
-    return "No Rows Active"
-  end
-end
-
-local function toggleArpPower()
-  -- Cycle: Off → Latch+On → On (no latch) → Off
-  if not state.arpEnabled then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    state.arpLatchClearedForNewChord = false
-  elseif state.arpLatchActive then
-    state.arpLatchActive = false
-    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
-    local newHeld = {}
-    for code, pitch in pairs(state.arpHeldNotes) do
-      if state.arpKeysCurrentlyHeld[code] then
-        newHeld[code] = pitch
-      end
-    end
-    state.arpHeldNotes = newHeld
-    
-    local count = 0
-    for _ in pairs(state.arpHeldNotes) do count = count + 1 end
-    if count == 0 then
-      stopArpTimer()
-      if state.arpCurrentPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-        state.arpCurrentPitch = nil
-      end
-    end
-  else
-    state.arpEnabled = false
-    state.arpLatchActive = false
-    stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-  end
-
-  local valStr = "ARP: OFF"
-  local subStr = "Arp Disabled"
-  if state.arpEnabled then
-    if state.arpLatchActive then
-      valStr = "ARP: LATCH"
-      subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
-    else
-      valStr = "ARP: ON"
-      subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
-    end
-  end
-
-  local spot = {
-    title = "ARPEGGIATOR",
-    value = valStr,
-    subtext = subStr,
-    targetId = "arp-power-btn",
-    color = "#d4a359"
-  }
-  updateHud(spot)
-  config.saveSettings()
-end
-
-local function toggleArp()
-  toggleArpPower()
-end
-
-local function handleBpmInput(code, flags)
-  if code == 53 then -- Escape
-    state.arpBpm = state.bpmBeforeEdit
-    state.bpmInputMode = false
-    state.bpmInputBuffer = ""
-    updateHud()
-    config.saveSettings()
-    return true
-  elseif code == 36 then -- Return
-    if state.bpmInputBuffer ~= "" then
-      local val = tonumber(state.bpmInputBuffer)
-      if val and val >= 20 and val <= 300 then
-        state.arpBpm = val
-      end
-    end
-    local prevBpm = state.bpmBeforeEdit
-    state.bpmInputMode = false
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    setLogicBpmTarget(state.arpBpm, prevBpm)
-    updateHud()
-    config.saveSettings()
-    return true
-  elseif code == 126 then -- Arrow Up
-    local delta = 1
-    if flags.shift then delta = 10
-    elseif flags.alt then delta = 0.1 end
-    state.arpBpm = math.min(300, state.arpBpm + delta)
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    updateHud()
-    return true
-  elseif code == 125 then -- Arrow Down
-    local delta = 1
-    if flags.shift then delta = 10
-    elseif flags.alt then delta = 0.1 end
-    state.arpBpm = math.max(20, state.arpBpm - delta)
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    updateHud()
-    return true
-  elseif code == 51 then -- Backspace
-    if #state.bpmInputBuffer > 0 then
-      state.bpmInputBuffer = state.bpmInputBuffer:sub(1, -2)
-    end
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer ~= "" and (state.bpmInputBuffer .. " BPM") or "TYPE TEMPO",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  elseif DIGIT_KEYCODES[code] then
-    state.bpmInputBuffer = state.bpmInputBuffer .. DIGIT_KEYCODES[code]
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer .. " BPM",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  elseif code == 47 then -- Period "."
-    if not state.bpmInputBuffer:find("%.") then
-      state.bpmInputBuffer = state.bpmInputBuffer .. "."
-    end
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer .. " BPM",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  end
-
-  state.bpmInputMode = false
-  state.bpmInputBuffer = ""
-  updateHud()
-  return false
-end
-
-local isSyncingLogicBpm = false
-local logicBpmTask = nil
-local logicBpmDebounceTimer = nil
-
-local function setLogicBpmTarget(targetBpm)
-  if not state.logicSyncEnabled then return end
-
-  if logicBpmDebounceTimer then
-    logicBpmDebounceTimer:stop()
-    logicBpmDebounceTimer = nil
-  end
-
-  logicBpmDebounceTimer = hs.timer.doAfter(0.20, function()
-    logicBpmDebounceTimer = nil
-    if logicBpmTask then
-      logicBpmTask:terminate()
-      logicBpmTask = nil
-    end
-
-    isSyncingLogicBpm = true
-
-    local script = string.format([[
-      property minBPM : 5
-      property maxBPM : 990
-
-      on setExactBPM(targetBPM)
-        set targetBPM to targetBPM as integer
-        
-        if targetBPM < minBPM then set targetBPM to minBPM
-        if targetBPM > maxBPM then set targetBPM to maxBPM
-        
-        tell application "System Events"
-          tell process "Logic Pro"
-            set tempoSlider to missing value
-            set allSliders to sliders of group 1 of group 1 of window 1
-            repeat with s in allSliders
-              if description of s is "Tempo" then
-                set tempoSlider to s
-                exit repeat
-              end if
-            end repeat
-            
-            if tempoSlider is missing value then return targetBPM
-            
-            repeat 20 times
-              set currentBPM to (value of tempoSlider) as integer
-              set deltaBPM to targetBPM - currentBPM
-              
-              if deltaBPM = 0 then return currentBPM
-              
-              if deltaBPM > 0 then
-                set goingUp to true
-                set amountLeft to deltaBPM
-              else
-                set goingUp to false
-                set amountLeft to -deltaBPM
-              end if
-              
-              set tenSteps to amountLeft div 10
-              repeat tenSteps times
-                if goingUp then
-                  perform action "AXIncrement" of tempoSlider
-                else
-                  perform action "AXDecrement" of tempoSlider
-                end if
-              end repeat
-              
-              set oneSteps to amountLeft mod 10
-              repeat oneSteps times
-                if goingUp then
-                  set value of tempoSlider to maxBPM
-                else
-                  set value of tempoSlider to minBPM
-                end if
-              end repeat
-            end repeat
-          end tell
-        end tell
-      end setExactBPM
-
-      setExactBPM(%d)
-    ]], math.floor(targetBpm + 0.5))
-
-    logicBpmTask = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
-      isSyncingLogicBpm = false
-      logicBpmTask = nil
-    end, { "-e", script })
-    logicBpmTask:start()
-  end)
-end
-
-local function stepLogicBpm(delta)
-  setLogicBpmTarget(state.arpBpm)
-end
-
-local function syncLogicBpm()
-  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
-  isSyncingLogicBpm = true
-
-  local script = [[
-    var bpm = null;
-    try {
-      var se = Application('System Events');
-      var logic = se.processes['Logic Pro'];
-      if (logic && logic.exists()) {
-        var win = logic.windows[0];
-        if (win && win.exists()) {
-          var grp = win.groups[0];
-          if (grp && grp.exists()) {
-            var ctrlBar = grp.uiElements[0];
-            if (ctrlBar && ctrlBar.exists()) {
-              var elems = ctrlBar.uiElements();
-              for (var i = 0; i < elems.length; i++) {
-                if (elems[i].description() === 'Tempo') {
-                  bpm = parseFloat(elems[i].value());
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch(e) {}
-    bpm;
-  ]]
-
-  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
-    isSyncingLogicBpm = false
-    if exitCode == 0 and stdOut then
-      local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
-        state.arpBpm = val
-        applyBpmChange()
-        updateHud()
-      end
-    end
-  end, { "-l", "JavaScript", "-e", script })
-  task:start()
-end
-
-local function toggleLogicSync()
-  state.logicSyncEnabled = not state.logicSyncEnabled
-  if state.logicSyncEnabled then
-    syncLogicBpm()
-  end
-  local spot = {
-    title = "LOGIC PRO SYNC",
-    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
-    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
-    targetId = "bpm-val",
-    color = "#d4a359"
-  }
-  updateHud(spot)
-end
-
-local function initLogicSync()
-  if not _G.activeWatchers.logicSyncTimer then
-    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
-  end
-  syncLogicBpm()
-end
-
-initLogicSync()
-
-return {
-  setHudModule = setHudModule,
-  stopArpTimer = stopArpTimer,
-  getArpIntervalSeconds = getArpIntervalSeconds,
-  startArpTimer = startArpTimer,
-  arpAddNote = arpAddNote,
-  arpRemoveNote = arpRemoveNote,
-  formatBpm = formatBpm,
-  applyBpmChange = applyBpmChange,
-  applyGatePercentChange = applyGatePercentChange,
-  updateLatchedArpNotes = updateLatchedArpNotes,
-  getArpRowTargetSubtext = getArpRowTargetSubtext,
-  toggleArpPower = toggleArpPower,
-  toggleArp = toggleArp,
-  handleBpmInput = handleBpmInput,
-  toggleLogicSync = toggleLogicSync,
-  syncLogicBpm = syncLogicBpm,
-  stepLogicBpm = stepLogicBpm,
-  setLogicBpmTarget = setLogicBpmTarget
-}
-
-
-end
-
-__modules["transposer"] = function()
-local config = __require("config")
 local state = config.state
 local SCALES = config.SCALES
 local NOTE_NAMES = config.NOTE_NAMES
-local WHITE_KEY_INDEX = config.WHITE_KEY_INDEX
 
-local function getEffectiveRowVelocity(isTopRow)
-  local isSplitArp = state.arpEnabled and state.arpBottomEnabled and (not state.arpTopEnabled)
-  if isTopRow then
-    local baseVol = state.topRowVolume
-    if isSplitArp then
-      baseVol = baseVol + state.splitArpTopBoost
+_G.activeWatchers = _G.activeWatchers or {}
+
+-- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
+if _G._qmidiRepeatTimers then
+  for code, entry in pairs(_G._qmidiRepeatTimers) do
+    pcall(function()
+      if entry.timer then entry.timer:stop() end
+      if entry.interval then entry.interval:stop() end
+    end)
+  end
+end
+_G._qmidiRepeatTimers = {}
+local controlRepeatTimers = _G._qmidiRepeatTimers
+
+local function stopControlRepeat(code)
+  if code and controlRepeatTimers[code] then
+    pcall(function()
+      if controlRepeatTimers[code].timer then
+        controlRepeatTimers[code].timer:stop()
+      end
+      if controlRepeatTimers[code].interval then
+        controlRepeatTimers[code].interval:stop()
+      end
+    end)
+    controlRepeatTimers[code] = nil
+  end
+end
+
+local function stopAllControlRepeats()
+  for code in pairs(controlRepeatTimers) do
+    stopControlRepeat(code)
+  end
+end
+
+local stateUndoStack = {}
+local stateRedoStack = {}
+local isRestoringControllerState = false
+
+local function captureStateSnapshot(label)
+  return {
+    label = label or "State Change",
+    currentRoot = state.currentRoot,
+    currentScaleIdx = state.currentScaleIdx,
+    octaveShift = state.octaveShift,
+    topRowOctaveOffset = state.topRowOctaveOffset,
+    bottomRowOctaveOffset = state.bottomRowOctaveOffset,
+    transposeShift = state.transposeShift,
+    topRowVolume = state.topRowVolume,
+    bottomRowVolume = state.bottomRowVolume,
+    arpEnabled = state.arpEnabled,
+    arpLatchActive = state.arpLatchActive,
+    arpDirectionIdx = state.arpDirectionIdx,
+    arpRateIdx = state.arpRateIdx,
+    arpGatePercent = state.arpGatePercent,
+    arpBpm = state.arpBpm,
+    arpTopEnabled = state.arpTopEnabled,
+    arpBottomEnabled = state.arpBottomEnabled,
+    modWheel = state.ccStates[1] or 0
+  }
+end
+
+local function pushStateSnapshot(label)
+  if isRestoringControllerState then return end
+  table.insert(stateUndoStack, captureStateSnapshot(label))
+  stateRedoStack = {}
+end
+
+local function applyStateSnapshot(snap)
+  isRestoringControllerState = true
+
+  state.currentRoot = snap.currentRoot
+  state.currentScaleIdx = snap.currentScaleIdx
+  state.octaveShift = snap.octaveShift
+  state.topRowOctaveOffset = snap.topRowOctaveOffset
+  state.bottomRowOctaveOffset = snap.bottomRowOctaveOffset or 0
+  state.transposeShift = snap.transposeShift
+  state.topRowVolume = snap.topRowVolume
+  state.bottomRowVolume = snap.bottomRowVolume
+  state.arpEnabled = snap.arpEnabled
+  state.arpLatchActive = snap.arpLatchActive
+  state.arpDirectionIdx = snap.arpDirectionIdx
+  state.arpRateIdx = snap.arpRateIdx
+  state.arpGatePercent = snap.arpGatePercent
+  state.arpBpm = snap.arpBpm
+  state.arpTopEnabled = snap.arpTopEnabled
+  state.arpBottomEnabled = snap.arpBottomEnabled
+  state.ccStates[1] = snap.modWheel
+
+  arpeggiator.updateLatchedArpNotes()
+  arpeggiator.applyBpmChange()
+  arpeggiator.applyGatePercentChange()
+  midi.sendMidiCC(1, snap.modWheel)
+
+  isRestoringControllerState = false
+  config.saveSettings()
+end
+
+local function undoControllerState(code)
+  if #stateUndoStack == 0 then
+    local spot = {
+      title = "UNDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to undo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateRedoStack, cur)
+
+  local prev = table.remove(stateUndoStack)
+  applyStateSnapshot(prev)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "UNDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Reverted: " .. (prev.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function redoControllerState(code)
+  if #stateRedoStack == 0 then
+    local spot = {
+      title = "REDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to redo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateUndoStack, cur)
+
+  local nxt = table.remove(stateRedoStack)
+  applyStateSnapshot(nxt)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "REDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Re-applied: " .. (nxt.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function canApplyShifts(testT, testO, testTop, testBot)
+  local oldT = state.transposeShift
+  local oldO = state.octaveShift
+  local oldTop = state.topRowOctaveOffset
+  local oldBot = state.bottomRowOctaveOffset
+
+  -- Calculate bounds for current state
+  local curMinPitch = math.huge
+  local curMaxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < curMinPitch then curMinPitch = pitch end
+    if pitch > curMaxPitch then curMaxPitch = pitch end
+  end
+
+  -- Calculate bounds for test state
+  state.transposeShift = testT
+  state.octaveShift = testO
+  state.topRowOctaveOffset = testTop
+  state.bottomRowOctaveOffset = testBot
+
+  local minPitch = math.huge
+  local maxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < minPitch then minPitch = pitch end
+    if pitch > maxPitch then maxPitch = pitch end
+  end
+
+  state.transposeShift = oldT
+  state.octaveShift = oldO
+  state.topRowOctaveOffset = oldTop
+  state.bottomRowOctaveOffset = oldBot
+
+  if minPitch >= 16 and maxPitch <= 113 then
+    return true, testT, testO, testTop, testBot
+  end
+
+  if curMinPitch < 16 or curMaxPitch > 113 then
+    while minPitch < 16 do
+      testO = testO + 12
+      testTop = testTop + 12
+      testBot = testBot + 12
+      minPitch = minPitch + 12
+      maxPitch = maxPitch + 12
     end
-    return math.max(0, math.min(127, baseVol))
-  else
-    return math.max(0, math.min(127, state.bottomRowVolume))
-  end
-end
-
-local function getTransposedPitch(basePitch, isTopRow)
-  local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
-  local octave = math.floor(effectivePitch / 12) - 1
-  local noteInOctave = effectivePitch % 12
-  local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
-
-  if scaleIndex and scaleIndex ~= -1 then
-    local intervals = SCALES[state.currentScaleIdx].intervals
-    local numIntervals = #intervals
-    local transposedIndex = scaleIndex + state.transposeShift
-    local octaveOffset = math.floor(transposedIndex / numIntervals)
-    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
-
-    local targetInterval = intervals[idxInScale]
-    local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
-    return newPitch
-  end
-  local fallbackPitch = effectivePitch + state.currentRoot + state.octaveShift + state.transposeShift
-  return fallbackPitch
-end
-
-local function noteNumToName(noteNum)
-  local octave = math.floor(noteNum / 12) - 1
-  local noteName = NOTE_NAMES[(noteNum % 12) + 1]
-  return noteName .. octave
-end
-
-local function getIntervalInfo(noteNum)
-  local noteInOctave = noteNum % 12
-  local semitonesFromRoot = (noteInOctave - state.currentRoot + 12) % 12
-  local intervals = SCALES[state.currentScaleIdx].intervals
-
-  for idx, interval in ipairs(intervals) do
-    if interval == semitonesFromRoot then
-      return idx, semitonesFromRoot
+    while maxPitch > 113 do
+      testO = testO - 12
+      testTop = testTop - 12
+      testBot = testBot - 12
+      minPitch = minPitch - 12
+      maxPitch = maxPitch - 12
     end
+    return true, testT, testO, testTop, testBot
   end
-  return nil, semitonesFromRoot
+
+  return false, testT, testO, testTop, testBot
+end
+
+local function executeControlAction(act, code)
+  if act == "undoState" then
+    undoControllerState(code)
+    return
+  elseif act == "redoState" then
+    redoControllerState(code)
+    return
+  end
+
+  -- Record state snapshot before mutating controller parameters
+  if act == "modeDown" or act == "modeUp" or
+     act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
+     act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
+     act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
+     act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
+     act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
+     act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
+     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" then
+    pushStateSnapshot(act)
+  end
+
+  if act == "topOctDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "topOctUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "trnspDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT - 1
+    local newO = curO
+    if newT <= -numIntervals then
+      newT = newT + numIntervals
+      newO = newO - 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "trnspUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT + 1
+    local newO = curO
+    if newT >= numIntervals then
+      newT = newT - numIntervals
+      newO = newO + 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "octaveDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newO = curO - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "OCTAVE",
+        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
+        subtext = "All keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "octaveUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newO = curO + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "OCTAVE",
+        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
+        subtext = "All keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "modeDown" then
+    state.currentScaleIdx = (state.currentScaleIdx - 2) % #SCALES + 1
+    arpeggiator.updateLatchedArpNotes()
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "modeUp" then
+    state.currentScaleIdx = (state.currentScaleIdx % #SCALES) + 1
+    arpeggiator.updateLatchedArpNotes()
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "rootDown" then
+    if state.currentRoot == 0 then
+      state.currentRoot = 11
+      state.octaveShift = math.max(-36, state.octaveShift - 12)
+    else
+      state.currentRoot = state.currentRoot - 1
+    end
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "rootUp" then
+    if state.currentRoot == 11 then
+      state.currentRoot = 0
+      state.octaveShift = math.min(36, state.octaveShift + 12)
+    else
+      state.currentRoot = state.currentRoot + 1
+    end
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomScale" then
+    state.currentRoot = math.random(0, 11)
+    state.currentScaleIdx = math.random(1, #SCALES)
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "RANDOM SCALE",
+      value = rootName .. " " .. scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "panic" then
+    midi.panicAllChannels()
+    state.sustainActive = false
+    state.sustainKeyDownTime = nil
+    state.arpLatchActive = false
+    state.sustainedPitches = {}
+    state.pressedKeys = {}
+    
+    arpeggiator.stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpSequence = {}
+
+    -- Clear repeats
+    stopAllControlRepeats()
+
+    local spot = {
+      title = "MIDI PANIC",
+      value = "ALL NOTES OFF",
+      subtext = "All notes silenced",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "resetAll" then
+    state.octaveShift = 0
+    state.topRowOctaveOffset = 0
+    state.bottomRowOctaveOffset = 0
+    state.transposeShift = 0
+    state.topRowVolume = 100
+    state.bottomRowVolume = 100
+    state.currentRoot = 0
+    state.currentScaleIdx = 1
+    state.sustainActive = false
+    state.ccStates[1] = 0
+    _G.activeWatchers.modAccumulator = 0
+    arpeggiator.stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpEnabled = false
+    state.arpLatchActive = false
+    state.arpTopEnabled = true
+    state.arpBottomEnabled = true
+    midi.sendMidiCC(64, 0)
+    midi.sendMidiCC(1, 0)
+    local spot = {
+      title = "RESET ALL",
+      value = "DEFAULTS RESTORED",
+      subtext = "Everything reset to defaults",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "zoomOut" then
+    state.zoomLevel = math.max(0.5, state.zoomLevel - 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(state.zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "zoomIn" then
+    state.zoomLevel = math.min(2.0, state.zoomLevel + 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(state.zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "sustain" then
+    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.sustainWasActiveOnPress = state.sustainActive
+    state.sustainActive = true
+    midi.sendMidiCC(64, 127)
+
+    -- Retroactively sustain all non-arp notes currently being physically held down
+    for code, keyInfo in pairs(state.pressedKeys) do
+      if type(keyInfo) == "table" then
+        keyInfo.isSustainedNote = true
+        if not keyInfo.isArpNote and keyInfo.pitch then
+          state.sustainedPitches = state.sustainedPitches or {}
+          state.sustainedPitches[keyInfo.pitch] = true
+        end
+      end
+    end
+
+    local spot = {
+      title = "SUSTAIN (CC #64)",
+      value = "SUSTAIN ON",
+      subtext = "Notes held across release",
+      targetId = code and ("key-" .. code) or "key-48",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
+  elseif act == "modWheelDown" then
+    local currentVal = state.ccStates[1] or 0
+    local newVal = math.max(0, currentVal - 4)
+    state.ccStates[1] = newVal
+    _G.activeWatchers.modAccumulator = newVal
+    midi.sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "modWheelUp" or act == "modWheel" then
+    local currentVal = state.ccStates[1] or 0
+    local newVal = math.min(127, currentVal + 4)
+    state.ccStates[1] = newVal
+    _G.activeWatchers.modAccumulator = newVal
+    midi.sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "topVolDown" then
+    state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    local spot = {
+      title = "TOP ROW VOL",
+      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
+      subtext = "Upper Keys Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "topVolUp" then
+    state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    local spot = {
+      title = "TOP ROW VOL",
+      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
+      subtext = "Upper Keys Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "botVolDown" then
+    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Lower Keys Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "botVolUp" then
+    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Lower Keys Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "volDown" then
+    state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local spot = {
+      title = "ROW VOLUMES",
+      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Dual Row Volume Level",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "volUp" or act == "volume" then
+    state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local spot = {
+      title = "ROW VOLUMES",
+      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = "Dual Row Volume Level",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
+  elseif act == "arpTopToggle" then
+    state.arpTopEnabled = not state.arpTopEnabled
+    if not state.arpTopEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        local noteKey = config.getNoteKey(code)
+        if noteKey and noteKey.isTop then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "TOP ROW ARP",
+      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-top-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpBottomToggle" then
+    state.arpBottomEnabled = not state.arpBottomEnabled
+    if not state.arpBottomEnabled then
+      for code in pairs(state.arpHeldNotes) do
+        local noteKey = config.getNoteKey(code)
+        if noteKey and not noteKey.isTop then
+          state.arpHeldNotes[code] = nil
+          state.arpKeysCurrentlyHeld[code] = nil
+        end
+      end
+    end
+    local spot = {
+      title = "BOTTOM ROW ARP",
+      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
+      subtext = arpeggiator.getArpRowTargetSubtext(),
+      targetId = "arp-bottom-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirDown" then
+    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirUp" then
+    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
+    local spot = {
+      title = "ARP DIRECTION",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      targetId = "arp-dir-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateDown" then
+    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateUp" then
+    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
+    arpeggiator.applyBpmChange()
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateDown" then
+    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
+    arpeggiator.applyGatePercentChange()
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
+      subtext = "Gate Duration",
+      targetId = "gate-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateUp" then
+    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+    arpeggiator.applyGatePercentChange()
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
+      subtext = "Gate Duration",
+      targetId = "gate-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmDown" then
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.max(20.0, state.arpBpm - step)
+    arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(-step)
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Step: " .. step .. " BPM",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmUp" then
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.min(300.0, state.arpBpm + step)
+    arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(step)
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Step: " .. step .. " BPM",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "relDown" or act == "releaseDown" then
+    local currentVal = state.ccStates[72] or 64
+    local newVal = math.max(0, currentVal - 4)
+    state.ccStates[72] = newVal
+    midi.sendMidiCC(72, newVal)
+    local spot = {
+      title = "SYNTH RELEASE",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #72 Level",
+      targetId = "header",
+      color = "#cf9ee1"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "relUp" or act == "releaseUp" then
+    local currentVal = state.ccStates[72] or 64
+    local newVal = math.min(127, currentVal + 4)
+    state.ccStates[72] = newVal
+    midi.sendMidiCC(72, newVal)
+    local spot = {
+      title = "SYNTH RELEASE",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #72 Level",
+      targetId = "header",
+      color = "#cf9ee1"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmEdit" then
+    state.bpmInputMode = true
+    state.bpmBeforeEdit = state.arpBpm
+    state.bpmInputBuffer = ""
+    local spot = {
+      title = "EDIT BPM",
+      value = "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  end
+
+  config.saveSettings()
+end
+
+local function handleKeyDown(code)
+  if code == 50 then -- Backtick
+    if not state.pressedKeys[code] then
+      state.pressedKeys[code] = { isControl = true }
+      arpeggiator.toggleArp()
+    end
+    return true
+  end
+
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    local isTop = noteKey.isTop
+    if not state.pressedKeys[code] then
+      local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
+      local arpActive = state.arpEnabled and arpEnabledForRow
+      local sustainActive = state.sustainActive
+
+      local isArpNote = false
+      local isSustainedNote = false
+
+      if state.shiftHeld then
+        isArpNote = not arpActive
+        isSustainedNote = not sustainActive
+      else
+        isArpNote = arpActive
+        isSustainedNote = sustainActive
+      end
+
+      state.pressedKeys[code] = {
+        pitch = transposedPitch,
+        isArpNote = isArpNote,
+        isSustainedNote = isSustainedNote
+      }
+
+      if isArpNote then
+        arpeggiator.arpAddNote(code, transposedPitch)
+      else
+        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop))
+      end
+      hud.updateWebviewHud()
+    end
+    return true
+  end
+
+  local numCtrlKey = config.getNumberControlKey(code)
+  if numCtrlKey then
+    if not state.pressedKeys[code] then
+      state.pressedKeys[code] = { isControl = true }
+      local act = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
+      executeControlAction(act, code)
+      stopControlRepeat(code)
+      local entry = {}
+      controlRepeatTimers[code] = entry
+      entry.timer = hs.timer.doAfter(0.35, function()
+        if not controlRepeatTimers[code] then return end
+        if state.pressedKeys[code] then
+          entry.interval = hs.timer.doEvery(0.08, function()
+            if not controlRepeatTimers[code] then return end
+            local ok, err = pcall(function()
+              if state.pressedKeys[code] then
+                local currentAct = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
+                -- Suppress undo push during key repeat (already captured on first press)
+                local savedFn = pushStateSnapshot
+                pushStateSnapshot = function() end
+                local ok2, err2 = pcall(executeControlAction, currentAct, code)
+                pushStateSnapshot = savedFn
+                if not ok2 then
+                  print("QWERTY MIDI: numCtrl repeat error: " .. tostring(err2))
+                end
+              else
+                stopControlRepeat(code)
+              end
+            end)
+            if not ok then
+              print("QWERTY MIDI: numCtrl interval error: " .. tostring(err))
+              stopControlRepeat(code)
+            end
+          end)
+        end
+      end)
+    end
+    return true
+  end
+
+  local ctrlKey = config.getControlKey(code)
+  if ctrlKey then
+    if not state.pressedKeys[code] then
+      state.pressedKeys[code] = { isControl = true }
+      local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+      executeControlAction(act, code)
+      if act ~= "sustain" then
+        stopControlRepeat(code)
+        local entry = {}
+        controlRepeatTimers[code] = entry
+        entry.timer = hs.timer.doAfter(0.35, function()
+          if not controlRepeatTimers[code] then return end
+          if state.pressedKeys[code] then
+            entry.interval = hs.timer.doEvery(0.08, function()
+              if not controlRepeatTimers[code] then return end
+              local ok, err = pcall(function()
+                if state.pressedKeys[code] then
+                  local currentAct = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+                  -- Suppress undo push during key repeat (already captured on first press)
+                  local savedFn = pushStateSnapshot
+                  pushStateSnapshot = function() end
+                  local ok2, err2 = pcall(executeControlAction, currentAct, code)
+                  pushStateSnapshot = savedFn
+                  if not ok2 then
+                    print("QWERTY MIDI: ctrl repeat error: " .. tostring(err2))
+                  end
+                else
+                  stopControlRepeat(code)
+                end
+              end)
+              if not ok then
+                print("QWERTY MIDI: ctrl interval error: " .. tostring(err))
+                stopControlRepeat(code)
+              end
+            end)
+          end
+        end)
+      end
+    end
+    return true
+  end
+
+  return false
+end
+
+local function handleKeyUp(code)
+  if code == 50 then -- Backtick
+    state.pressedKeys[code] = nil
+    hud.updateWebviewHud()
+    return true
+  end
+
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    local keyInfo = state.pressedKeys[code]
+    if keyInfo then
+      local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo
+      local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
+      local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
+
+      if isArpNote then
+        arpeggiator.arpRemoveNote(code)
+      else
+        if isSustainedNote and state.sustainActive then
+          state.sustainedPitches = state.sustainedPitches or {}
+          state.sustainedPitches[playedPitch] = true
+        else
+          midi.sendMidiNote("noteOff", playedPitch, 0)
+        end
+      end
+      state.pressedKeys[code] = nil
+    end
+    hud.updateWebviewHud()
+    return true
+  end
+
+  local numCtrlKey = config.getNumberControlKey(code)
+  if numCtrlKey then
+    stopControlRepeat(code)
+    state.pressedKeys[code] = nil
+    hud.updateWebviewHud()
+    return true
+  end
+
+  local ctrlKey = config.getControlKey(code)
+  if ctrlKey then
+    stopControlRepeat(code)
+    state.pressedKeys[code] = nil
+    local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+    if act == "sustain" then
+      local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0
+      if holdDuration > 0.25 then
+        state.sustainActive = false
+        midi.sendMidiCC(64, 0)
+      else
+        if state.sustainWasActiveOnPress then
+          state.sustainActive = false
+          midi.sendMidiCC(64, 0)
+        else
+          state.sustainActive = true
+          midi.sendMidiCC(64, 127)
+        end
+      end
+
+      if not state.sustainActive then
+        midi.sendMidiCC(64, 0)
+        if state.sustainedPitches then
+          for pitch in pairs(state.sustainedPitches) do
+            local isCurrentlyHeld = false
+            for _, keyInfo in pairs(state.pressedKeys) do
+              if type(keyInfo) == "table" and keyInfo.pitch == pitch then
+                isCurrentlyHeld = true
+                break
+              end
+            end
+            if not isCurrentlyHeld then
+              midi.sendMidiNote("noteOff", pitch, 0)
+            end
+          end
+          state.sustainedPitches = {}
+        end
+      end
+
+      local spot = {
+        title = "SUSTAIN (CC #64)",
+        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
+        targetId = "key-48",
+        color = state.sustainActive and "#d4a359" or "#b5aba0"
+      }
+      hud.updateWebviewHud(spot)
+    else
+      hud.updateWebviewHud()
+    end
+    return true
+  end
+
+  -- Fallback cleanup for unmapped or ignored keys
+  if state.pressedKeys[code] then
+    state.pressedKeys[code] = nil
+  end
+
+  return false
 end
 
 return {
-  getEffectiveRowVelocity = getEffectiveRowVelocity,
-  getTransposedPitch = getTransposedPitch,
-  noteNumToName = noteNumToName,
-  getIntervalInfo = getIntervalInfo
+  executeControlAction = executeControlAction,
+  handleKeyDown = handleKeyDown,
+  handleKeyUp = handleKeyUp,
+  stopAllControlRepeats = stopAllControlRepeats
 }
 
 end
@@ -3246,7 +2740,6 @@ local HTML_UI_CONTENT = [[
   let selectedKeys = new Set();
   let isMarqueeSelecting = false;
   let marqueeStartX = 0, marqueeStartY = 0;
-  let isShiftClickSelect = false;
 
   function clearSelection() {
     document.querySelectorAll('.key-pad.selected-key').forEach(el => el.classList.remove('selected-key'));
@@ -3373,7 +2866,7 @@ local HTML_UI_CONTENT = [[
     ['number', 'upper', 'home', 'lower'].forEach(rowName => {
       const rowEl = document.getElementById('row-' + rowName);
       if (!rowEl) return;
-      rowEl.innerHTML = '';
+      rowEl.textContent = '';
       if (l[rowName]) {
         l[rowName].forEach(k => {
           const pad = document.createElement('div');
@@ -3482,12 +2975,6 @@ local HTML_UI_CONTENT = [[
           pad.addEventListener('mouseup', releasePad);
           pad.addEventListener('mouseleave', releasePad);
 
-          // Shared helper to get half note element
-          const getHalfNote = (pad, halfClass) => {
-            const half = pad.querySelector('.' + halfClass + ' .key-note');
-            return half;
-          };
-
           // Drag & Drop handlers for layout editor
           pad.addEventListener('dragstart', (e) => {
             if (!isEditMode || k.isDummy) {
@@ -3545,7 +3032,6 @@ local HTML_UI_CONTENT = [[
               if (!data) return;
 
               if (data.type === 'action') {
-                const halfType = isShift ? 'shiftAction' : 'action';
                 assignActionToKey(k.code, data.action, isShift);
                 pad.classList.add('just-updated-glow');
                 setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
@@ -3782,7 +3268,7 @@ local HTML_UI_CONTENT = [[
   function renderDrawerCategories(catalog, searchQuery) {
     const container = document.getElementById('drawer-categories-container');
     if (!container) return;
-    container.innerHTML = '';
+    container.textContent = '';
 
     const query = (searchQuery || '').toLowerCase().trim();
     const cats = catalog || DEFAULT_ACTION_CATALOG;
@@ -3810,9 +3296,9 @@ local HTML_UI_CONTENT = [[
         const label = document.createElement('span');
         label.className = 'item-label';
         if (act.id === 'undoState') {
-          label.innerHTML = '&#x21A9; ' + act.name;
+          label.textContent = '\u21A9 ' + act.name;
         } else if (act.id === 'redoState') {
-          label.innerHTML = '&#x21AA; ' + act.name;
+          label.textContent = '\u21AA ' + act.name;
         } else {
           label.textContent = act.name;
         }
@@ -4086,7 +3572,7 @@ local HTML_UI_CONTENT = [[
     const select = document.getElementById('preset-select');
     if (!select) return;
 
-    select.innerHTML = '';
+    select.textContent = '';
     activePresetsList.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
@@ -5194,533 +4680,6 @@ return HTML_UI_CONTENT
 
 end
 
-__modules["settings_ui"] = function()
-local hsWebview = require("hs.webview")
-local hsUsercontent = require("hs.webview.usercontent")
-local config = __require("config")
-local state = config.state
-
-local settingsWebview = nil
-
-local function generateSettingsHTML()
-  local bpmStep        = state.bpmStepSize or 10
-  local logicSync      = state.logicSyncEnabled
-  local gate           = state.arpGatePercent or 80
-  local zoom           = state.zoomLevel or 1.0
-  local sensitivity    = state.scrollSensitivity or 0.15
-  local momentumScale  = state.scrollMomentumScale or 0.3
-
-  -- Build BPM step selected states
-  local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
-  bpmSel[tostring(bpmStep)] = "selected"
-
-  -- Build zoom selected states
-  local zoomSel = {}
-  for _, v in ipairs({0.8, 1.0, 1.2, 1.4}) do
-    zoomSel[tostring(v)] = math.abs(zoom - v) < 0.05 and "selected" or ""
-  end
-
-  -- Format floats nicely for slider defaults
-  local sensFmt    = string.format("%.2f", sensitivity)
-  local momentFmt  = string.format("%.2f", momentumScale)
-
-  return string.format([[
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-
-    body {
-      font-family: Georgia, serif;
-      background: #18140f;
-      color: #e2d5c0;
-      font-size: 15px;
-      overflow: hidden;
-      border-radius: 16px;
-    }
-
-    #panel {
-      background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
-      border: 1.5px solid rgba(212, 163, 89, 0.4);
-      border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
-      padding: 0;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* ── Title bar ── */
-    #titlebar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 20px 12px;
-      border-bottom: 1px solid rgba(212, 163, 89, 0.2);
-      cursor: move;
-      -webkit-app-region: drag;
-      flex-shrink: 0;
-    }
-
-    #titlebar-label {
-      font-weight: 700;
-      font-size: 15px;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      color: #d4a359;
-      text-shadow: 0 0 12px rgba(212,163,89,0.4);
-    }
-
-    #close-btn {
-      background: rgba(212,163,89,0.12);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      width: 26px; height: 26px;
-      border-radius: 50%%;
-      font-size: 13px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: background 0.15s, box-shadow 0.15s;
-      -webkit-app-region: no-drag;
-      flex-shrink: 0;
-      font-family: inherit;
-      outline: none;
-    }
-    #close-btn:hover {
-      background: rgba(212,163,89,0.28);
-      box-shadow: 0 0 8px rgba(212,163,89,0.3);
-    }
-
-    /* ── Scroll area ── */
-    #scroll-area {
-      overflow-y: auto;
-      flex: 1;
-      padding: 18px 20px 20px;
-    }
-
-    /* ── Section ── */
-    .section {
-      margin-bottom: 20px;
-    }
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 2.2px;
-      text-transform: uppercase;
-      color: rgba(212,163,89,0.55);
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid rgba(212,163,89,0.12);
-    }
-
-    /* ── Row ── */
-    .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-    .row:last-child { margin-bottom: 0; }
-
-    .row-label { flex: 1; min-width: 0; }
-    .row-label strong { font-weight: 700; font-size: 14px; color: #e2d5c0; display: block; }
-    .row-label span { font-size: 12px; color: rgba(200,185,160,0.55); display: block; margin-top: 2px; }
-
-    /* ── Select ── */
-    select {
-      background: rgba(20,16,10,0.9);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      padding: 6px 10px;
-      border-radius: 8px;
-      outline: none;
-      font-size: 13px;
-      font-family: inherit;
-      font-weight: 700;
-      flex-shrink: 0;
-      appearance: none;
-      -webkit-appearance: none;
-      cursor: pointer;
-      min-width: 105px;
-      text-align: center;
-    }
-    select:focus { border-color: rgba(212,163,89,0.7); }
-    select option { background: #1a1508; color: #d4a359; }
-
-    /* ── Toggle ── */
-    .toggle-wrap {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-    .toggle {
-      position: relative;
-      width: 48px; height: 26px;
-    }
-    .toggle input { opacity: 0; width: 0; height: 0; }
-    .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: rgba(30,24,14,0.9);
-      border: 1px solid rgba(212,163,89,0.3);
-      border-radius: 13px;
-      cursor: pointer;
-      transition: background 0.2s, border-color 0.2s;
-    }
-    .toggle-thumb {
-      position: absolute;
-      top: 3px; left: 3px;
-      width: 18px; height: 18px;
-      background: rgba(212,163,89,0.45);
-      border-radius: 50%%;
-      transition: transform 0.2s, background 0.2s;
-      pointer-events: none;
-    }
-    .toggle input:checked ~ .toggle-track {
-      background: rgba(212,163,89,0.18);
-      border-color: rgba(212,163,89,0.7);
-    }
-    .toggle input:checked ~ .toggle-thumb {
-      transform: translateX(22px);
-      background: #d4a359;
-    }
-
-    /* ── Slider ── */
-    .slider-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-      width: 190px;
-    }
-    input[type=range] {
-      -webkit-appearance: none;
-      appearance: none;
-      flex: 1;
-      height: 5px;
-      background: rgba(212,163,89,0.18);
-      border-radius: 3px;
-      outline: none;
-      cursor: pointer;
-    }
-    input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 16px; height: 16px;
-      border-radius: 50%%;
-      background: #d4a359;
-      border: 1px solid rgba(0,0,0,0.4);
-      box-shadow: 0 0 6px rgba(212,163,89,0.5);
-      cursor: pointer;
-    }
-    .slider-val {
-      font-size: 13px;
-      font-weight: 700;
-      color: #d4a359;
-      min-width: 38px;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    /* ── Number input ── */
-    input[type=number] {
-      background: rgba(20,16,10,0.9);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      padding: 6px 10px;
-      border-radius: 8px;
-      outline: none;
-      font-size: 13px;
-      font-family: inherit;
-      font-weight: 700;
-      width: 84px;
-      text-align: center;
-    }
-    input[type=number]:focus { border-color: rgba(212,163,89,0.7); }
-
-    /* ── Divider ── */
-    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 6px 0 20px; }
-  </style>
-</head>
-<body>
-<div id="panel">
-  <div id="titlebar">
-    <div id="titlebar-label">⚙ Settings</div>
-    <button id="close-btn" onclick="send('close')">✕</button>
-  </div>
-
-  <div id="scroll-area">
-
-    <!-- Scroll / Trackpad -->
-    <div class="section">
-      <div class="section-title">Trackpad / Scroll</div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Mod Wheel Sensitivity</strong>
-          <span>Speed of mod wheel change per scroll tick</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="sensitivitySlider" min="0.02" max="0.5" step="0.01"
-            value="%s"
-            oninput="onSensitivity(this.value)">
-          <div class="slider-val" id="sensitivityVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Momentum Scale</strong>
-          <span>Inertia strength after finger lifts (0 = none)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="momentumSlider" min="0" max="1" step="0.05"
-            value="%s"
-            oninput="onMomentum(this.value)">
-          <div class="slider-val" id="momentumVal">%s</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tempo & Sync -->
-    <div class="section">
-      <div class="section-title">Tempo &amp; Sync</div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>BPM Step Size</strong>
-          <span>Change per increment / decrement key</span>
-        </div>
-        <select id="bpmStepSize" onchange="send('setBpmStep', parseInt(this.value))">
-          <option value="1" %s>1 BPM</option>
-          <option value="5" %s>5 BPM</option>
-          <option value="10" %s>10 BPM</option>
-          <option value="25" %s>25 BPM</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Sync to Logic Pro</strong>
-          <span>Auto-match BPM with active session</span>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="logicSync" %s onchange="send('setLogicSync', this.checked)">
-          <div class="toggle-track"></div>
-          <div class="toggle-thumb"></div>
-        </label>
-      </div>
-    </div>
-
-    <!-- Arpeggiator -->
-    <div class="section">
-      <div class="section-title">Arpeggiator</div>
-      <div class="row">
-        <div class="row-label">
-          <strong>Default Gate Length</strong>
-          <span>Note duration as %% of step interval</span>
-        </div>
-        <input type="number" id="gatePercent" value="%d" min="10" max="150" step="5"
-          onchange="send('setGate', parseInt(this.value))">
-      </div>
-    </div>
-
-    <!-- Display -->
-    <div class="section">
-      <div class="section-title">Display</div>
-      <div class="row">
-        <div class="row-label">
-          <strong>HUD Zoom Level</strong>
-          <span>Scale factor for the status dashboard</span>
-        </div>
-        <select id="zoomLevel" onchange="send('setZoom', parseFloat(this.value))">
-          <option value="0.8" %s>80%%</option>
-          <option value="1.0" %s>100%% (Default)</option>
-          <option value="1.2" %s>120%%</option>
-          <option value="1.4" %s>140%%</option>
-        </select>
-      </div>
-    </div>
-
-  </div><!-- /scroll-area -->
-</div><!-- /panel -->
-
-<script>
-  function send(type, value) {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.settingsUserContent) {
-      window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
-    }
-  }
-  function onSensitivity(v) {
-    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
-    send('setSensitivity', parseFloat(v));
-  }
-  function onMomentum(v) {
-    document.getElementById('momentumVal').textContent = parseFloat(v).toFixed(2);
-    send('setMomentum', parseFloat(v));
-  }
-  function syncState(s) {
-    if (!s) return;
-    if (s.bpmStepSize !== undefined) {
-      var el = document.getElementById('bpmStepSize');
-      if (el) el.value = String(s.bpmStepSize);
-    }
-    if (s.logicSyncEnabled !== undefined) {
-      var el = document.getElementById('logicSync');
-      if (el) el.checked = !!s.logicSyncEnabled;
-    }
-    if (s.arpGatePercent !== undefined) {
-      var el = document.getElementById('gatePercent');
-      if (el) el.value = s.arpGatePercent;
-    }
-    if (s.zoomLevel !== undefined) {
-      var el = document.getElementById('zoomLevel');
-      if (el) el.value = String(s.zoomLevel);
-    }
-    if (s.scrollSensitivity !== undefined) {
-      var el = document.getElementById('sensitivitySlider');
-      if (el) el.value = s.scrollSensitivity;
-      var valEl = document.getElementById('sensitivityVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
-    }
-    if (s.scrollMomentumScale !== undefined) {
-      var el = document.getElementById('momentumSlider');
-      if (el) el.value = s.scrollMomentumScale;
-      var valEl = document.getElementById('momentumVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
-    }
-  }
-</script>
-</body>
-</html>
-]],
-    -- sensitivity slider
-    sensFmt, sensFmt,
-    -- momentum slider
-    momentFmt, momentFmt,
-    -- bpm step selects
-    bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
-    -- logic sync checked
-    logicSync and "checked" or "",
-    -- gate
-    math.floor(gate),
-    -- zoom selects
-    zoomSel["0.8"], zoomSel["1.0"], zoomSel["1.2"], zoomSel["1.4"]
-  )
-end
-
-_G.activeWatchers = _G.activeWatchers or {}
-
-local function createSettingsWebview()
-  if _G.activeWatchers.settingsWebview then
-    return _G.activeWatchers.settingsWebview
-  end
-
-  local uc = hsUsercontent.new("settingsUserContent")
-
-  uc:setCallback(function(message)
-    local body = message.body
-    if not body or not body.type then return end
-
-    if body.type == "setBpmStep" then
-      local val = tonumber(body.value) or 10
-      state.bpmStepSize = val
-      hs.settings.set("qwertyMidi_bpmStepSize", val)
-    elseif body.type == "setLogicSync" then
-      local val = (body.value == true or body.value == "true" or body.value == 1)
-      state.logicSyncEnabled = val
-      hs.settings.set("qwertyMidi_logicSyncEnabled", val)
-    elseif body.type == "setGate" then
-      local val = tonumber(body.value) or 80.0
-      state.arpGatePercent = math.max(5.0, math.min(150.0, val))
-    elseif body.type == "setZoom" then
-      local val = tonumber(body.value) or 1.0
-      state.zoomLevel = val
-      hs.settings.set("qwertyMidi_zoomLevel", val)
-    elseif body.type == "setSensitivity" then
-      local val = tonumber(body.value) or 0.15
-      state.scrollSensitivity = val
-      hs.settings.set("qwertyMidi_scrollSensitivity", val)
-    elseif body.type == "setMomentum" then
-      local val = tonumber(body.value) or 0.3
-      state.scrollMomentumScale = val
-      hs.settings.set("qwertyMidi_scrollMomentumScale", val)
-    elseif body.type == "close" then
-      if _G.activeWatchers.settingsWebview then
-        _G.activeWatchers.settingsWebview:hide()
-      end
-      return
-    end
-
-    config.saveSettings()
-    local hud = __require("hud")
-    hud.updateWebviewHud()
-  end)
-
-  local screen = hs.screen.mainScreen():frame()
-  local w, h = 528, 612
-  local x = math.floor(screen.x + (screen.w - w) / 2)
-  local y = math.floor(screen.y + (screen.h - h) / 2)
-
-  local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
-  wv:windowTitle("QWERTY MIDI Settings")
-  -- Borderless floating panel that sits above the HUD webview
-  wv:windowStyle({ "borderless", "nonactivating" })
-  wv:level(hs.drawing.windowLevels.floating + 1)
-  wv:allowTextEntry(true)
-  wv:html(generateSettingsHTML())
-
-  _G.activeWatchers.settingsWebview = wv
-  return wv
-end
-
-local function syncStateToWebview()
-  if not _G.activeWatchers.settingsWebview then return end
-  local s = {
-    bpmStepSize = state.bpmStepSize or 10,
-    logicSyncEnabled = state.logicSyncEnabled,
-    arpGatePercent = state.arpGatePercent or 80,
-    zoomLevel = state.zoomLevel or 1.0,
-    scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollMomentumScale = state.scrollMomentumScale or 0.3
-  }
-  local jsonStr = hs.json.encode(s)
-  _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
-end
-
-local function toggleSettingsWindow()
-  local wv = createSettingsWebview()
-
-  if wv:isVisible() then
-    wv:hide()
-  else
-    local screen = hs.screen.mainScreen():frame()
-    local w, h = 528, 612
-    local x = math.floor(screen.x + (screen.w - w) / 2)
-    local y = math.floor(screen.y + (screen.h - h) / 2)
-    wv:frame({ x = x, y = y, w = w, h = h })
-
-    syncStateToWebview()
-    wv:show()
-  end
-end
-
--- Cleanup old instance on reload and pre-warm new settings webview
-if _G.activeWatchers.settingsWebview then
-  _G.activeWatchers.settingsWebview:delete()
-  _G.activeWatchers.settingsWebview = nil
-end
-createSettingsWebview()
-
-return {
-  toggleSettingsWindow = toggleSettingsWindow
-}
-
-end
-
 __modules["config"] = function()
 local function getSetting(key, default)
   local val = hs.settings.get("qwertyMidi_" .. key)
@@ -6305,22 +5264,31 @@ local function getNumberControlKey(code)
   return nil
 end
 
+
+local _cachedActiveNoteKeysMap = nil
+local _cachedActiveControlKeysMap = nil
+
 local function getActiveNoteKeysMap()
+  if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  _cachedActiveNoteKeysMap = map
   return map
 end
 
 local function getActiveControlKeysMap()
+  if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil then map[code] = k end end
   for code, k in pairs(upperRowKeys) do if k.action ~= nil then map[code] = k end end
   for code, k in pairs(lowerRowKeys) do if k.action ~= nil then map[code] = k end end
+  _cachedActiveControlKeysMap = map
   return map
 end
+
 
 return {
   state = state,
@@ -6357,1109 +5325,1574 @@ return {
 
 end
 
-__modules["controls"] = function()
+__modules["transposer"] = function()
+local config = __require("config")
+local state = config.state
+local SCALES = config.SCALES
+local NOTE_NAMES = config.NOTE_NAMES
+local WHITE_KEY_INDEX = config.WHITE_KEY_INDEX
+
+local function getEffectiveRowVelocity(isTopRow)
+  local isSplitArp = state.arpEnabled and state.arpBottomEnabled and (not state.arpTopEnabled)
+  if isTopRow then
+    local baseVol = state.topRowVolume
+    if isSplitArp then
+      baseVol = baseVol + state.splitArpTopBoost
+    end
+    return math.max(0, math.min(127, baseVol))
+  else
+    return math.max(0, math.min(127, state.bottomRowVolume))
+  end
+end
+
+local function getTransposedPitch(basePitch, isTopRow)
+  local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
+  local octave = math.floor(effectivePitch / 12) - 1
+  local noteInOctave = effectivePitch % 12
+  local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
+
+  if scaleIndex and scaleIndex ~= -1 then
+    local intervals = SCALES[state.currentScaleIdx].intervals
+    local numIntervals = #intervals
+    local transposedIndex = scaleIndex + state.transposeShift
+    local octaveOffset = math.floor(transposedIndex / numIntervals)
+    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
+
+    local targetInterval = intervals[idxInScale]
+    local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
+    return newPitch
+  end
+  local fallbackPitch = effectivePitch + state.currentRoot + state.octaveShift + state.transposeShift
+  return fallbackPitch
+end
+
+local function noteNumToName(noteNum)
+  local octave = math.floor(noteNum / 12) - 1
+  local noteName = NOTE_NAMES[(noteNum % 12) + 1]
+  return noteName .. octave
+end
+
+local function getIntervalInfo(noteNum)
+  local noteInOctave = noteNum % 12
+  local semitonesFromRoot = (noteInOctave - state.currentRoot + 12) % 12
+  local intervals = SCALES[state.currentScaleIdx].intervals
+
+  for idx, interval in ipairs(intervals) do
+    if interval == semitonesFromRoot then
+      return idx, semitonesFromRoot
+    end
+  end
+  return nil, semitonesFromRoot
+end
+
+return {
+  getEffectiveRowVelocity = getEffectiveRowVelocity,
+  getTransposedPitch = getTransposedPitch,
+  noteNumToName = noteNumToName,
+  getIntervalInfo = getIntervalInfo
+}
+
+end
+
+__modules["arpeggiator"] = function()
+local config = __require("config")
+local midi = __require("midi")
+local transposer = __require("transposer")
+
+local state = config.state
+local upperRowKeys = config.upperRowKeys
+local lowerRowKeys = config.lowerRowKeys
+local ARP_DIRECTIONS = state.ARP_DIRECTIONS
+local ARP_RATES = state.ARP_RATES
+local ARP_GATES = state.ARP_GATES
+local DIGIT_KEYCODES = state.DIGIT_KEYCODES
+
+
+local function countTableKeys(t)
+  local count = 0
+  for _ in pairs(t or {}) do count = count + 1 end
+  return count
+end
+
+local hudModule = nil
+
+local function setHudModule(m)
+  hudModule = m
+end
+
+local function updateHud(spotlightInfo, activeArpPitch)
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
+  end
+end
+
+local function stopArpTimer()
+  if state.arpActiveGateTimers then
+    for pitch, timer in pairs(state.arpActiveGateTimers) do
+      if timer then timer:stop() end
+      midi.sendMidiNote("noteOff", pitch, 0)
+    end
+    state.arpActiveGateTimers = {}
+  end
+  if state.arpGateTimer then
+    state.arpGateTimer:stop()
+    state.arpGateTimer = nil
+  end
+  if state.arpTimer then
+    state.arpTimer:stop()
+    state.arpTimer = nil
+  end
+  if state.arpCurrentPitch then
+    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+    state.arpCurrentPitch = nil
+  end
+  state.arpStepIndex = 1
+  state.arpStepDirection = 1
+  state.arpPos = 0
+end
+
+local function getArpIntervalSeconds()
+  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
+  return (60.0 / state.arpBpm) * rateFactor
+end
+
+local function arpTick()
+  local pitchList = {}
+  for code, pitch in pairs(state.arpHeldNotes) do
+    local noteKey = config.getNoteKey(code)
+    local isTop = noteKey and noteKey.isTop or false
+    local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
+    if rowArpEnabled then
+      table.insert(pitchList, pitch)
+    end
+  end
+  table.sort(pitchList)
+
+  if #pitchList == 0 then
+    if state.arpActiveGateTimers then
+      for pitch, timer in pairs(state.arpActiveGateTimers) do
+        if timer then timer:stop() end
+        midi.sendMidiNote("noteOff", pitch, 0)
+      end
+      state.arpActiveGateTimers = {}
+    end
+    if state.arpGateTimer then
+      state.arpGateTimer:stop()
+      state.arpGateTimer = nil
+    end
+    if state.arpCurrentPitch then
+      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+      state.arpCurrentPitch = nil
+      updateHud()
+    end
+    return
+  end
+
+  if state.arpDirectionIdx == 1 then -- UP
+    local pos = (state.arpPos % #pitchList) + 1
+    state.arpStepIndex = pos
+  elseif state.arpDirectionIdx == 2 then -- DOWN
+    local pos = (state.arpPos % #pitchList) + 1
+    state.arpStepIndex = #pitchList - pos + 1
+  elseif state.arpDirectionIdx == 3 then -- UP-DOWN
+    if state.arpStepIndex > #pitchList then
+      state.arpStepIndex = math.max(1, #pitchList - 1)
+      state.arpStepDirection = -1
+    elseif state.arpStepIndex < 1 then
+      state.arpStepIndex = math.min(#pitchList, 2)
+      state.arpStepDirection = 1
+    end
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
+      state.arpStepIndex = math.max(1, #pitchList - 1)
+      state.arpStepDirection = -1
+    end
+  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
+    local pos = (state.arpPos % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then
+      idx = math.floor(pos / 2) + 1
+    else
+      idx = #pitchList - math.floor(pos / 2) + 1
+    end
+    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out)
+    local pos = (state.arpPos % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then
+      idx = mid
+    elseif pos % 2 == 0 then
+      idx = mid + math.floor(pos / 2)
+    else
+      idx = mid - math.floor(pos / 2)
+    end
+    if idx < 1 or idx > #pitchList then
+      idx = ((pos - 1) % #pitchList) + 1
+    end
+    state.arpStepIndex = idx
+  elseif state.arpDirectionIdx == 7 then -- RANDOM
+    state.arpStepIndex = math.random(1, #pitchList)
+  end
+
+  local nextPitch = pitchList[state.arpStepIndex]
+
+  if state.arpDirectionIdx == 3 then -- UP-DOWN
+    if #pitchList == 1 then
+      state.arpStepIndex = 1
+      state.arpStepDirection = 1
+    else
+      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
+      if state.arpStepIndex > #pitchList then
+        state.arpStepIndex = math.max(1, #pitchList - 1)
+        state.arpStepDirection = -1
+      elseif state.arpStepIndex < 1 then
+        state.arpStepIndex = math.min(#pitchList, 2)
+        state.arpStepDirection = 1
+      end
+    end
+  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
+    if #pitchList == 1 then
+      state.arpStepIndex = 1
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
+      if state.arpStepIndex < 1 then
+        state.arpStepIndex = math.min(#pitchList, 2)
+        state.arpStepDirection = 1
+      elseif state.arpStepIndex > #pitchList then
+        state.arpStepIndex = math.max(1, #pitchList - 1)
+        state.arpStepDirection = -1
+      end
+    end
+  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
+    state.arpPos = (state.arpPos or 0) + 1
+  end
+
+  -- For gate <= 100%, kill any previous step pitch before starting the new pitch.
+  -- For gate > 100%, allow previous notes to remain sounding until their individual gate timer fires.
+  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+  if gateRatio <= 1.0 and state.arpCurrentPitch then
+    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
+      state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
+      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
+    end
+    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+    state.arpCurrentPitch = nil
+  end
+
+  local isTopRowArpNote = false
+  for code, p in pairs(state.arpHeldNotes) do
+    if p == nextPitch and lowerRowKeys[code] == nil and upperRowKeys[code] then
+      isTopRowArpNote = true
+      break
+    end
+  end
+  local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
+  midi.sendMidiNote("noteOn", nextPitch, vel)
+  state.arpCurrentPitch = nextPitch
+
+  updateHud(nil, nextPitch)
+
+  local gateDuration = getArpIntervalSeconds() * gateRatio
+  local pitchToRelease = nextPitch
+  local timer = hs.timer.doAfter(gateDuration, function()
+    midi.sendMidiNote("noteOff", pitchToRelease, 0)
+    if state.arpCurrentPitch == pitchToRelease then
+      state.arpCurrentPitch = nil
+      updateHud()
+    end
+    state.arpActiveGateTimers[pitchToRelease] = nil
+  end)
+
+  state.arpActiveGateTimers = state.arpActiveGateTimers or {}
+  if state.arpActiveGateTimers[pitchToRelease] then
+    state.arpActiveGateTimers[pitchToRelease]:stop()
+    state.arpActiveGateTimers[pitchToRelease] = nil
+  end
+  state.arpActiveGateTimers[pitchToRelease] = timer
+  state.arpGateTimer = timer
+end
+
+local function startArpTimer(preserveState)
+  if state.arpTimer then return end
+  local intervalSeconds = getArpIntervalSeconds()
+  if not preserveState then
+    if state.arpDirectionIdx == 4 then
+      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = 1
+      state.arpStepDirection = 1
+    end
+    state.arpPos = 0
+    arpTick()
+  end
+  state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
+end
+
+local function arpAddNote(code, pitch)
+  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
+
+  if state.arpLatchActive then
+    if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
+      state.arpHeldNotes = {}
+      state.arpLatchClearedForNewChord = true
+      if state.arpCurrentPitch then
+        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        state.arpCurrentPitch = nil
+      end
+    end
+  end
+
+  state.arpKeysCurrentlyHeld[code] = true
+  state.arpHeldNotes[code] = pitch
+
+  if not state.arpTimer then
+    startArpTimer()
+  end
+end
+
+local function arpRemoveNote(code)
+  state.arpKeysCurrentlyHeld[code] = nil
+
+  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
+
+  if state.arpLatchActive then
+    if numPhysicalHeld == 0 then
+      state.arpLatchClearedForNewChord = false
+    end
+    return
+  end
+
+  state.arpHeldNotes[code] = nil
+  local count = countTableKeys(state.arpHeldNotes)
+  if count == 0 then
+    stopArpTimer()
+    updateHud()
+  end
+end
+
+local function formatBpm(bpm)
+  if bpm == math.floor(bpm) then
+    return tostring(math.floor(bpm))
+  else
+    return string.format("%.1f", bpm)
+  end
+end
+
+local function applyBpmChange()
+  if state.arpTimer then
+    state.arpTimer:stop()
+    state.arpTimer = nil
+    startArpTimer(true)
+  end
+end
+
+local function applyGatePercentChange()
+  if state.arpTimer then
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    if state.arpActiveGateTimers then
+      if gateRatio <= 1.0 then
+        for pitch, timer in pairs(state.arpActiveGateTimers) do
+          if pitch ~= state.arpCurrentPitch then
+            if timer then timer:stop() end
+            midi.sendMidiNote("noteOff", pitch, 0)
+            state.arpActiveGateTimers[pitch] = nil
+          end
+        end
+      end
+    end
+  end
+end
+
+local function updateLatchedArpNotes()
+  if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
+  for code, _ in pairs(state.arpHeldNotes) do
+    if lowerRowKeys[code] then
+      state.arpHeldNotes[code] = transposer.getTransposedPitch(lowerRowKeys[code].baseNote, false)
+    elseif upperRowKeys[code] then
+      state.arpHeldNotes[code] = transposer.getTransposedPitch(upperRowKeys[code].baseNote, true)
+    end
+  end
+end
+
+local function getArpRowTargetSubtext()
+  if state.arpTopEnabled and state.arpBottomEnabled then
+    return "Top & Bottom Rows"
+  elseif state.arpTopEnabled then
+    return "Top Row Only"
+  elseif state.arpBottomEnabled then
+    return "Bottom Row Only"
+  else
+    return "No Rows Active"
+  end
+end
+
+local function toggleArpPower()
+  -- Cycle: Off → Latch+On → On (no latch) → Off
+  if not state.arpEnabled then
+    state.arpEnabled = true
+    state.arpLatchActive = true
+    state.arpLatchClearedForNewChord = false
+  elseif state.arpLatchActive then
+    state.arpLatchActive = false
+    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
+    local newHeld = {}
+    for code, pitch in pairs(state.arpHeldNotes) do
+      if state.arpKeysCurrentlyHeld[code] then
+        newHeld[code] = pitch
+      end
+    end
+    state.arpHeldNotes = newHeld
+
+    local count = countTableKeys(state.arpHeldNotes)
+    if count == 0 then
+      stopArpTimer()
+      if state.arpCurrentPitch then
+        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        state.arpCurrentPitch = nil
+      end
+    end
+  else
+    state.arpEnabled = false
+    state.arpLatchActive = false
+    stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+  end
+
+  local valStr = "ARP: OFF"
+  local subStr = "Arp Disabled"
+  if state.arpEnabled then
+    if state.arpLatchActive then
+      valStr = "ARP: LATCH"
+      subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    else
+      valStr = "ARP: ON"
+      subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    end
+  end
+
+  local spot = {
+    title = "ARPEGGIATOR",
+    value = valStr,
+    subtext = subStr,
+    targetId = "arp-power-btn",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+  config.saveSettings()
+end
+
+local function toggleArp()
+  toggleArpPower()
+end
+
+local function handleBpmInput(code, flags)
+  if code == 53 then -- Escape
+    state.arpBpm = state.bpmBeforeEdit
+    state.bpmInputMode = false
+    state.bpmInputBuffer = ""
+    updateHud()
+    config.saveSettings()
+    return true
+  elseif code == 36 then -- Return
+    if state.bpmInputBuffer ~= "" then
+      local val = tonumber(state.bpmInputBuffer)
+      if val and val >= 20 and val <= 300 then
+        state.arpBpm = val
+      end
+    end
+    local prevBpm = state.bpmBeforeEdit
+    state.bpmInputMode = false
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    setLogicBpmTarget(state.arpBpm, prevBpm)
+    updateHud()
+    config.saveSettings()
+    return true
+  elseif code == 126 then -- Arrow Up
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    state.arpBpm = math.min(300, state.arpBpm + delta)
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    updateHud()
+    return true
+  elseif code == 125 then -- Arrow Down
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    state.arpBpm = math.max(20, state.arpBpm - delta)
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    updateHud()
+    return true
+  elseif code == 51 then -- Backspace
+    if #state.bpmInputBuffer > 0 then
+      state.bpmInputBuffer = state.bpmInputBuffer:sub(1, -2)
+    end
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer ~= "" and (state.bpmInputBuffer .. " BPM") or "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  elseif DIGIT_KEYCODES[code] then
+    state.bpmInputBuffer = state.bpmInputBuffer .. DIGIT_KEYCODES[code]
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  elseif code == 47 then -- Period "."
+    if not state.bpmInputBuffer:find("%.") then
+      state.bpmInputBuffer = state.bpmInputBuffer .. "."
+    end
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  end
+
+  state.bpmInputMode = false
+  state.bpmInputBuffer = ""
+  updateHud()
+  return false
+end
+
+local isSyncingLogicBpm = false
+local logicBpmTask = nil
+local logicBpmDebounceTimer = nil
+
+local function setLogicBpmTarget(targetBpm)
+  if not state.logicSyncEnabled then return end
+
+  if logicBpmDebounceTimer then
+    logicBpmDebounceTimer:stop()
+    logicBpmDebounceTimer = nil
+  end
+
+  logicBpmDebounceTimer = hs.timer.doAfter(0.20, function()
+    logicBpmDebounceTimer = nil
+    if logicBpmTask then
+      logicBpmTask:terminate()
+      logicBpmTask = nil
+    end
+
+    isSyncingLogicBpm = true
+
+    local script = string.format([[
+      property minBPM : 5
+      property maxBPM : 990
+
+      on setExactBPM(targetBPM)
+        set targetBPM to targetBPM as integer
+
+        if targetBPM < minBPM then set targetBPM to minBPM
+        if targetBPM > maxBPM then set targetBPM to maxBPM
+
+        tell application "System Events"
+          tell process "Logic Pro"
+            set tempoSlider to missing value
+            set allSliders to sliders of group 1 of group 1 of window 1
+            repeat with s in allSliders
+              if description of s is "Tempo" then
+                set tempoSlider to s
+                exit repeat
+              end if
+            end repeat
+
+            if tempoSlider is missing value then return targetBPM
+
+            repeat 20 times
+              set currentBPM to (value of tempoSlider) as integer
+              set deltaBPM to targetBPM - currentBPM
+
+              if deltaBPM = 0 then return currentBPM
+
+              if deltaBPM > 0 then
+                set goingUp to true
+                set amountLeft to deltaBPM
+              else
+                set goingUp to false
+                set amountLeft to -deltaBPM
+              end if
+
+              set tenSteps to amountLeft div 10
+              repeat tenSteps times
+                if goingUp then
+                  perform action "AXIncrement" of tempoSlider
+                else
+                  perform action "AXDecrement" of tempoSlider
+                end if
+              end repeat
+
+              set oneSteps to amountLeft mod 10
+              repeat oneSteps times
+                if goingUp then
+                  set value of tempoSlider to maxBPM
+                else
+                  set value of tempoSlider to minBPM
+                end if
+              end repeat
+            end repeat
+          end tell
+        end tell
+      end setExactBPM
+
+      setExactBPM(%d)
+    ]], math.floor(targetBpm + 0.5))
+
+    logicBpmTask = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+      isSyncingLogicBpm = false
+      logicBpmTask = nil
+    end, { "-e", script })
+    logicBpmTask:start()
+  end)
+end
+
+local function stepLogicBpm(delta)
+  setLogicBpmTarget(state.arpBpm)
+end
+
+local function syncLogicBpm()
+  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
+  isSyncingLogicBpm = true
+
+  local script = [[
+    var bpm = null;
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic && logic.exists()) {
+        var win = logic.windows[0];
+        if (win && win.exists()) {
+          var grp = win.groups[0];
+          if (grp && grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar && ctrlBar.exists()) {
+              var elems = ctrlBar.uiElements();
+              for (var i = 0; i < elems.length; i++) {
+                if (elems[i].description() === 'Tempo') {
+                  bpm = parseFloat(elems[i].value());
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+    bpm;
+  ]]
+
+  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+    isSyncingLogicBpm = false
+    if exitCode == 0 and stdOut then
+      local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
+        state.arpBpm = val
+        applyBpmChange()
+        updateHud()
+      end
+    end
+  end, { "-l", "JavaScript", "-e", script })
+  task:start()
+end
+
+local function toggleLogicSync()
+  state.logicSyncEnabled = not state.logicSyncEnabled
+  if state.logicSyncEnabled then
+    syncLogicBpm()
+  end
+  local spot = {
+    title = "LOGIC PRO SYNC",
+    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
+    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
+    targetId = "bpm-val",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+end
+
+local function initLogicSync()
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  end
+  syncLogicBpm()
+end
+
+initLogicSync()
+
+return {
+  setHudModule = setHudModule,
+  stopArpTimer = stopArpTimer,
+  getArpIntervalSeconds = getArpIntervalSeconds,
+  startArpTimer = startArpTimer,
+  arpAddNote = arpAddNote,
+  arpRemoveNote = arpRemoveNote,
+  formatBpm = formatBpm,
+  applyBpmChange = applyBpmChange,
+  applyGatePercentChange = applyGatePercentChange,
+  updateLatchedArpNotes = updateLatchedArpNotes,
+  getArpRowTargetSubtext = getArpRowTargetSubtext,
+  toggleArpPower = toggleArpPower,
+  toggleArp = toggleArp,
+  handleBpmInput = handleBpmInput,
+  toggleLogicSync = toggleLogicSync,
+  syncLogicBpm = syncLogicBpm,
+  stepLogicBpm = stepLogicBpm,
+  setLogicBpmTarget = setLogicBpmTarget
+}
+
+
+end
+
+__modules["settings_ui"] = function()
+local hsWebview = require("hs.webview")
+local hsUsercontent = require("hs.webview.usercontent")
+local config = __require("config")
+local state = config.state
+
+local settingsWebview = nil
+
+local function generateSettingsHTML()
+  local bpmStep        = state.bpmStepSize or 10
+  local logicSync      = state.logicSyncEnabled
+  local gate           = state.arpGatePercent or 80
+  local zoom           = state.zoomLevel or 1.0
+  local sensitivity    = state.scrollSensitivity or 0.15
+  local momentumScale  = state.scrollMomentumScale or 0.3
+
+  -- Build BPM step selected states
+  local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
+  bpmSel[tostring(bpmStep)] = "selected"
+
+  -- Build zoom selected states
+  local zoomSel = {}
+  for _, v in ipairs({0.8, 1.0, 1.2, 1.4}) do
+    zoomSel[tostring(v)] = math.abs(zoom - v) < 0.05 and "selected" or ""
+  end
+
+  -- Format floats nicely for slider defaults
+  local sensFmt    = string.format("%.2f", sensitivity)
+  local momentFmt  = string.format("%.2f", momentumScale)
+
+  return string.format([[
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+
+    body {
+      font-family: Georgia, serif;
+      background: #18140f;
+      color: #e2d5c0;
+      font-size: 15px;
+      overflow: hidden;
+      border-radius: 16px;
+    }
+
+    #panel {
+      background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
+      border: 1.5px solid rgba(212, 163, 89, 0.4);
+      border-radius: 16px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
+      padding: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Title bar ── */
+    #titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px 12px;
+      border-bottom: 1px solid rgba(212, 163, 89, 0.2);
+      cursor: move;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+
+    #titlebar-label {
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: #d4a359;
+      text-shadow: 0 0 12px rgba(212,163,89,0.4);
+    }
+
+    #close-btn {
+      background: rgba(212,163,89,0.12);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      width: 26px; height: 26px;
+      border-radius: 50%%;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, box-shadow 0.15s;
+      -webkit-app-region: no-drag;
+      flex-shrink: 0;
+      font-family: inherit;
+      outline: none;
+    }
+    #close-btn:hover {
+      background: rgba(212,163,89,0.28);
+      box-shadow: 0 0 8px rgba(212,163,89,0.3);
+    }
+
+    /* ── Scroll area ── */
+    #scroll-area {
+      overflow-y: auto;
+      flex: 1;
+      padding: 18px 20px 20px;
+    }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2.2px;
+      text-transform: uppercase;
+      color: rgba(212,163,89,0.55);
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(212,163,89,0.12);
+    }
+
+    /* ── Row ── */
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .row:last-child { margin-bottom: 0; }
+
+    .row-label { flex: 1; min-width: 0; }
+    .row-label strong { font-weight: 700; font-size: 14px; color: #e2d5c0; display: block; }
+    .row-label span { font-size: 12px; color: rgba(200,185,160,0.55); display: block; margin-top: 2px; }
+
+    /* ── Select ── */
+    select {
+      background: rgba(20,16,10,0.9);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 700;
+      flex-shrink: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+      min-width: 105px;
+      text-align: center;
+    }
+    select:focus { border-color: rgba(212,163,89,0.7); }
+    select option { background: #1a1508; color: #d4a359; }
+
+    /* ── Toggle ── */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .toggle {
+      position: relative;
+      width: 48px; height: 26px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(30,24,14,0.9);
+      border: 1px solid rgba(212,163,89,0.3);
+      border-radius: 13px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 18px; height: 18px;
+      background: rgba(212,163,89,0.45);
+      border-radius: 50%%;
+      transition: transform 0.2s, background 0.2s;
+      pointer-events: none;
+    }
+    .toggle input:checked ~ .toggle-track {
+      background: rgba(212,163,89,0.18);
+      border-color: rgba(212,163,89,0.7);
+    }
+    .toggle input:checked ~ .toggle-thumb {
+      transform: translateX(22px);
+      background: #d4a359;
+    }
+
+    /* ── Slider ── */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      width: 190px;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 5px;
+      background: rgba(212,163,89,0.18);
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%%;
+      background: #d4a359;
+      border: 1px solid rgba(0,0,0,0.4);
+      box-shadow: 0 0 6px rgba(212,163,89,0.5);
+      cursor: pointer;
+    }
+    .slider-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #d4a359;
+      min-width: 38px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Number input ── */
+    input[type=number] {
+      background: rgba(20,16,10,0.9);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 700;
+      width: 84px;
+      text-align: center;
+    }
+    input[type=number]:focus { border-color: rgba(212,163,89,0.7); }
+
+    /* ── Divider ── */
+    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 6px 0 20px; }
+  </style>
+</head>
+<body>
+<div id="panel">
+  <div id="titlebar">
+    <div id="titlebar-label">⚙ Settings</div>
+    <button id="close-btn" onclick="send('close')">✕</button>
+  </div>
+
+  <div id="scroll-area">
+
+    <!-- Scroll / Trackpad -->
+    <div class="section">
+      <div class="section-title">Trackpad / Scroll</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Mod Wheel Sensitivity</strong>
+          <span>Speed of mod wheel change per scroll tick</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="sensitivitySlider" min="0.02" max="0.5" step="0.01"
+            value="%s"
+            oninput="onSensitivity(this.value)">
+          <div class="slider-val" id="sensitivityVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Momentum Scale</strong>
+          <span>Inertia strength after finger lifts (0 = none)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="momentumSlider" min="0" max="1" step="0.05"
+            value="%s"
+            oninput="onMomentum(this.value)">
+          <div class="slider-val" id="momentumVal">%s</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tempo & Sync -->
+    <div class="section">
+      <div class="section-title">Tempo &amp; Sync</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>BPM Step Size</strong>
+          <span>Change per increment / decrement key</span>
+        </div>
+        <select id="bpmStepSize" onchange="send('setBpmStep', parseInt(this.value))">
+          <option value="1" %s>1 BPM</option>
+          <option value="5" %s>5 BPM</option>
+          <option value="10" %s>10 BPM</option>
+          <option value="25" %s>25 BPM</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Sync to Logic Pro</strong>
+          <span>Auto-match BPM with active session</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="logicSync" %s onchange="send('setLogicSync', this.checked)">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Arpeggiator -->
+    <div class="section">
+      <div class="section-title">Arpeggiator</div>
+      <div class="row">
+        <div class="row-label">
+          <strong>Default Gate Length</strong>
+          <span>Note duration as %% of step interval</span>
+        </div>
+        <input type="number" id="gatePercent" value="%d" min="10" max="150" step="5"
+          onchange="send('setGate', parseInt(this.value))">
+      </div>
+    </div>
+
+    <!-- Display -->
+    <div class="section">
+      <div class="section-title">Display</div>
+      <div class="row">
+        <div class="row-label">
+          <strong>HUD Zoom Level</strong>
+          <span>Scale factor for the status dashboard</span>
+        </div>
+        <select id="zoomLevel" onchange="send('setZoom', parseFloat(this.value))">
+          <option value="0.8" %s>80%%</option>
+          <option value="1.0" %s>100%% (Default)</option>
+          <option value="1.2" %s>120%%</option>
+          <option value="1.4" %s>140%%</option>
+        </select>
+      </div>
+    </div>
+
+  </div><!-- /scroll-area -->
+</div><!-- /panel -->
+
+<script>
+  function send(type, value) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.settingsUserContent) {
+      window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
+    }
+  }
+  function onSensitivity(v) {
+    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
+    send('setSensitivity', parseFloat(v));
+  }
+  function onMomentum(v) {
+    document.getElementById('momentumVal').textContent = parseFloat(v).toFixed(2);
+    send('setMomentum', parseFloat(v));
+  }
+  function syncState(s) {
+    if (!s) return;
+    if (s.bpmStepSize !== undefined) {
+      var el = document.getElementById('bpmStepSize');
+      if (el) el.value = String(s.bpmStepSize);
+    }
+    if (s.logicSyncEnabled !== undefined) {
+      var el = document.getElementById('logicSync');
+      if (el) el.checked = !!s.logicSyncEnabled;
+    }
+    if (s.arpGatePercent !== undefined) {
+      var el = document.getElementById('gatePercent');
+      if (el) el.value = s.arpGatePercent;
+    }
+    if (s.zoomLevel !== undefined) {
+      var el = document.getElementById('zoomLevel');
+      if (el) el.value = String(s.zoomLevel);
+    }
+    if (s.scrollSensitivity !== undefined) {
+      var el = document.getElementById('sensitivitySlider');
+      if (el) el.value = s.scrollSensitivity;
+      var valEl = document.getElementById('sensitivityVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    }
+    if (s.scrollMomentumScale !== undefined) {
+      var el = document.getElementById('momentumSlider');
+      if (el) el.value = s.scrollMomentumScale;
+      var valEl = document.getElementById('momentumVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
+    }
+  }
+</script>
+</body>
+</html>
+]],
+    -- sensitivity slider
+    sensFmt, sensFmt,
+    -- momentum slider
+    momentFmt, momentFmt,
+    -- bpm step selects
+    bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
+    -- logic sync checked
+    logicSync and "checked" or "",
+    -- gate
+    math.floor(gate),
+    -- zoom selects
+    zoomSel["0.8"], zoomSel["1.0"], zoomSel["1.2"], zoomSel["1.4"]
+  )
+end
+
+_G.activeWatchers = _G.activeWatchers or {}
+
+local function createSettingsWebview()
+  if _G.activeWatchers.settingsWebview then
+    return _G.activeWatchers.settingsWebview
+  end
+
+  local uc = hsUsercontent.new("settingsUserContent")
+
+  uc:setCallback(function(message)
+    local body = message.body
+    if not body or not body.type then return end
+
+    if body.type == "setBpmStep" then
+      local val = tonumber(body.value) or 10
+      state.bpmStepSize = val
+      hs.settings.set("qwertyMidi_bpmStepSize", val)
+    elseif body.type == "setLogicSync" then
+      local val = (body.value == true or body.value == "true" or body.value == 1)
+      state.logicSyncEnabled = val
+      hs.settings.set("qwertyMidi_logicSyncEnabled", val)
+    elseif body.type == "setGate" then
+      local val = tonumber(body.value) or 80.0
+      state.arpGatePercent = math.max(5.0, math.min(150.0, val))
+    elseif body.type == "setZoom" then
+      local val = tonumber(body.value) or 1.0
+      state.zoomLevel = val
+      hs.settings.set("qwertyMidi_zoomLevel", val)
+    elseif body.type == "setSensitivity" then
+      local val = tonumber(body.value) or 0.15
+      state.scrollSensitivity = val
+      hs.settings.set("qwertyMidi_scrollSensitivity", val)
+    elseif body.type == "setMomentum" then
+      local val = tonumber(body.value) or 0.3
+      state.scrollMomentumScale = val
+      hs.settings.set("qwertyMidi_scrollMomentumScale", val)
+    elseif body.type == "close" then
+      if _G.activeWatchers.settingsWebview then
+        _G.activeWatchers.settingsWebview:hide()
+      end
+      return
+    end
+
+    config.saveSettings()
+    local hud = __require("hud")
+    hud.updateWebviewHud()
+  end)
+
+  local screen = hs.screen.mainScreen():frame()
+  local w, h = 528, 612
+  local x = math.floor(screen.x + (screen.w - w) / 2)
+  local y = math.floor(screen.y + (screen.h - h) / 2)
+
+  local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
+  wv:windowTitle("QWERTY MIDI Settings")
+  -- Borderless floating panel that sits above the HUD webview
+  wv:windowStyle({ "borderless", "nonactivating" })
+  wv:level(hs.drawing.windowLevels.floating + 1)
+  wv:allowTextEntry(true)
+  wv:html(generateSettingsHTML())
+
+  _G.activeWatchers.settingsWebview = wv
+  return wv
+end
+
+local function syncStateToWebview()
+  if not _G.activeWatchers.settingsWebview then return end
+  local s = {
+    bpmStepSize = state.bpmStepSize or 10,
+    logicSyncEnabled = state.logicSyncEnabled,
+    arpGatePercent = state.arpGatePercent or 80,
+    zoomLevel = state.zoomLevel or 1.0,
+    scrollSensitivity = state.scrollSensitivity or 0.15,
+    scrollMomentumScale = state.scrollMomentumScale or 0.3
+  }
+  local jsonStr = hs.json.encode(s)
+  _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
+end
+
+local function toggleSettingsWindow()
+  local wv = createSettingsWebview()
+
+  if wv:isVisible() then
+    wv:hide()
+  else
+    local screen = hs.screen.mainScreen():frame()
+    local w, h = 528, 612
+    local x = math.floor(screen.x + (screen.w - w) / 2)
+    local y = math.floor(screen.y + (screen.h - h) / 2)
+    wv:frame({ x = x, y = y, w = w, h = h })
+
+    syncStateToWebview()
+    wv:show()
+  end
+end
+
+-- Cleanup old instance on reload and pre-warm new settings webview
+if _G.activeWatchers.settingsWebview then
+  _G.activeWatchers.settingsWebview:delete()
+  _G.activeWatchers.settingsWebview = nil
+end
+createSettingsWebview()
+
+return {
+  toggleSettingsWindow = toggleSettingsWindow
+}
+
+end
+
+__modules["init"] = function()
 local config = __require("config")
 local midi = __require("midi")
 local transposer = __require("transposer")
 local arpeggiator = __require("arpeggiator")
 local hud = __require("hud")
+local controls = __require("controls")
+local settings_ui = __require("settings_ui")
+
+local function profileLog(msg)
+  local f = io.open("/tmp/midi_startup.log", "a")
+  if f then
+    f:write(os.clock() .. ": " .. msg .. "\n")
+    f:close()
+  end
+end
+profileLog("Start init.lua")
 
 local state = config.state
-local SCALES = config.SCALES
-local NOTE_NAMES = config.NOTE_NAMES
 
 _G.activeWatchers = _G.activeWatchers or {}
 
--- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
-if _G._qmidiRepeatTimers then
-  for code, entry in pairs(_G._qmidiRepeatTimers) do
-    pcall(function()
-      if entry.timer then entry.timer:stop() end
-      if entry.interval then entry.interval:stop() end
-    end)
-  end
-end
-_G._qmidiRepeatTimers = {}
-local controlRepeatTimers = _G._qmidiRepeatTimers
+arpeggiator.setHudModule(hud)
+hud.setControlsModule(controls)
 
-local function stopControlRepeat(code)
-  if code and controlRepeatTimers[code] then
-    pcall(function()
-      if controlRepeatTimers[code].timer then
-        controlRepeatTimers[code].timer:stop()
-      end
-      if controlRepeatTimers[code].interval then
-        controlRepeatTimers[code].interval:stop()
-      end
-    end)
-    controlRepeatTimers[code] = nil
-  end
-end
-
-local function stopAllControlRepeats()
-  for code in pairs(controlRepeatTimers) do
-    stopControlRepeat(code)
-  end
-end
-
-local stateUndoStack = {}
-local stateRedoStack = {}
-local isRestoringControllerState = false
-
-local function captureStateSnapshot(label)
-  return {
-    label = label or "State Change",
-    currentRoot = state.currentRoot,
-    currentScaleIdx = state.currentScaleIdx,
-    octaveShift = state.octaveShift,
-    topRowOctaveOffset = state.topRowOctaveOffset,
-    bottomRowOctaveOffset = state.bottomRowOctaveOffset,
-    transposeShift = state.transposeShift,
-    topRowVolume = state.topRowVolume,
-    bottomRowVolume = state.bottomRowVolume,
-    arpEnabled = state.arpEnabled,
-    arpLatchActive = state.arpLatchActive,
-    arpDirectionIdx = state.arpDirectionIdx,
-    arpRateIdx = state.arpRateIdx,
-    arpGatePercent = state.arpGatePercent,
-    arpBpm = state.arpBpm,
-    arpTopEnabled = state.arpTopEnabled,
-    arpBottomEnabled = state.arpBottomEnabled,
-    modWheel = state.ccStates[1] or 0
-  }
-end
-
-local function pushStateSnapshot(label)
-  if isRestoringControllerState then return end
-  table.insert(stateUndoStack, captureStateSnapshot(label))
-  stateRedoStack = {}
-end
-
-local function applyStateSnapshot(snap)
-  isRestoringControllerState = true
-
-  state.currentRoot = snap.currentRoot
-  state.currentScaleIdx = snap.currentScaleIdx
-  state.octaveShift = snap.octaveShift
-  state.topRowOctaveOffset = snap.topRowOctaveOffset
-  state.bottomRowOctaveOffset = snap.bottomRowOctaveOffset or 0
-  state.transposeShift = snap.transposeShift
-  state.topRowVolume = snap.topRowVolume
-  state.bottomRowVolume = snap.bottomRowVolume
-  state.arpEnabled = snap.arpEnabled
-  state.arpLatchActive = snap.arpLatchActive
-  state.arpDirectionIdx = snap.arpDirectionIdx
-  state.arpRateIdx = snap.arpRateIdx
-  state.arpGatePercent = snap.arpGatePercent
-  state.arpBpm = snap.arpBpm
-  state.arpTopEnabled = snap.arpTopEnabled
-  state.arpBottomEnabled = snap.arpBottomEnabled
-  state.ccStates[1] = snap.modWheel
-
-  arpeggiator.updateLatchedArpNotes()
-  arpeggiator.applyBpmChange()
-  arpeggiator.applyGatePercentChange()
-  midi.sendMidiCC(1, snap.modWheel)
-
-  isRestoringControllerState = false
-  config.saveSettings()
-end
-
-local function undoControllerState(code)
-  if #stateUndoStack == 0 then
-    local spot = {
-      title = "UNDO STATE",
-      value = "NO HISTORY",
-      subtext = "Nothing to undo",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return
+function _G.toggleMidiMode(newState)
+  if newState == nil then
+    state.midiActive = not state.midiActive
+  else
+    state.midiActive = newState
   end
 
-  local cur = captureStateSnapshot("Current")
-  table.insert(stateRedoStack, cur)
+  -- Persist window-open state so reload can auto-reopen if needed
+  hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
 
-  local prev = table.remove(stateUndoStack)
-  applyStateSnapshot(prev)
-
-  local scaleName = SCALES[state.currentScaleIdx].name
-  local rootName = NOTE_NAMES[state.currentRoot + 1]
-  local spot = {
-    title = "UNDO STATE",
-    value = rootName .. " " .. scaleName,
-    subtext = "Reverted: " .. (prev.label or "Controller State"),
-    targetId = code and ("key-" .. code) or "header",
-    color = "#d4a359"
-  }
-  hud.updateWebviewHud(spot)
-end
-
-local function redoControllerState(code)
-  if #stateRedoStack == 0 then
-    local spot = {
-      title = "REDO STATE",
-      value = "NO HISTORY",
-      subtext = "Nothing to redo",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return
-  end
-
-  local cur = captureStateSnapshot("Current")
-  table.insert(stateUndoStack, cur)
-
-  local nxt = table.remove(stateRedoStack)
-  applyStateSnapshot(nxt)
-
-  local scaleName = SCALES[state.currentScaleIdx].name
-  local rootName = NOTE_NAMES[state.currentRoot + 1]
-  local spot = {
-    title = "REDO STATE",
-    value = rootName .. " " .. scaleName,
-    subtext = "Re-applied: " .. (nxt.label or "Controller State"),
-    targetId = code and ("key-" .. code) or "header",
-    color = "#d4a359"
-  }
-  hud.updateWebviewHud(spot)
-end
-
-local function canApplyShifts(testT, testO, testTop, testBot)
-  local oldT = state.transposeShift
-  local oldO = state.octaveShift
-  local oldTop = state.topRowOctaveOffset
-  local oldBot = state.bottomRowOctaveOffset
-
-  -- Calculate bounds for current state
-  local curMinPitch = math.huge
-  local curMaxPitch = -math.huge
-  for _, kData in pairs(config.getActiveNoteKeysMap()) do
-    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
-    if pitch < curMinPitch then curMinPitch = pitch end
-    if pitch > curMaxPitch then curMaxPitch = pitch end
-  end
-
-  -- Calculate bounds for test state
-  state.transposeShift = testT
-  state.octaveShift = testO
-  state.topRowOctaveOffset = testTop
-  state.bottomRowOctaveOffset = testBot
-
-  local minPitch = math.huge
-  local maxPitch = -math.huge
-  for _, kData in pairs(config.getActiveNoteKeysMap()) do
-    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
-    if pitch < minPitch then minPitch = pitch end
-    if pitch > maxPitch then maxPitch = pitch end
-  end
-
-  state.transposeShift = oldT
-  state.octaveShift = oldO
-  state.topRowOctaveOffset = oldTop
-  state.bottomRowOctaveOffset = oldBot
-
-  if minPitch >= 16 and maxPitch <= 113 then
-    return true, testT, testO, testTop, testBot
-  end
-
-  if curMinPitch < 16 or curMaxPitch > 113 then
-    while minPitch < 16 do
-      testO = testO + 12
-      testTop = testTop + 12
-      testBot = testBot + 12
-      minPitch = minPitch + 12
-      maxPitch = maxPitch + 12
+  if state.midiActive then
+    profileLog("Starting midiActive logic")
+    _G.activeWatchers.midiKeyTap:start()
+    _G.activeWatchers.midiScrollTap:start()
+    profileLog("Before createMidiWebview")
+    local h = hud.createMidiWebview()
+    profileLog("After createMidiWebview, before show")
+    h:show()
+    profileLog("After show")
+  else
+    -- Stop all key repeats before tearing down
+    if controls.stopAllControlRepeats then
+      controls.stopAllControlRepeats()
     end
-    while maxPitch > 113 do
-      testO = testO - 12
-      testTop = testTop - 12
-      testBot = testBot - 12
-      minPitch = minPitch - 12
-      maxPitch = maxPitch - 12
-    end
-    return true, testT, testO, testTop, testBot
-  end
-
-  return false, testT, testO, testTop, testBot
-end
-
-local function executeControlAction(act, code)
-  if act == "undoState" then
-    undoControllerState(code)
-    return
-  elseif act == "redoState" then
-    redoControllerState(code)
-    return
-  end
-
-  -- Record state snapshot before mutating controller parameters
-  if act == "modeDown" or act == "modeUp" or
-     act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
-     act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
-     act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
-     act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
-     act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
-     act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
-     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" then
-    pushStateSnapshot(act)
-  end
-
-  if act == "topOctDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newTop = curTop - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TOP OCTAVE",
-        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
-        subtext = "Top keys shifted",
-        targetId = "octave-indicator-top",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "topOctUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newTop = curTop + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TOP OCTAVE",
-        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
-        subtext = "Top keys shifted",
-        targetId = "octave-indicator-top",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "botOctDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newBot = curBot - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "BOT OCTAVE",
-        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
-        subtext = "Bottom keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "botOctUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newBot = curBot + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "BOT OCTAVE",
-        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
-        subtext = "Bottom keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "trnspDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
-    local newT = curT - 1
-    local newO = curO
-    if newT <= -numIntervals then
-      newT = newT + numIntervals
-      newO = newO - 12
-    end
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TRANSPOSE",
-        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
-        subtext = "Scale notes shifted",
-        targetId = "header",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "trnspUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
-    local newT = curT + 1
-    local newO = curO
-    if newT >= numIntervals then
-      newT = newT - numIntervals
-      newO = newO + 12
-    end
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TRANSPOSE",
-        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
-        subtext = "Scale notes shifted",
-        targetId = "header",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "octaveDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "octaveUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "modeDown" then
-    state.currentScaleIdx = (state.currentScaleIdx - 2) % #SCALES + 1
-    arpeggiator.updateLatchedArpNotes()
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "SCALE / MODE",
-      value = scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "modeUp" then
-    state.currentScaleIdx = (state.currentScaleIdx % #SCALES) + 1
-    arpeggiator.updateLatchedArpNotes()
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "SCALE / MODE",
-      value = scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "rootDown" then
-    if state.currentRoot == 0 then
-      state.currentRoot = 11
-      state.octaveShift = math.max(-36, state.octaveShift - 12)
-    else
-      state.currentRoot = state.currentRoot - 1
-    end
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local spot = {
-      title = "ROOT NOTE",
-      value = rootName,
-      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-      targetId = "root-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "rootUp" then
-    if state.currentRoot == 11 then
-      state.currentRoot = 0
-      state.octaveShift = math.min(36, state.octaveShift + 12)
-    else
-      state.currentRoot = state.currentRoot + 1
-    end
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local spot = {
-      title = "ROOT NOTE",
-      value = rootName,
-      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-      targetId = "root-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomScale" then
-    state.currentRoot = math.random(0, 11)
-    state.currentScaleIdx = math.random(1, #SCALES)
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "RANDOM SCALE",
-      value = rootName .. " " .. scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "panic" then
-    midi.panicAllChannels()
-    state.sustainActive = false
-    state.sustainedPitches = {}
+    _G.activeWatchers.midiKeyTap:stop()
+    _G.activeWatchers.midiScrollTap:stop()
     state.pressedKeys = {}
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    local spot = {
-      title = "MIDI PANIC",
-      value = "ALL NOTES OFF",
-      subtext = "All notes silenced",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "resetAll" then
-    state.octaveShift = 0
-    state.topRowOctaveOffset = 0
-    state.bottomRowOctaveOffset = 0
-    state.transposeShift = 0
-    state.topRowVolume = 100
-    state.bottomRowVolume = 100
-    state.currentRoot = 0
-    state.currentScaleIdx = 1
-    state.sustainActive = false
-    state.ccStates[1] = 0
-    _G.activeWatchers.modAccumulator = 0
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    state.arpEnabled = false
-    state.arpLatchActive = false
-    state.arpTopEnabled = true
-    state.arpBottomEnabled = true
-    midi.sendMidiCC(64, 0)
-    midi.sendMidiCC(1, 0)
-    local spot = {
-      title = "RESET ALL",
-      value = "DEFAULTS RESTORED",
-      subtext = "Everything reset to defaults",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "zoomOut" then
-    state.zoomLevel = math.max(0.5, state.zoomLevel - 0.1)
-    local spot = {
-      title = "HUD ZOOM",
-      value = math.floor(state.zoomLevel * 100) .. "%",
-      subtext = "Scale Factor",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "zoomIn" then
-    state.zoomLevel = math.min(2.0, state.zoomLevel + 0.1)
-    local spot = {
-      title = "HUD ZOOM",
-      value = math.floor(state.zoomLevel * 100) .. "%",
-      subtext = "Scale Factor",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "sustain" then
-    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
-    state.sustainWasActiveOnPress = state.sustainActive
-    state.sustainActive = true
-    midi.sendMidiCC(64, 127)
-
-    -- Retroactively sustain all non-arp notes currently being physically held down
-    for code, keyInfo in pairs(state.pressedKeys) do
-      if type(keyInfo) == "table" then
-        keyInfo.isSustainedNote = true
-        if not keyInfo.isArpNote and keyInfo.pitch then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[keyInfo.pitch] = true
-        end
-      end
+    state.sustainKeyDownTime = nil
+    if _G.activeWatchers.midiWebview then
+      _G.activeWatchers.midiWebview:hide()
     end
-
-    local spot = {
-      title = "SUSTAIN (CC #64)",
-      value = "SUSTAIN ON",
-      subtext = "Notes held across release",
-      targetId = code and ("key-" .. code) or "key-48",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpToggle" then
-    arpeggiator.toggleArpPower()
-  elseif act == "modWheelDown" then
-    local currentVal = state.ccStates[1] or 0
-    local newVal = math.max(0, currentVal - 4)
-    state.ccStates[1] = newVal
-    _G.activeWatchers.modAccumulator = newVal
-    midi.sendMidiCC(1, newVal)
-    local spot = {
-      title = "MOD WHEEL",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #1 Intensity",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "modWheelUp" or act == "modWheel" then
-    local currentVal = state.ccStates[1] or 0
-    local newVal = math.min(127, currentVal + 4)
-    state.ccStates[1] = newVal
-    _G.activeWatchers.modAccumulator = newVal
-    midi.sendMidiCC(1, newVal)
-    local spot = {
-      title = "MOD WHEEL",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #1 Intensity",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "topVolDown" then
-    state.topRowVolume = math.max(0, state.topRowVolume - 4)
-    local spot = {
-      title = "TOP ROW VOL",
-      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
-      targetId = "vol-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "topVolUp" then
-    state.topRowVolume = math.min(127, state.topRowVolume + 4)
-    local spot = {
-      title = "TOP ROW VOL",
-      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
-      targetId = "vol-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "botVolDown" then
-    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
-    local spot = {
-      title = "BOTTOM ROW VOL",
-      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
-      targetId = "vol-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "botVolUp" then
-    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
-    local spot = {
-      title = "BOTTOM ROW VOL",
-      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
-      targetId = "vol-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "volDown" then
-    state.topRowVolume = math.max(0, state.topRowVolume - 4)
-    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "volUp" or act == "volume" then
-    state.topRowVolume = math.min(127, state.topRowVolume + 4)
-    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpToggle" then
-    arpeggiator.toggleArpPower()
-  elseif act == "arpTopToggle" then
-    state.arpTopEnabled = not state.arpTopEnabled
-    if not state.arpTopEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and noteKey.isTop then
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-      end
-    end
-    local spot = {
-      title = "TOP ROW ARP",
-      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-top-toggle",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpBottomToggle" then
-    state.arpBottomEnabled = not state.arpBottomEnabled
-    if not state.arpBottomEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and not noteKey.isTop then
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-      end
-    end
-    local spot = {
-      title = "BOTTOM ROW ARP",
-      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-bottom-toggle",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpDirDown" then
-    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
-    local spot = {
-      title = "ARP DIRECTION",
-      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
-      targetId = "arp-dir-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpDirUp" then
-    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
-    local spot = {
-      title = "ARP DIRECTION",
-      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
-      targetId = "arp-dir-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpRateDown" then
-    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
-    arpeggiator.applyBpmChange()
-    local spot = {
-      title = "ARP RATE",
-      value = state.ARP_RATES[state.arpRateIdx].label,
-      subtext = "Note Division",
-      targetId = "arp-rate-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpRateUp" then
-    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
-    arpeggiator.applyBpmChange()
-    local spot = {
-      title = "ARP RATE",
-      value = state.ARP_RATES[state.arpRateIdx].label,
-      subtext = "Note Division",
-      targetId = "arp-rate-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpGateDown" then
-    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
-    arpeggiator.applyGatePercentChange()
-    local spot = {
-      title = "ARP NOTE LENGTH",
-      value = math.floor(state.arpGatePercent + 0.5) .. "%",
-      subtext = "Gate Duration",
-      targetId = "gate-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpGateUp" then
-    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
-    arpeggiator.applyGatePercentChange()
-    local spot = {
-      title = "ARP NOTE LENGTH",
-      value = math.floor(state.arpGatePercent + 0.5) .. "%",
-      subtext = "Gate Duration",
-      targetId = "gate-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "bpmDown" then
-    local step = state.bpmStepSize or 10
-    state.arpBpm = math.max(20.0, state.arpBpm - step)
-    arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(-step)
-    local spot = {
-      title = "TEMPO / BPM",
-      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Step: " .. step .. " BPM",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "bpmUp" then
-    local step = state.bpmStepSize or 10
-    state.arpBpm = math.min(300.0, state.arpBpm + step)
-    arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(step)
-    local spot = {
-      title = "TEMPO / BPM",
-      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Step: " .. step .. " BPM",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "relDown" or act == "releaseDown" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.max(0, currentVal - 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "relUp" or act == "releaseUp" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.min(127, currentVal + 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "bpmEdit" then
-    state.bpmInputMode = true
-    state.bpmBeforeEdit = state.arpBpm
-    state.bpmInputBuffer = ""
-    local spot = {
-      title = "EDIT BPM",
-      value = "TYPE TEMPO",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
   end
-
-  config.saveSettings()
 end
 
-local function handleKeyDown(code)
-  if code == 50 then -- Backtick
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      arpeggiator.toggleArp()
+_G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(event)
+  if not state.midiActive then return false end
+
+  local ok, result = xpcall(function()
+    local deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventDeltaAxis1) or 0
+    if deltaY == 0 then
+      deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
     end
-    return true
-  end
 
-  local noteKey = config.getNoteKey(code)
-  if noteKey then
-    local isTop = noteKey.isTop
-    if not state.pressedKeys[code] then
-      local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-      local arpActive = state.arpEnabled and arpEnabledForRow
-      local sustainActive = state.sustainActive
+    -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
+    local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
+    local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
 
-      local isArpNote = false
-      local isSustainedNote = false
+    -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
+    if _G.activeWatchers.isHoveringScrollable then
+      return false
+    end
 
+        if deltaY ~= 0 then
       if state.shiftHeld then
-        isArpNote = not arpActive
-        isSustainedNote = not sustainActive
-      else
-        isArpNote = arpActive
-        isSustainedNote = sustainActive
-      end
+        local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
+        _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
+        local sensitivity = 0.25 * inertiaScale
+        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
+        local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
 
-      state.pressedKeys[code] = {
-        pitch = transposedPitch,
-        isArpNote = isArpNote,
-        isSustainedNote = isSustainedNote
-      }
-
-      if isArpNote then
-        arpeggiator.arpAddNote(code, transposedPitch)
-      else
-        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop))
-      end
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  local numCtrlKey = config.getNumberControlKey(code)
-  if numCtrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-      executeControlAction(act, code)
-      stopControlRepeat(code)
-      local entry = {}
-      controlRepeatTimers[code] = entry
-      entry.timer = hs.timer.doAfter(0.35, function()
-        if not controlRepeatTimers[code] then return end
-        if state.pressedKeys[code] then
-          entry.interval = hs.timer.doEvery(0.08, function()
-            if not controlRepeatTimers[code] then return end
-            local ok, err = pcall(function()
-              if state.pressedKeys[code] then
-                local currentAct = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-                -- Suppress undo push during key repeat (already captured on first press)
-                local savedFn = pushStateSnapshot
-                pushStateSnapshot = function() end
-                local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                pushStateSnapshot = savedFn
-                if not ok2 then
-                  print("QWERTY MIDI: numCtrl repeat error: " .. tostring(err2))
-                end
-              else
-                stopControlRepeat(code)
-              end
-            end)
-            if not ok then
-              print("QWERTY MIDI: numCtrl interval error: " .. tostring(err))
-              stopControlRepeat(code)
-            end
-          end)
+        local deltaVol = newVol - math.floor(avgVol + 0.5)
+        if deltaVol ~= 0 then
+          state.topRowVolume = math.max(0, math.min(127, state.topRowVolume + deltaVol))
+          state.bottomRowVolume = math.max(0, math.min(127, state.bottomRowVolume + deltaVol))
+          local spot = {
+            title = "ROW VOLUMES",
+            value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+            subtext = "Dual Row Volume Level",
+            targetId = "header",
+            color = "#d4a359"
+          }
+          hud.updateWebviewHud(spot)
         end
-      end)
+      else
+        local currentMod = state.ccStates[1] or 0
+        _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
+        local sensitivity = state.scrollSensitivity * inertiaScale
+        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
+        local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
+
+        if newMod ~= state.ccStates[1] then
+          state.ccStates[1] = newMod
+          midi.sendMidiCC(1, newMod)
+          local spot = {
+            title = "MOD WHEEL (CC #1)",
+            value = tostring(newMod),
+            subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
+            targetId = "header",
+            color = "#d4a359"
+          }
+          hud.updateWebviewHud(spot)
+        end
+      end
+      return true
     end
-    return true
+
+    return false
+  end, function(err)
+    print("QWERTY MIDI: CRITICAL SCROLLTAP ERROR: " .. tostring(err))
+    print(debug.traceback())
+    return false
+  end)
+
+  if not ok then
+    return false
+  end
+  return result
+end)
+
+_G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp, hs.eventtap.event.types.flagsChanged }, function(event)
+  if not state.midiActive then return false end
+
+  local function errorHandler(err)
+    print("QWERTY MIDI: CRITICAL EVENTTAP ERROR: " .. tostring(err))
+    print(debug.traceback())
+    -- Failsafe: if we crash during a key event, try to prevent stuck keys
+    pcall(function()
+      if state and state.pressedKeys then
+        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+        if code then state.pressedKeys[code] = nil end
+      end
+    end)
+    return false -- allow event to pass to OS so we don't lock the keyboard
   end
 
-  local ctrlKey = config.getControlKey(code)
-  if ctrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-      executeControlAction(act, code)
-      if act ~= "sustain" then
-        stopControlRepeat(code)
-        local entry = {}
-        controlRepeatTimers[code] = entry
-        entry.timer = hs.timer.doAfter(0.35, function()
-          if not controlRepeatTimers[code] then return end
-          if state.pressedKeys[code] then
-            entry.interval = hs.timer.doEvery(0.08, function()
-              if not controlRepeatTimers[code] then return end
-              local ok, err = pcall(function()
-                if state.pressedKeys[code] then
-                  local currentAct = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-                  -- Suppress undo push during key repeat (already captured on first press)
-                  local savedFn = pushStateSnapshot
-                  pushStateSnapshot = function() end
-                  local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                  pushStateSnapshot = savedFn
-                  if not ok2 then
-                    print("QWERTY MIDI: ctrl repeat error: " .. tostring(err2))
-                  end
-                else
-                  stopControlRepeat(code)
-                end
-              end)
-              if not ok then
-                print("QWERTY MIDI: ctrl interval error: " .. tostring(err))
-                stopControlRepeat(code)
-              end
-            end)
+  local ok, result = xpcall(function()
+
+      -- Exception: Let text input fields receive keystrokes natively
+      if state.textInputActive then
+        return false
+      end
+
+      -- Exception: Let Delete/Backspace work in the webview's edit mode
+      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+      if code == 51 or code == 117 then -- Delete (51) or Forward Delete (117)
+        if event:getType() == hs.eventtap.event.types.keyDown then
+          return false
+        end
+        return true
+      end
+
+      -- Exception: Pass keys through natively ONLY if Web Inspector or DevTools window is focused
+      local focusedWin = hs.window.focusedWindow()
+      if focusedWin then
+        local title = focusedWin:title() or ""
+        if string.find(title, "Inspector") or string.find(title, "DevTools") then
+          return false
+        end
+      end
+
+      local flags = event:getFlags()
+
+      -- Handle Cmd-, for QWERTY MIDI settings while MIDI controller is enabled
+      if flags.cmd and not flags.alt and not flags.ctrl then
+        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+        if code == 43 then -- keycode 43 is ','
+          if event:getType() == hs.eventtap.event.types.keyDown then
+            settings_ui.toggleSettingsWindow()
           end
+          return true
+        end
+      end
+
+      if state.bpmInputMode then
+        if event:getType() == hs.eventtap.event.types.flagsChanged then
+          return false
+        end
+        if flags.cmd or flags.ctrl then return false end
+        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+        local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+        if isDown then
+          return arpeggiator.handleBpmInput(code, flags)
+        end
+        return true
+      end
+
+      if flags.cmd or flags.alt or flags.ctrl or flags.capslock then
+        return false
+      end
+
+      local isShiftNow = flags.shift
+      if isShiftNow ~= state.shiftHeld then
+        state.shiftHeld = isShiftNow
+        hud.updateWebviewHud()
+      end
+
+      if event:getType() == hs.eventtap.event.types.flagsChanged then
+        return false
+      end
+
+      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+
+      if isDown then
+        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return false end)
+        if not ok then
+          print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
+          return false
+        end
+        return status
+      else
+        local ok, status = xpcall(function() return controls.handleKeyUp(code) end, function(err) print('QWERTY MIDI: handleKeyUp error: '..tostring(err)); print(debug.traceback()); return false end)
+        if not ok then
+          print("QWERTY MIDI: handleKeyUp error: " .. tostring(status))
+          return false
+        end
+        return status
+      end
+
+  end, errorHandler)
+
+  if not ok then
+    return false
+  end
+  return result
+end)
+
+-- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
+-- Also checks webview liveness via JS heartbeat — if no heartbeat for 6s, web process is dead
+_G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
+  if state.midiActive then
+    if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
+      print("QWERTY MIDI: Watchdog detected dead keyTap, restarting...")
+      _G.activeWatchers.midiKeyTap:start()
+    end
+    if _G.activeWatchers.midiScrollTap and not _G.activeWatchers.midiScrollTap:isEnabled() then
+      print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
+      _G.activeWatchers.midiScrollTap:start()
+    end
+    -- Webview liveness: if heartbeat stopped for 6s, web content process is dead
+    if _G.activeWatchers.midiWebview and hud.getLastHeartbeat() > 0 then
+      local elapsed = os.time() - hud.getLastHeartbeat()
+      if elapsed >= 6 then
+        print("QWERTY MIDI: Watchdog detected dead webview (no heartbeat for " .. elapsed .. "s) — recreating")
+        local ok, err = pcall(function()
+          local h = hud.createMidiWebview()
+          h:show()
         end)
+        if not ok then
+          print("QWERTY MIDI: Watchdog webview recreate failed: " .. tostring(err))
+        end
       end
     end
-    return true
   end
+end)
 
-  return false
+_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
+  _G.toggleMidiMode()
+end)
+
+if _G.activeWatchers.settingsHotkey then
+  _G.activeWatchers.settingsHotkey:delete()
+  _G.activeWatchers.settingsHotkey = nil
 end
 
-local function handleKeyUp(code)
-  if code == 50 then -- Backtick
-    state.pressedKeys[code] = nil
-    hud.updateWebviewHud()
-    return true
-  end
+profileLog("Before panicAllChannels")
+midi.panicAllChannels()
 
-  local noteKey = config.getNoteKey(code)
-  if noteKey then
-    local keyInfo = state.pressedKeys[code]
-    if keyInfo then
-      local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo
-      local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
-      local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
-
-      if isArpNote then
-        arpeggiator.arpRemoveNote(code)
-      else
-        if isSustainedNote and state.sustainActive then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[playedPitch] = true
-        else
-          midi.sendMidiNote("noteOff", playedPitch, 0)
-        end
-      end
-      state.pressedKeys[code] = nil
+-- Auto-reopen window if it was open when the last reload occurred
+local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
+if wasOpen then
+  profileLog("Auto-reopening controller window (was open before reload)")
+  hs.timer.doAfter(0.3, function()
+    local ok, err = pcall(function()
+      _G.toggleMidiMode(true)
+    end)
+    if not ok then
+      print("QWERTY MIDI: auto-reopen failed: " .. tostring(err))
     end
-    hud.updateWebviewHud()
-    return true
-  end
-
-  local numCtrlKey = config.getNumberControlKey(code)
-  if numCtrlKey then
-    stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    hud.updateWebviewHud()
-    return true
-  end
-
-  local ctrlKey = config.getControlKey(code)
-  if ctrlKey then
-    stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-    if act == "sustain" then
-      local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0
-      if holdDuration > 0.25 then
-        state.sustainActive = false
-        midi.sendMidiCC(64, 0)
-      else
-        if state.sustainWasActiveOnPress then
-          state.sustainActive = false
-          midi.sendMidiCC(64, 0)
-        else
-          state.sustainActive = true
-          midi.sendMidiCC(64, 127)
-        end
-      end
-
-      if not state.sustainActive then
-        midi.sendMidiCC(64, 0)
-        if state.sustainedPitches then
-          for pitch in pairs(state.sustainedPitches) do
-            local isCurrentlyHeld = false
-            for _, keyInfo in pairs(state.pressedKeys) do
-              if type(keyInfo) == "table" and keyInfo.pitch == pitch then
-                isCurrentlyHeld = true
-                break
-              end
-            end
-            if not isCurrentlyHeld then
-              midi.sendMidiNote("noteOff", pitch, 0)
-            end
-          end
-          state.sustainedPitches = {}
-        end
-      end
-
-      local spot = {
-        title = "SUSTAIN (CC #64)",
-        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
-        targetId = "key-48",
-        color = state.sustainActive and "#d4a359" or "#b5aba0"
-      }
-      hud.updateWebviewHud(spot)
-    else
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  return false
+  end)
 end
+
+profileLog("Init complete!")
 
 return {
-  executeControlAction = executeControlAction,
-  handleKeyDown = handleKeyDown,
-  handleKeyUp = handleKeyUp,
-  stopAllControlRepeats = stopAllControlRepeats
+  toggleMidiMode = _G.toggleMidiMode,
+  toggleSettingsWindow = settings_ui.toggleSettingsWindow
 }
 
 end
@@ -7537,6 +6970,639 @@ return {
   panicAllChannels = panicAllChannels
 }
 
+
+end
+
+__modules["hud"] = function()
+local hsWebview = require("hs.webview")
+local hsUsercontent = require("hs.webview.usercontent")
+
+local config = __require("config")
+local midi = __require("midi")
+local transposer = __require("transposer")
+local arpeggiator = __require("arpeggiator")
+
+local state = config.state
+local SCALES = config.SCALES
+local NOTE_NAMES = config.NOTE_NAMES
+local numberRowControls = config.numberRowControls
+local ARP_DIRECTIONS = state.ARP_DIRECTIONS
+local ARP_RATES = state.ARP_RATES
+local ARP_GATES = state.ARP_GATES
+
+local HTML_UI_CONTENT = __require("ui_html")
+local webviewGeneration = 0
+local lastHeartbeat = 0
+local evalFailCount = 0
+
+_G.activeWatchers = _G.activeWatchers or {}
+
+local controlsModule = nil
+
+local function setControlsModule(m)
+  controlsModule = m
+end
+
+state.textInputActive = false
+
+local pendingSpotlightInfo = nil
+local pendingActiveArpPitch = nil
+local hudUpdateScheduled = false
+local lastFrameScale = nil
+local _savedNormalHeight = nil
+
+local function safeEvaluateJS(js)
+  if not _G.activeWatchers.midiWebview then return end
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
+  end)
+  if not ok then
+    print("QWERTY MIDI: evaluateJavaScript error: " .. tostring(err))
+  end
+  return ok
+end
+
+local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
+  if not _G.activeWatchers.midiWebview then return end
+
+  local baseW, baseH = 980, 280
+  local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+  local NOTIF_BAND = math.floor(50 * effectiveScale)
+  local newW = math.floor(baseW * effectiveScale)
+  local newH = math.floor(baseH * effectiveScale) + NOTIF_BAND
+
+  if lastFrameScale ~= effectiveScale then
+    lastFrameScale = effectiveScale
+    local curFrame = _G.activeWatchers.midiWebview:frame()
+    if curFrame.w ~= newW or curFrame.h ~= newH then
+      local screen = hs.screen.mainScreen():frame()
+      local cx = curFrame.x + (curFrame.w / 2)
+      local cy = curFrame.y + (curFrame.h / 2)
+      local nx = math.floor(cx - (newW / 2))
+      local ny = math.floor(cy - (newH / 2))
+      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
+      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
+      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+      _G.activeWatchers.hudX = nx
+      _G.activeWatchers.hudY = ny
+      hs.settings.set("qwertyMidi_hudX", nx)
+      hs.settings.set("qwertyMidi_hudY", ny)
+    end
+  end
+
+  hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
+
+  local currentScaleIdx = tonumber(state.currentScaleIdx) or 1
+  local modeFrac = (currentScaleIdx - 0.5) / #SCALES
+  local modeName = SCALES[currentScaleIdx].name
+
+  local octVal = tonumber(state.octaveShift) or 0
+  local topOctVal = tonumber(state.topRowOctaveOffset) or 0
+  local trnspVal = tonumber(state.transposeShift) or 0
+  local trnspStr = (trnspVal ~= 0) and ("Trnsp: " .. (trnspVal >= 0 and "+" or "") .. trnspVal .. "st") or ""
+  local susStr = state.sustainActive and "SUS: ON" or ""
+  local shiftStr = state.shiftHeld and "[SHIFT]" or ""
+
+  local statusParts = {}
+  if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
+  if susStr ~= "" then table.insert(statusParts, susStr) end
+  if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
+  if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
+  local statusStr = table.concat(statusParts, "  •  ")
+
+  local topOctaveStr = (topOctVal >= 0 and "+" or "") .. math.floor(topOctVal / 12)
+  local bottomOctaveStr = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12)
+
+  local keyUpdates = {}
+
+  local actionTypeClass = {
+    -- Home row pairs
+    trnspDown = "ctrl-trnsp", trnspUp = "ctrl-trnsp",
+    rootDown = "ctrl-root", rootUp = "ctrl-root",
+    modeDown = "ctrl-mode", modeUp = "ctrl-mode",
+    octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
+    topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
+    topVolDown = "ctrl-vol", topVolUp = "ctrl-vol",
+    modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
+    volDown = "ctrl-vol", volUp = "ctrl-vol",
+
+    -- Number row pairs
+    arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
+    arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
+    arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
+    relDown = "ctrl-rel", relUp = "ctrl-rel", releaseDown = "ctrl-rel", releaseUp = "ctrl-rel",
+    bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
+    zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
+
+    -- Singletons / Toggles
+    arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
+    bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset",
+    undoState = "ctrl-reset", redoState = "ctrl-reset"
+  }
+
+  for code, cData in pairs(numberRowControls) do
+    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
+    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local isMainArp = (code == 50)
+    local isTopArp = (code == 18)
+    local isBotArp = (code == 19)
+    local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
+    local pairedClass = actionTypeClass[act] or ""
+    keyUpdates[tostring(code)] = {
+      note = label,
+      action = act,
+      isControl = true,
+      typeClass = pairedClass,
+      pressed = (state.pressedKeys[code] ~= nil),
+      sustainActive = isArpActive
+    }
+  end
+
+  for code, kData in pairs(config.getActiveNoteKeysMap()) do
+    local noteNum = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    local intervalIdx = transposer.getIntervalInfo(noteNum)
+    local noteName = transposer.noteNumToName(noteNum)
+    local typeClass = ""
+
+    if intervalIdx == 1 then
+      typeClass = "root-key"
+    elseif intervalIdx == 3 then
+      typeClass = "third-key"
+    elseif intervalIdx == 5 then
+      typeClass = "fifth-key"
+    end
+
+    local isPressed = (state.pressedKeys[code] ~= nil)
+    if state.arpEnabled and state.arpCurrentPitch and noteNum == state.arpCurrentPitch then
+      isPressed = true
+    end
+
+    local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
+
+    keyUpdates[tostring(code)] = {
+      note = noteName,
+      typeClass = typeClass,
+      pressed = isPressed,
+      latched = isLatched,
+      outOfBounds = (noteNum < 0 or noteNum > 127)
+    }
+  end
+
+  for code, cData in pairs(config.getActiveControlKeysMap()) do
+    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
+    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local isSustain = (code == 48)
+    local isLatch = (code == 0)
+    local pairedClass = actionTypeClass[act] or ""
+    keyUpdates[tostring(code)] = {
+      note = label,
+      action = act,
+      isControl = true,
+      typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
+      pressed = (state.pressedKeys[code] ~= nil),
+      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
+    }
+  end
+
+  local modVal = state.ccStates[1] or 0
+
+  local bpmDisplayStr
+  if state.bpmInputMode then
+    bpmDisplayStr = state.bpmInputBuffer .. "\226\150\140"
+  else
+    bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
+  end
+
+  local payload = {
+    rootIdx = state.currentRoot,
+    modeName = modeName,
+    arpEnabled = state.arpEnabled,
+    arpLatchActive = state.arpLatchActive,
+    arpDirectionIdx = state.arpDirectionIdx,
+    arpRateIdx = state.arpRateIdx,
+    arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
+    bpmDisplay = bpmDisplayStr,
+    bpmEditing = state.bpmInputMode,
+    logicSyncEnabled = state.logicSyncEnabled,
+    arpTopEnabled = state.arpTopEnabled,
+    arpBottomEnabled = state.arpBottomEnabled,
+    statusText = statusStr,
+    topOctaveStr = topOctaveStr,
+    bottomOctaveStr = bottomOctaveStr,
+    topVolPercent = math.floor((state.topRowVolume / 127) * 100),
+    bottomVolPercent = math.floor((state.bottomRowVolume / 127) * 100),
+    effectiveTopVolPercent = math.floor((transposer.getEffectiveRowVelocity(true) / 127) * 100),
+    modeFrac = modeFrac,
+    modWheel = modVal,
+    zoomLevel = effectiveScale,
+    spotlight = spotlightInfo,
+    keys = keyUpdates
+  }
+
+  local jsonStr = hs.json.encode(payload)
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
+  end)
+  if ok then
+    evalFailCount = 0
+  else
+    evalFailCount = evalFailCount + 1
+    if evalFailCount >= 3 then
+      print("QWERTY MIDI: webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
+      evalFailCount = 0
+      hs.timer.doAfter(0.1, function()
+        if state.midiActive then
+          local rok, rerr = pcall(function()
+            local h = createMidiWebview()
+            h:show()
+          end)
+          if not rok then
+            print("QWERTY MIDI: webview recreate failed: " .. tostring(rerr))
+          end
+        end
+      end)
+    end
+  end
+end
+
+local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
+  if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
+  if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
+
+  if forceImmediate then
+    performWebviewHudUpdate(pendingSpotlightInfo, pendingActiveArpPitch)
+    pendingSpotlightInfo = nil
+    return
+  end
+
+  if not hudUpdateScheduled then
+    hudUpdateScheduled = true
+    hs.timer.doAfter(0.016, function()
+      hudUpdateScheduled = false
+      local s = pendingSpotlightInfo
+      local a = pendingActiveArpPitch
+      pendingSpotlightInfo = nil
+      performWebviewHudUpdate(s, a)
+    end)
+  end
+end
+
+local function createMidiWebview()
+  webviewGeneration = webviewGeneration + 1
+  local myGen = webviewGeneration
+  if _G.activeWatchers.midiWebview then
+    -- Clear callback BEFORE delete to prevent async race nuking new webview ref
+    _G.activeWatchers.midiWebview:windowCallback(nil)
+    _G.activeWatchers.midiWebview:delete()
+    _G.activeWatchers.midiWebview = nil
+  end
+
+  local screen = hs.screen.mainScreen():frame()
+  local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+  local NOTIF_BAND = math.floor(50 * effectiveScale)
+  local width = math.floor(980 * effectiveScale)
+  local height = math.floor(280 * effectiveScale) + NOTIF_BAND
+  local savedX = hs.settings.get("qwertyMidi_hudX")
+  local savedY = hs.settings.get("qwertyMidi_hudY")
+  local hudX = savedX or _G.activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
+  local hudY = savedY or _G.activeWatchers.hudY or math.floor(screen.y + screen.h - height - 60)
+
+  local uc = hsUsercontent.new("midiControllerUC")
+  uc:setCallback(function(msg)
+    if not msg or not msg.body then return end
+    local body = msg.body
+    if body.type == "domReady" then
+      lastHeartbeat = os.time()
+      evalFailCount = 0
+      updateWebviewHud()
+    elseif body.type == "heartbeat" then
+      lastHeartbeat = os.time()
+    elseif body.type == "keyDown" and body.code then
+      if controlsModule then controlsModule.handleKeyDown(body.code) end
+    elseif body.type == "keyUp" and body.code then
+      if controlsModule then controlsModule.handleKeyUp(body.code) end
+    elseif body.type == "setRoot" and body.root ~= nil then
+      state.currentRoot = math.max(0, math.min(11, body.root))
+      arpeggiator.updateLatchedArpNotes()
+      local rootName = NOTE_NAMES[state.currentRoot + 1]
+      local spot = {
+        title = "ROOT NOTE",
+        value = rootName,
+        subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+        targetId = "root-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
+      state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
+      arpeggiator.updateLatchedArpNotes()
+      local scaleInfo = SCALES[state.currentScaleIdx]
+      local spot = {
+        title = "SCALE / MODE",
+        value = scaleInfo.name,
+        subtext = scaleInfo.brightTag,
+        targetId = "mode-thumb",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "toggleArpPower" then
+      arpeggiator.toggleArpPower()
+    elseif body.type == "setArpDirection" and body.directionIdx ~= nil then
+      state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+      local spot = {
+        title = "ARP DIRECTION",
+        value = ARP_DIRECTIONS[state.arpDirectionIdx],
+        subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+        targetId = "arp-dir-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setArpRate" and body.rateIdx ~= nil then
+      state.arpRateIdx = math.max(1, math.min(#ARP_RATES, body.rateIdx))
+      arpeggiator.applyBpmChange()
+      local spot = {
+        title = "ARP RATE",
+        value = ARP_RATES[state.arpRateIdx].label,
+        subtext = "Note Division",
+        targetId = "arp-rate-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "dragGate" and body.delta ~= nil then
+      state.arpGatePercent = math.max(5.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
+      arpeggiator.applyGatePercentChange()
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateUp" then
+      state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+      arpeggiator.applyGatePercentChange()
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "gateDown" then
+      state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
+      arpeggiator.applyGatePercentChange()
+      local spot = {
+        title = "ARP NOTE LENGTH",
+        value = math.floor(state.arpGatePercent + 0.5) .. "%",
+        subtext = "Gate Duration",
+        targetId = "gate-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "enterBpmEdit" then
+      state.bpmInputMode = true
+      state.bpmBeforeEdit = state.arpBpm
+      state.bpmInputBuffer = ""
+      local spot = {
+        title = "EDIT BPM",
+        value = "TYPE TEMPO",
+        subtext = "Type digits & press Enter",
+        targetId = "bpm-value",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "bpmUp" then
+      local step = state.bpmStepSize or 10
+      state.arpBpm = math.min(300, state.arpBpm + step)
+      arpeggiator.applyBpmChange()
+      arpeggiator.stepLogicBpm(step)
+      updateWebviewHud()
+    elseif body.type == "bpmDown" then
+      local step = state.bpmStepSize or 10
+      state.arpBpm = math.max(20, state.arpBpm - step)
+      arpeggiator.applyBpmChange()
+      arpeggiator.stepLogicBpm(-step)
+      updateWebviewHud()
+    elseif body.type == "toggleLogicSync" then
+      arpeggiator.toggleLogicSync()
+    elseif body.type == "dragBpm" and body.delta ~= nil then
+      state.arpBpm = math.max(20.0, math.min(300.0, state.arpBpm + body.delta))
+      arpeggiator.applyBpmChange()
+      if arpeggiator.setLogicBpmTarget then arpeggiator.setLogicBpmTarget(state.arpBpm) end
+      updateWebviewHud()
+    elseif body.type == "toggleArpTop" then
+      state.arpTopEnabled = not state.arpTopEnabled
+      if not state.arpTopEnabled then
+        for code in pairs(state.arpHeldNotes) do
+          if upperRowKeys[code] then
+            state.arpHeldNotes[code] = nil
+            state.arpKeysCurrentlyHeld[code] = nil
+          end
+        end
+      end
+      local spot = {
+        title = "TOP ROW ARP",
+        value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
+        subtext = arpeggiator.getArpRowTargetSubtext(),
+        targetId = "arp-top-toggle",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "toggleArpBottom" then
+      state.arpBottomEnabled = not state.arpBottomEnabled
+      if not state.arpBottomEnabled then
+        for code in pairs(state.arpHeldNotes) do
+          if lowerRowKeys[code] then
+            state.arpHeldNotes[code] = nil
+            state.arpKeysCurrentlyHeld[code] = nil
+          end
+        end
+      end
+      local spot = {
+        title = "BOTTOM ROW ARP",
+        value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
+        subtext = arpeggiator.getArpRowTargetSubtext(),
+        targetId = "arp-bottom-toggle",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "dragOctave" and body.row and body.direction then
+      if body.row == "top" then
+        state.topRowOctaveOffset = math.max(-48, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
+        hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
+      else
+        state.bottomRowOctaveOffset = math.max(-48, math.min(36, state.bottomRowOctaveOffset + (body.direction * 12)))
+        hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
+      end
+      updateWebviewHud()
+    elseif body.type == "dragWindow" and body.dx and body.dy then
+      if _G.activeWatchers.midiWebview then
+        local frame = _G.activeWatchers.midiWebview:frame()
+        local newX = math.floor(frame.x + body.dx)
+        local newY = math.floor(frame.y + body.dy)
+        _G.activeWatchers.midiWebview:frame({ x = newX, y = newY, w = frame.w, h = frame.h })
+        _G.activeWatchers.hudX = newX
+        _G.activeWatchers.hudY = newY
+        hs.settings.set("qwertyMidi_hudX", newX)
+        hs.settings.set("qwertyMidi_hudY", newY)
+      end
+    elseif body.type == "toggleEditMode" then
+      if _G.activeWatchers.midiWebview then
+        local wv = _G.activeWatchers.midiWebview
+        local frame = wv:frame()
+        if body.active then
+          _savedNormalHeight = frame.h
+          -- Shift Y up by the height difference so it expands upward instead of off-screen
+          wv:frame({ x = frame.x, y = frame.y - frame.h, w = frame.w, h = frame.h * 2 })
+        else
+          local restoreH = _savedNormalHeight or frame.h
+          _savedNormalHeight = nil
+          -- Shift Y back down by the same amount
+          wv:frame({ x = frame.x, y = frame.y + restoreH, w = frame.w, h = restoreH })
+        end
+      end
+    elseif body.type == "getLayoutConfig" then
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "saveCustomLayout" then
+      config.saveCustomLayout(body.layout or body.data)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "selectPreset" then
+      config.selectPreset(body.id)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "savePreset" then
+      config.savePreset(body.id, body.name, body.layout or body.data)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "renamePreset" then
+      config.renamePreset(body.id, body.newName)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "deletePreset" then
+      config.deletePreset(body.id)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "duplicatePreset" then
+      config.duplicatePreset(body.id, body.newName)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "resetLayout" then
+      config.resetLayout()
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "updateKeyMapping" then
+      if body.code and body.binding then
+        config.updateKeyMapping(body.code, body.binding)
+        updateWebviewHud(nil, nil, true)
+      end
+    elseif body.type == "textInputFocus" then
+      state.textInputActive = (body.focused == true)
+    elseif body.type == "log" then
+      if body.message then
+        local f = io.open("/tmp/wv_js.log", "a")
+        if f then f:write(tostring(body.message) .. "\n"); f:close() end
+      end
+    elseif body.type == "hoverScrollable" then
+      _G.activeWatchers.isHoveringScrollable = body.state
+      -- Safer file logging replacing os.execute
+      if body.message then
+        local f = io.open("/tmp/wv_js.log", "a")
+        if f then
+          f:write(tostring(body.message) .. "\n")
+          f:close()
+        end
+      end
+    end
+    config.saveSettings()
+  end)
+
+  local rect = { x = hudX, y = hudY, w = width, h = height }
+  local wv = hsWebview.new(rect, { developerExtrasEnabled = true }, uc)
+  wv:windowTitle("MIDI Controller HUD")
+  wv:windowStyle({ "borderless", "utility" })
+  wv:transparent(true)
+
+  wv:html(HTML_UI_CONTENT)
+  wv:level(hs.canvas.windowLevels.floating)
+  wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
+  wv:show()
+
+  wv:windowCallback(function(action, webview)
+    if action == "closing" then
+      -- Ignore stale callbacks from old webview generations
+      if myGen ~= webviewGeneration then return end
+      _G.activeWatchers.midiWebview = nil
+      -- If midiActive is still true, the webview crashed unexpectedly — auto-respawn
+      if state.midiActive then
+        print("QWERTY MIDI: webview closed unexpectedly — respawning in 0.5s")
+        hs.timer.doAfter(0.5, function()
+          if state.midiActive and myGen == webviewGeneration then
+            local ok, err = pcall(function()
+              local h = createMidiWebview()
+              h:show()
+            end)
+            if not ok then
+              print("QWERTY MIDI: webview respawn failed: " .. tostring(err))
+            end
+          end
+        end)
+      end
+    end
+  end)
+
+  _G.activeWatchers.midiWebview = wv
+
+  hs.timer.doAfter(0.05, function()
+    if _G.activeWatchers.midiWebview then
+      updateWebviewHud()
+    end
+  end)
+  hs.timer.doAfter(0.25, function()
+    if _G.activeWatchers.midiWebview then
+      updateWebviewHud()
+    end
+  end)
+  hs.timer.doAfter(1.0, function()
+    if _G.activeWatchers.midiWebview and myGen == webviewGeneration then
+      updateWebviewHud()
+    end
+  end)
+
+  return wv
+end
+
+return {
+  setControlsModule = setControlsModule,
+  updateWebviewHud = updateWebviewHud,
+  createMidiWebview = createMidiWebview,
+  getLastHeartbeat = function() return lastHeartbeat end
+}
 
 end
 

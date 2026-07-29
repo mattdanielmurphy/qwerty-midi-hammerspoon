@@ -10,6 +10,13 @@ local ARP_RATES = state.ARP_RATES
 local ARP_GATES = state.ARP_GATES
 local DIGIT_KEYCODES = state.DIGIT_KEYCODES
 
+
+local function countTableKeys(t)
+  local count = 0
+  for _ in pairs(t or {}) do count = count + 1 end
+  return count
+end
+
 local hudModule = nil
 
 local function setHudModule(m)
@@ -228,8 +235,7 @@ local function startArpTimer(preserveState)
 end
 
 local function arpAddNote(code, pitch)
-  local numPhysicalHeld = 0
-  for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
 
   if state.arpLatchActive then
     if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
@@ -253,8 +259,7 @@ end
 local function arpRemoveNote(code)
   state.arpKeysCurrentlyHeld[code] = nil
 
-  local numPhysicalHeld = 0
-  for _ in pairs(state.arpKeysCurrentlyHeld) do numPhysicalHeld = numPhysicalHeld + 1 end
+  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
 
   if state.arpLatchActive then
     if numPhysicalHeld == 0 then
@@ -264,8 +269,7 @@ local function arpRemoveNote(code)
   end
 
   state.arpHeldNotes[code] = nil
-  local count = 0
-  for _ in pairs(state.arpHeldNotes) do count = count + 1 end
+  local count = countTableKeys(state.arpHeldNotes)
   if count == 0 then
     stopArpTimer()
     updateHud()
@@ -345,8 +349,7 @@ local function toggleArpPower()
     end
     state.arpHeldNotes = newHeld
     
-    local count = 0
-    for _ in pairs(state.arpHeldNotes) do count = count + 1 end
+    local count = countTableKeys(state.arpHeldNotes)
     if count == 0 then
       stopArpTimer()
       if state.arpCurrentPitch then

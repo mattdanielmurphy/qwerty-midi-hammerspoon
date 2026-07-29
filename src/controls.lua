@@ -518,11 +518,19 @@ local function executeControlAction(act, code)
   elseif act == "panic" then
     midi.panicAllChannels()
     state.sustainActive = false
+    state.sustainKeyDownTime = nil
+    state.arpLatchActive = false
     state.sustainedPitches = {}
     state.pressedKeys = {}
+
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
     state.arpKeysCurrentlyHeld = {}
+    state.arpSequence = {}
+
+    -- Clear repeats
+    stopAllControlRepeats()
+
     local spot = {
       title = "MIDI PANIC",
       value = "ALL NOTES OFF",
@@ -1090,6 +1098,11 @@ local function handleKeyUp(code)
       hud.updateWebviewHud()
     end
     return true
+  end
+
+  -- Fallback cleanup for unmapped or ignored keys
+  if state.pressedKeys[code] then
+    state.pressedKeys[code] = nil
   end
 
   return false

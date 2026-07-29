@@ -581,22 +581,31 @@ local function getNumberControlKey(code)
   return nil
 end
 
+
+local _cachedActiveNoteKeysMap = nil
+local _cachedActiveControlKeysMap = nil
+
 local function getActiveNoteKeysMap()
+  if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  _cachedActiveNoteKeysMap = map
   return map
 end
 
 local function getActiveControlKeysMap()
+  if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil then map[code] = k end end
   for code, k in pairs(upperRowKeys) do if k.action ~= nil then map[code] = k end end
   for code, k in pairs(lowerRowKeys) do if k.action ~= nil then map[code] = k end end
+  _cachedActiveControlKeysMap = map
   return map
 end
+
 
 return {
   state = state,
