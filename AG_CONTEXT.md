@@ -17,6 +17,9 @@
 - **Web UI HMR (No Reload Needed)**: Run `bun x vite` from the project root to start the dev server (`http://localhost:5173`). When running, `src/hud.lua` connects directly to Vite. Edits to `src/web/index.html` (CSS/JS/HTML) hot-reload instantly in the webview without touching Hammerspoon or destroying MIDI state!
 - **UI Production Build**: Running `bin/bundle_and_reload.sh` automatically syncs `src/web/index.html` into `src/ui_html.lua` for offline production distribution.
 - **HUD Layout & Controls**: 4-row webview layout (`number`, `upper`, `home`, `lower`) using Fraunces Google Font and dark neutral theme. Trackpad scroll supports Mod Wheel (normal) and Volume (Shift held).
+- **Planner & Model Delegation Protocol**:
+  - Whenever the user includes `/planner` or requests a plan for fixes, ALWAYS execute the formal Planning Mode workflow (`implementation_plan.md` artifact with `request_feedback = true`) regardless of initial perceived task simplicity.
+  - When `/planner 3.1 pro high` or similar model requests are invoked, delegate planning or subagent tasks using `Model: "pro"` (or the requested model target) and run full research/planning before making any code edits.
 
 
 
