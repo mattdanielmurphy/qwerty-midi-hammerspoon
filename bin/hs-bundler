@@ -10,7 +10,19 @@ import sys
 import re
 import argparse
 
+def sync_ui_html(src_dir):
+    web_index = os.path.join(src_dir, "web", "index.html")
+    ui_html_lua = os.path.join(src_dir, "ui_html.lua")
+    if os.path.exists(web_index):
+        with open(web_index, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        lua_module_content = f'local HTML_UI_CONTENT = [[\n{html_content}\n]]\n\nreturn HTML_UI_CONTENT\n'
+        with open(ui_html_lua, "w", encoding="utf-8") as f:
+            f.write(lua_module_content)
+        print(f"🎨 Synced web UI into {ui_html_lua}")
+
 def bundle_lua(src_dir, entry_file, output_file):
+    sync_ui_html(src_dir)
     abs_src_dir = os.path.abspath(src_dir)
     abs_entry = os.path.abspath(os.path.join(src_dir, entry_file))
 

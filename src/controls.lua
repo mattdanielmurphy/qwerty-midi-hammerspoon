@@ -7,86 +7,442 @@ local hud = require("hud")
 local state = config.state
 local SCALES = config.SCALES
 local NOTE_NAMES = config.NOTE_NAMES
-local numberRowControls = config.numberRowControls
-local upperRowKeys = config.upperRowKeys
-local lowerRowKeys = config.lowerRowKeys
-local homeRowControls = config.homeRowControls
 
 _G.activeWatchers = _G.activeWatchers or {}
 
-local controlRepeatTimers = {}
+-- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
+if _G._qmidiRepeatTimers then
+  for code, entry in pairs(_G._qmidiRepeatTimers) do
+    pcall(function()
+      if entry.timer then entry.timer:stop() end
+      if entry.interval then entry.interval:stop() end
+    end)
+  end
+end
+_G._qmidiRepeatTimers = {}
+local controlRepeatTimers = _G._qmidiRepeatTimers
 
 local function stopControlRepeat(code)
-  if controlRepeatTimers[code] then
-    if controlRepeatTimers[code].timer then controlRepeatTimers[code].timer:stop() end
-    if controlRepeatTimers[code].interval then controlRepeatTimers[code].interval:stop() end
+  if code and controlRepeatTimers[code] then
+    pcall(function()
+      if controlRepeatTimers[code].timer then
+        controlRepeatTimers[code].timer:stop()
+      end
+      if controlRepeatTimers[code].interval then
+        controlRepeatTimers[code].interval:stop()
+      end
+    end)
     controlRepeatTimers[code] = nil
   end
 end
 
+local function stopAllControlRepeats()
+  for code in pairs(controlRepeatTimers) do
+    stopControlRepeat(code)
+  end
+end
+
+local stateUndoStack = {}
+local stateRedoStack = {}
+local isRestoringControllerState = false
+
+local function captureStateSnapshot(label)
+  return {
+    label = label or "State Change",
+    currentRoot = state.currentRoot,
+    currentScaleIdx = state.currentScaleIdx,
+    octaveShift = state.octaveShift,
+    topRowOctaveOffset = state.topRowOctaveOffset,
+    bottomRowOctaveOffset = state.bottomRowOctaveOffset,
+    transposeShift = state.transposeShift,
+    topRowVolume = state.topRowVolume,
+    bottomRowVolume = state.bottomRowVolume,
+    arpEnabled = state.arpEnabled,
+    arpLatchActive = state.arpLatchActive,
+    arpDirectionIdx = state.arpDirectionIdx,
+    arpRateIdx = state.arpRateIdx,
+    arpGatePercent = state.arpGatePercent,
+    arpBpm = state.arpBpm,
+    arpTopEnabled = state.arpTopEnabled,
+    arpBottomEnabled = state.arpBottomEnabled,
+    modWheel = state.ccStates[1] or 0
+  }
+end
+
+local function pushStateSnapshot(label)
+  if isRestoringControllerState then return end
+  table.insert(stateUndoStack, captureStateSnapshot(label))
+  stateRedoStack = {}
+end
+
+local function applyStateSnapshot(snap)
+  isRestoringControllerState = true
+
+  state.currentRoot = snap.currentRoot
+  state.currentScaleIdx = snap.currentScaleIdx
+  state.octaveShift = snap.octaveShift
+  state.topRowOctaveOffset = snap.topRowOctaveOffset
+  state.bottomRowOctaveOffset = snap.bottomRowOctaveOffset or 0
+  state.transposeShift = snap.transposeShift
+  state.topRowVolume = snap.topRowVolume
+  state.bottomRowVolume = snap.bottomRowVolume
+  state.arpEnabled = snap.arpEnabled
+  state.arpLatchActive = snap.arpLatchActive
+  state.arpDirectionIdx = snap.arpDirectionIdx
+  state.arpRateIdx = snap.arpRateIdx
+  state.arpGatePercent = snap.arpGatePercent
+  state.arpBpm = snap.arpBpm
+  state.arpTopEnabled = snap.arpTopEnabled
+  state.arpBottomEnabled = snap.arpBottomEnabled
+  state.ccStates[1] = snap.modWheel
+
+  arpeggiator.updateLatchedArpNotes()
+  arpeggiator.applyBpmChange()
+  arpeggiator.applyGatePercentChange()
+  midi.sendMidiCC(1, snap.modWheel)
+
+  isRestoringControllerState = false
+  config.saveSettings()
+end
+
+local function undoControllerState(code)
+  if #stateUndoStack == 0 then
+    local spot = {
+      title = "UNDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to undo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateRedoStack, cur)
+
+  local prev = table.remove(stateUndoStack)
+  applyStateSnapshot(prev)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "UNDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Reverted: " .. (prev.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function redoControllerState(code)
+  if #stateRedoStack == 0 then
+    local spot = {
+      title = "REDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to redo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateUndoStack, cur)
+
+  local nxt = table.remove(stateRedoStack)
+  applyStateSnapshot(nxt)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "REDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Re-applied: " .. (nxt.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function canApplyShifts(testT, testO, testTop, testBot)
+  local oldT = state.transposeShift
+  local oldO = state.octaveShift
+  local oldTop = state.topRowOctaveOffset
+  local oldBot = state.bottomRowOctaveOffset
+
+  -- Calculate bounds for current state
+  local curMinPitch = math.huge
+  local curMaxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < curMinPitch then curMinPitch = pitch end
+    if pitch > curMaxPitch then curMaxPitch = pitch end
+  end
+
+  -- Calculate bounds for test state
+  state.transposeShift = testT
+  state.octaveShift = testO
+  state.topRowOctaveOffset = testTop
+  state.bottomRowOctaveOffset = testBot
+
+  local minPitch = math.huge
+  local maxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < minPitch then minPitch = pitch end
+    if pitch > maxPitch then maxPitch = pitch end
+  end
+
+  state.transposeShift = oldT
+  state.octaveShift = oldO
+  state.topRowOctaveOffset = oldTop
+  state.bottomRowOctaveOffset = oldBot
+
+  if minPitch >= 16 and maxPitch <= 113 then
+    return true, testT, testO, testTop, testBot
+  end
+
+  if curMinPitch < 16 or curMaxPitch > 113 then
+    while minPitch < 16 do
+      testO = testO + 12
+      testTop = testTop + 12
+      testBot = testBot + 12
+      minPitch = minPitch + 12
+      maxPitch = maxPitch + 12
+    end
+    while maxPitch > 113 do
+      testO = testO - 12
+      testTop = testTop - 12
+      testBot = testBot - 12
+      minPitch = minPitch - 12
+      maxPitch = maxPitch - 12
+    end
+    return true, testT, testO, testTop, testBot
+  end
+
+  return false, testT, testO, testTop, testBot
+end
+
 local function executeControlAction(act, code)
+  if act == "undoState" then
+    undoControllerState(code)
+    return
+  elseif act == "redoState" then
+    redoControllerState(code)
+    return
+  end
+
+  -- Record state snapshot before mutating controller parameters
+  if act == "modeDown" or act == "modeUp" or
+     act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
+     act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
+     act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
+     act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
+     act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
+     act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
+     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" then
+    pushStateSnapshot(act)
+  end
+
   if act == "topOctDown" then
-    state.topRowOctaveOffset = math.max(-36, state.topRowOctaveOffset - 12)
-    local spot = {
-      title = "TOP ROW OCTAVE",
-      value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
-      subtext = "Upper Row Pitch",
-      targetId = "octave-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "topOctUp" then
-    state.topRowOctaveOffset = math.min(36, state.topRowOctaveOffset + 12)
-    local spot = {
-      title = "TOP ROW OCTAVE",
-      value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
-      subtext = "Upper Row Pitch",
-      targetId = "octave-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "trnspDown" then
-    state.transposeShift = state.transposeShift - 1
-    arpeggiator.updateLatchedArpNotes()
-    local spot = {
-      title = "TRANSPOSE",
-      value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " Deg",
-      subtext = "Scale Degree Offset",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT - 1
+    local newO = curO
+    if newT <= -numIntervals then
+      newT = newT + numIntervals
+      newO = newO - 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "trnspUp" then
-    state.transposeShift = state.transposeShift + 1
-    arpeggiator.updateLatchedArpNotes()
-    local spot = {
-      title = "TRANSPOSE",
-      value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " Deg",
-      subtext = "Scale Degree Offset",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT + 1
+    local newO = curO
+    if newT >= numIntervals then
+      newT = newT - numIntervals
+      newO = newO + 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "octaveDown" then
-    state.octaveShift = math.max(-36, state.octaveShift - 12)
-    local spot = {
-      title = "GLOBAL OCTAVE",
-      value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-      subtext = "Global Pitch Offset",
-      targetId = "octave-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newO = curO - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "OCTAVE",
+        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
+        subtext = "All keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "octaveUp" then
-    state.octaveShift = math.min(36, state.octaveShift + 12)
-    local spot = {
-      title = "GLOBAL OCTAVE",
-      value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-      subtext = "Global Pitch Offset",
-      targetId = "octave-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newO = curO + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "OCTAVE",
+        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
+        subtext = "All keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "modeDown" then
     state.currentScaleIdx = (state.currentScaleIdx - 2) % #SCALES + 1
     arpeggiator.updateLatchedArpNotes()
@@ -162,6 +518,7 @@ local function executeControlAction(act, code)
   elseif act == "panic" then
     midi.panicAllChannels()
     state.sustainActive = false
+    state.sustainedPitches = {}
     state.pressedKeys = {}
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
@@ -169,7 +526,7 @@ local function executeControlAction(act, code)
     local spot = {
       title = "MIDI PANIC",
       value = "ALL NOTES OFF",
-      subtext = "Reset Active Notes",
+      subtext = "All notes silenced",
       targetId = code and ("key-" .. code) or "header",
       color = "#d4a359"
     }
@@ -177,6 +534,7 @@ local function executeControlAction(act, code)
   elseif act == "resetAll" then
     state.octaveShift = 0
     state.topRowOctaveOffset = 0
+    state.bottomRowOctaveOffset = 0
     state.transposeShift = 0
     state.topRowVolume = 100
     state.bottomRowVolume = 100
@@ -190,14 +548,14 @@ local function executeControlAction(act, code)
     state.arpKeysCurrentlyHeld = {}
     state.arpEnabled = false
     state.arpLatchActive = false
-    state.arpTopEnabled = false
+    state.arpTopEnabled = true
     state.arpBottomEnabled = true
     midi.sendMidiCC(64, 0)
     midi.sendMidiCC(1, 0)
     local spot = {
       title = "RESET ALL",
       value = "DEFAULTS RESTORED",
-      subtext = "All Parameters Reset",
+      subtext = "Everything reset to defaults",
       targetId = code and ("key-" .. code) or "header",
       color = "#d4a359"
     }
@@ -345,7 +703,8 @@ local function executeControlAction(act, code)
     state.arpTopEnabled = not state.arpTopEnabled
     if not state.arpTopEnabled then
       for code in pairs(state.arpHeldNotes) do
-        if upperRowKeys[code] then
+        local noteKey = config.getNoteKey(code)
+        if noteKey and noteKey.isTop then
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
         end
@@ -363,7 +722,8 @@ local function executeControlAction(act, code)
     state.arpBottomEnabled = not state.arpBottomEnabled
     if not state.arpBottomEnabled then
       for code in pairs(state.arpHeldNotes) do
-        if lowerRowKeys[code] then
+        local noteKey = config.getNoteKey(code)
+        if noteKey and not noteKey.isTop then
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
         end
@@ -421,6 +781,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpGateDown" then
     state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
+    arpeggiator.applyGatePercentChange()
     local spot = {
       title = "ARP NOTE LENGTH",
       value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -431,6 +792,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpGateUp" then
     state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+    arpeggiator.applyGatePercentChange()
     local spot = {
       title = "ARP NOTE LENGTH",
       value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -465,6 +827,32 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+  elseif act == "relDown" or act == "releaseDown" then
+    local currentVal = state.ccStates[72] or 64
+    local newVal = math.max(0, currentVal - 4)
+    state.ccStates[72] = newVal
+    midi.sendMidiCC(72, newVal)
+    local spot = {
+      title = "SYNTH RELEASE",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #72 Level",
+      targetId = "header",
+      color = "#cf9ee1"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "relUp" or act == "releaseUp" then
+    local currentVal = state.ccStates[72] or 64
+    local newVal = math.min(127, currentVal + 4)
+    state.ccStates[72] = newVal
+    midi.sendMidiCC(72, newVal)
+    local spot = {
+      title = "SYNTH RELEASE",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #72 Level",
+      targetId = "header",
+      color = "#cf9ee1"
+    }
+    hud.updateWebviewHud(spot)
   elseif act == "bpmEdit" then
     state.bpmInputMode = true
     state.bpmBeforeEdit = state.arpBpm
@@ -485,17 +873,17 @@ end
 local function handleKeyDown(code)
   if code == 50 then -- Backtick
     if not state.pressedKeys[code] then
-      state.pressedKeys[code] = true
+      state.pressedKeys[code] = { isControl = true }
       arpeggiator.toggleArp()
     end
     return true
   end
 
-  if lowerRowKeys[code] or upperRowKeys[code] then
-    local isTop = lowerRowKeys[code] == nil and upperRowKeys[code] ~= nil
-    local kData = isTop and upperRowKeys[code] or lowerRowKeys[code]
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    local isTop = noteKey.isTop
     if not state.pressedKeys[code] then
-      local transposedPitch = transposer.getTransposedPitch(kData.baseNote, isTop)
+      local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
       local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
       local arpActive = state.arpEnabled and arpEnabledForRow
       local sustainActive = state.sustainActive
@@ -504,9 +892,8 @@ local function handleKeyDown(code)
       local isSustainedNote = false
 
       if state.shiftHeld then
-        -- Holding Shift bypasses any active mode (Arp or Sustain), forcing a normal un-sustained note tap
-        isArpNote = false
-        isSustainedNote = false
+        isArpNote = not arpActive
+        isSustainedNote = not sustainActive
       else
         isArpNote = arpActive
         isSustainedNote = sustainActive
@@ -526,55 +913,90 @@ local function handleKeyDown(code)
       hud.updateWebviewHud()
     end
     return true
-  elseif numberRowControls[code] then
-    local cData = numberRowControls[code]
+  end
+
+  local numCtrlKey = config.getNumberControlKey(code)
+  if numCtrlKey then
     if not state.pressedKeys[code] then
-      state.pressedKeys[code] = true
-      local act = state.shiftHeld and cData.shiftAction or cData.action
+      state.pressedKeys[code] = { isControl = true }
+      local act = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
       executeControlAction(act, code)
       stopControlRepeat(code)
-      controlRepeatTimers[code] = {
-        timer = hs.timer.doAfter(0.35, function()
-          if state.pressedKeys[code] then
-            controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
+      local entry = {}
+      controlRepeatTimers[code] = entry
+      entry.timer = hs.timer.doAfter(0.35, function()
+        if not controlRepeatTimers[code] then return end
+        if state.pressedKeys[code] then
+          entry.interval = hs.timer.doEvery(0.08, function()
+            if not controlRepeatTimers[code] then return end
+            local ok, err = pcall(function()
               if state.pressedKeys[code] then
-                local currentAct = state.shiftHeld and cData.shiftAction or cData.action
-                executeControlAction(currentAct, code)
+                local currentAct = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
+                -- Suppress undo push during key repeat (already captured on first press)
+                local savedFn = pushStateSnapshot
+                pushStateSnapshot = function() end
+                local ok2, err2 = pcall(executeControlAction, currentAct, code)
+                pushStateSnapshot = savedFn
+                if not ok2 then
+                  print("QWERTY MIDI: numCtrl repeat error: " .. tostring(err2))
+                end
               else
+                stopControlRepeat(code)
+              end
+            end)
+            if not ok then
+              print("QWERTY MIDI: numCtrl interval error: " .. tostring(err))
+              stopControlRepeat(code)
+            end
+          end)
+        end
+      end)
+    end
+    return true
+  end
+
+  local ctrlKey = config.getControlKey(code)
+  if ctrlKey then
+    if not state.pressedKeys[code] then
+      state.pressedKeys[code] = { isControl = true }
+      local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+      executeControlAction(act, code)
+      if act ~= "sustain" then
+        stopControlRepeat(code)
+        local entry = {}
+        controlRepeatTimers[code] = entry
+        entry.timer = hs.timer.doAfter(0.35, function()
+          if not controlRepeatTimers[code] then return end
+          if state.pressedKeys[code] then
+            entry.interval = hs.timer.doEvery(0.08, function()
+              if not controlRepeatTimers[code] then return end
+              local ok, err = pcall(function()
+                if state.pressedKeys[code] then
+                  local currentAct = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+                  -- Suppress undo push during key repeat (already captured on first press)
+                  local savedFn = pushStateSnapshot
+                  pushStateSnapshot = function() end
+                  local ok2, err2 = pcall(executeControlAction, currentAct, code)
+                  pushStateSnapshot = savedFn
+                  if not ok2 then
+                    print("QWERTY MIDI: ctrl repeat error: " .. tostring(err2))
+                  end
+                else
+                  stopControlRepeat(code)
+                end
+              end)
+              if not ok then
+                print("QWERTY MIDI: ctrl interval error: " .. tostring(err))
                 stopControlRepeat(code)
               end
             end)
           end
         end)
-      }
-    end
-    return true
-  elseif homeRowControls[code] then
-    local cData = homeRowControls[code]
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = true
-      local act = state.shiftHeld and cData.shiftAction or cData.action
-      executeControlAction(act, code)
-      if act ~= "sustain" then
-        stopControlRepeat(code)
-        controlRepeatTimers[code] = {
-          timer = hs.timer.doAfter(0.35, function()
-            if state.pressedKeys[code] then
-              controlRepeatTimers[code].interval = hs.timer.doEvery(0.08, function()
-                if state.pressedKeys[code] then
-                  local currentAct = state.shiftHeld and cData.shiftAction or cData.action
-                  executeControlAction(currentAct, code)
-                else
-                  stopControlRepeat(code)
-                end
-              end)
-            end
-          end)
-        }
       end
     end
     return true
   end
+
   return false
 end
 
@@ -585,8 +1007,8 @@ local function handleKeyUp(code)
     return true
   end
 
-  if lowerRowKeys[code] or upperRowKeys[code] then
-    local isTop = lowerRowKeys[code] == nil and upperRowKeys[code] ~= nil
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
     local keyInfo = state.pressedKeys[code]
     if keyInfo then
       local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo
@@ -596,7 +1018,7 @@ local function handleKeyUp(code)
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
-        if isSustainedNote then
+        if isSustainedNote and state.sustainActive then
           state.sustainedPitches = state.sustainedPitches or {}
           state.sustainedPitches[playedPitch] = true
         else
@@ -607,18 +1029,23 @@ local function handleKeyUp(code)
     end
     hud.updateWebviewHud()
     return true
-  elseif numberRowControls[code] then
+  end
+
+  local numCtrlKey = config.getNumberControlKey(code)
+  if numCtrlKey then
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
     return true
-  elseif homeRowControls[code] then
-    local cData = homeRowControls[code]
+  end
+
+  local ctrlKey = config.getControlKey(code)
+  if ctrlKey then
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
-    local act = state.shiftHeld and cData.shiftAction or cData.action
+    local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
     if act == "sustain" then
-      local holdDuration = hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime
+      local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0
       if holdDuration > 0.25 then
         state.sustainActive = false
         midi.sendMidiCC(64, 0)
@@ -636,11 +1063,19 @@ local function handleKeyUp(code)
         midi.sendMidiCC(64, 0)
         if state.sustainedPitches then
           for pitch in pairs(state.sustainedPitches) do
-            midi.sendMidiNote("noteOff", pitch, 0)
+            local isCurrentlyHeld = false
+            for _, keyInfo in pairs(state.pressedKeys) do
+              if type(keyInfo) == "table" and keyInfo.pitch == pitch then
+                isCurrentlyHeld = true
+                break
+              end
+            end
+            if not isCurrentlyHeld then
+              midi.sendMidiNote("noteOff", pitch, 0)
+            end
           end
           state.sustainedPitches = {}
         end
-        midi.sendMidiCC(123, 0)
       end
 
       local spot = {
@@ -656,11 +1091,13 @@ local function handleKeyUp(code)
     end
     return true
   end
+
   return false
 end
 
 return {
   executeControlAction = executeControlAction,
   handleKeyDown = handleKeyDown,
-  handleKeyUp = handleKeyUp
+  handleKeyUp = handleKeyUp,
+  stopAllControlRepeats = stopAllControlRepeats
 }

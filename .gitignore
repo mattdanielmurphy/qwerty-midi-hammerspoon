@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+/node_modules
+
+# Build & Rust outputs
+dist/
+/dist
+target/
+**/target/
+src-tauri/target/
+
+# System / OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Temporary & Local files
+tmp/
+/tmp
+*.tmp
+*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific temporary scripts/tests if desired
+tmp_*

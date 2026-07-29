@@ -365,6 +365,37 @@ local function generateSettingsHTML()
     document.getElementById('momentumVal').textContent = parseFloat(v).toFixed(2);
     send('setMomentum', parseFloat(v));
   }
+  function syncState(s) {
+    if (!s) return;
+    if (s.bpmStepSize !== undefined) {
+      var el = document.getElementById('bpmStepSize');
+      if (el) el.value = String(s.bpmStepSize);
+    }
+    if (s.logicSyncEnabled !== undefined) {
+      var el = document.getElementById('logicSync');
+      if (el) el.checked = !!s.logicSyncEnabled;
+    }
+    if (s.arpGatePercent !== undefined) {
+      var el = document.getElementById('gatePercent');
+      if (el) el.value = s.arpGatePercent;
+    }
+    if (s.zoomLevel !== undefined) {
+      var el = document.getElementById('zoomLevel');
+      if (el) el.value = String(s.zoomLevel);
+    }
+    if (s.scrollSensitivity !== undefined) {
+      var el = document.getElementById('sensitivitySlider');
+      if (el) el.value = s.scrollSensitivity;
+      var valEl = document.getElementById('sensitivityVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    }
+    if (s.scrollMomentumScale !== undefined) {
+      var el = document.getElementById('momentumSlider');
+      if (el) el.value = s.scrollMomentumScale;
+      var valEl = document.getElementById('momentumVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
+    }
+  }
 </script>
 </body>
 </html>
@@ -384,11 +415,11 @@ local function generateSettingsHTML()
   )
 end
 
-local function toggleSettingsWindow()
-  if settingsWebview then
-    settingsWebview:delete()
-    settingsWebview = nil
-    return
+_G.activeWatchers = _G.activeWatchers or {}
+
+local function createSettingsWebview()
+  if _G.activeWatchers.settingsWebview then
+    return _G.activeWatchers.settingsWebview
   end
 
   local uc = hsUsercontent.new("settingsUserContent")
@@ -398,26 +429,31 @@ local function toggleSettingsWindow()
     if not body or not body.type then return end
 
     if body.type == "setBpmStep" then
-      state.bpmStepSize = body.value
-      hs.settings.set("qwertyMidi_bpmStepSize", body.value)
+      local val = tonumber(body.value) or 10
+      state.bpmStepSize = val
+      hs.settings.set("qwertyMidi_bpmStepSize", val)
     elseif body.type == "setLogicSync" then
-      state.logicSyncEnabled = body.value
-      hs.settings.set("qwertyMidi_logicSyncEnabled", body.value)
+      local val = (body.value == true or body.value == "true" or body.value == 1)
+      state.logicSyncEnabled = val
+      hs.settings.set("qwertyMidi_logicSyncEnabled", val)
     elseif body.type == "setGate" then
-      state.arpGatePercent = math.max(5, math.min(150, body.value))
+      local val = tonumber(body.value) or 80.0
+      state.arpGatePercent = math.max(5.0, math.min(150.0, val))
     elseif body.type == "setZoom" then
-      state.zoomLevel = body.value
-      hs.settings.set("qwertyMidi_zoomLevel", body.value)
+      local val = tonumber(body.value) or 1.0
+      state.zoomLevel = val
+      hs.settings.set("qwertyMidi_zoomLevel", val)
     elseif body.type == "setSensitivity" then
-      state.scrollSensitivity = body.value
-      hs.settings.set("qwertyMidi_scrollSensitivity", body.value)
+      local val = tonumber(body.value) or 0.15
+      state.scrollSensitivity = val
+      hs.settings.set("qwertyMidi_scrollSensitivity", val)
     elseif body.type == "setMomentum" then
-      state.scrollMomentumScale = body.value
-      hs.settings.set("qwertyMidi_scrollMomentumScale", body.value)
+      local val = tonumber(body.value) or 0.3
+      state.scrollMomentumScale = val
+      hs.settings.set("qwertyMidi_scrollMomentumScale", val)
     elseif body.type == "close" then
-      if settingsWebview then
-        settingsWebview:delete()
-        settingsWebview = nil
+      if _G.activeWatchers.settingsWebview then
+        _G.activeWatchers.settingsWebview:hide()
       end
       return
     end
@@ -432,15 +468,55 @@ local function toggleSettingsWindow()
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
-  settingsWebview = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
-  settingsWebview:windowTitle("QWERTY MIDI Settings")
+  local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
+  wv:windowTitle("QWERTY MIDI Settings")
   -- Borderless floating panel that sits above the HUD webview
-  settingsWebview:windowStyle({ "borderless", "nonactivating" })
-  settingsWebview:level(hs.drawing.windowLevels.floating + 1)
-  settingsWebview:allowTextEntry(true)
-  settingsWebview:html(generateSettingsHTML())
-  settingsWebview:show()
+  wv:windowStyle({ "borderless", "nonactivating" })
+  wv:level(hs.drawing.windowLevels.floating + 1)
+  wv:allowTextEntry(true)
+  wv:html(generateSettingsHTML())
+
+  _G.activeWatchers.settingsWebview = wv
+  return wv
 end
+
+local function syncStateToWebview()
+  if not _G.activeWatchers.settingsWebview then return end
+  local s = {
+    bpmStepSize = state.bpmStepSize or 10,
+    logicSyncEnabled = state.logicSyncEnabled,
+    arpGatePercent = state.arpGatePercent or 80,
+    zoomLevel = state.zoomLevel or 1.0,
+    scrollSensitivity = state.scrollSensitivity or 0.15,
+    scrollMomentumScale = state.scrollMomentumScale or 0.3
+  }
+  local jsonStr = hs.json.encode(s)
+  _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
+end
+
+local function toggleSettingsWindow()
+  local wv = createSettingsWebview()
+
+  if wv:isVisible() then
+    wv:hide()
+  else
+    local screen = hs.screen.mainScreen():frame()
+    local w, h = 528, 612
+    local x = math.floor(screen.x + (screen.w - w) / 2)
+    local y = math.floor(screen.y + (screen.h - h) / 2)
+    wv:frame({ x = x, y = y, w = w, h = h })
+
+    syncStateToWebview()
+    wv:show()
+  end
+end
+
+-- Cleanup old instance on reload and pre-warm new settings webview
+if _G.activeWatchers.settingsWebview then
+  _G.activeWatchers.settingsWebview:delete()
+  _G.activeWatchers.settingsWebview = nil
+end
+createSettingsWebview()
 
 return {
   toggleSettingsWindow = toggleSettingsWindow

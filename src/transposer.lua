@@ -18,7 +18,7 @@ local function getEffectiveRowVelocity(isTopRow)
 end
 
 local function getTransposedPitch(basePitch, isTopRow)
-  local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or 0)
+  local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
   local octave = math.floor(effectivePitch / 12) - 1
   local noteInOctave = effectivePitch % 12
   local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
@@ -28,16 +28,14 @@ local function getTransposedPitch(basePitch, isTopRow)
     local numIntervals = #intervals
     local transposedIndex = scaleIndex + state.transposeShift
     local octaveOffset = math.floor(transposedIndex / numIntervals)
-    local idxInScale = (transposedIndex % numIntervals) + 1
+    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
 
     local targetInterval = intervals[idxInScale]
     local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
-    if newPitch >= 0 and newPitch <= 127 then
-      return newPitch
-    end
+    return newPitch
   end
   local fallbackPitch = effectivePitch + state.currentRoot + state.octaveShift + state.transposeShift
-  return math.max(0, math.min(127, fallbackPitch))
+  return fallbackPitch
 end
 
 local function noteNumToName(noteNum)

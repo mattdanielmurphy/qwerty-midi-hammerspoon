@@ -1,6 +1,14 @@
 local function getSetting(key, default)
   local val = hs.settings.get("qwertyMidi_" .. key)
   if val == nil then return default end
+  if type(default) == "number" then
+    local num = tonumber(val)
+    return num ~= nil and num or default
+  elseif type(default) == "boolean" then
+    if type(val) == "boolean" then return val end
+    if type(val) == "number" then return val ~= 0 end
+    if type(val) == "string" then return val == "true" or val == "1" end
+  end
   return val
 end
 
@@ -10,6 +18,7 @@ local state = {
   currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
   octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
   topRowOctaveOffset = getSetting("topRowOctaveOffset", 0), -- Independent Top Row Octave Offset
+  bottomRowOctaveOffset = getSetting("bottomRowOctaveOffset", 0), -- Independent Bottom Row Octave Offset
   transposeShift = getSetting("transposeShift", 0),     -- Transpose offset in scale degrees (-12 to +12)
   sustainActive = false,      -- Sustain toggle state (CC64)
   sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
@@ -56,7 +65,7 @@ local state = {
   arpStepIndex = 1,
   arpStepDirection = 1,
   lastArpMode = 1,
-  arpTopEnabled = getSetting("arpTopEnabled", false),
+  arpTopEnabled = getSetting("arpTopEnabled", true),
   arpBottomEnabled = getSetting("arpBottomEnabled", true),
 
   -- BPM Input Mode & Sync State
@@ -82,7 +91,8 @@ local state = {
 
   ccStates = {
     [1] = 0,
-    [7] = 100
+    [7] = 100,
+    [72] = 64
   },
 
   pressedKeys = {},
@@ -91,21 +101,39 @@ local state = {
 }
 
 local function saveSettings()
+  state.currentRoot = tonumber(state.currentRoot) or 0
+  state.currentScaleIdx = tonumber(state.currentScaleIdx) or 1
+  state.octaveShift = tonumber(state.octaveShift) or 0
+  state.topRowOctaveOffset = tonumber(state.topRowOctaveOffset) or 0
+  state.bottomRowOctaveOffset = tonumber(state.bottomRowOctaveOffset) or 0
+  state.transposeShift = tonumber(state.transposeShift) or 0
+  state.arpDirectionIdx = tonumber(state.arpDirectionIdx) or 1
+  state.arpRateIdx = tonumber(state.arpRateIdx) or 5
+  state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
+  state.arpBpm = tonumber(state.arpBpm) or 120.0
+  state.bpmStepSize = tonumber(state.bpmStepSize) or 10
+  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
+  state.scrollMomentumScale = tonumber(state.scrollMomentumScale) or 0.3
+  state.topRowVolume = tonumber(state.topRowVolume) or 100
+  state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
+  state.zoomLevel = tonumber(state.zoomLevel) or 1.0
+
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
   hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
   hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
+  hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
   hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
-  hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled)
-  hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive)
+  hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled == true)
+  hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
   hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
-  hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled)
-  hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled)
+  hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
+  hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
-  hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled)
+  hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
   hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
@@ -132,64 +160,443 @@ local WHITE_KEY_INDEX = {
   [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
 }
 
-local numberRowControls = {
+local defaultNumberRowControls = {
   [50] = { key = "`", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
   [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
   [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
   [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
   [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
-  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "octaveDown",   shiftName = "Oct -" },
-  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "octaveUp",     shiftName = "Oct +" },
+  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
+  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
   [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
   [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
-  [25] = { key = "9", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
-  [29] = { key = "0", name = "BPM Set",  action = "bpmEdit",        shiftAction = "resetAll",     shiftName = "Reset" },
+  [25] = { key = "9", name = "Rel -",    action = "relDown",        shiftAction = "relDown",      shiftName = "Rel -" },
+  [29] = { key = "0", name = "Rel +",    action = "relUp",          shiftAction = "relUp",        shiftName = "Rel +" },
   [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
   [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
 
-local lowerRowKeys = {
-  [6]  = { key = "Z", baseNote = 60 },
-  [7]  = { key = "X", baseNote = 62 },
-  [8]  = { key = "C", baseNote = 64 },
-  [9]  = { key = "V", baseNote = 65 },
-  [11] = { key = "B", baseNote = 67 },
-  [45] = { key = "N", baseNote = 69 },
-  [46] = { key = "M", baseNote = 71 },
-  [43] = { key = ",", baseNote = 72 },
-  [47] = { key = ".", baseNote = 74 },
-  [44] = { key = "/", baseNote = 76 },
-  [39] = { key = "'", baseNote = 77 }
+local defaultUpperRowKeys = {
+  [12] = { key = "Q", baseNote = 72, isTop = true }, [13] = { key = "W", baseNote = 74, isTop = true }, [14] = { key = "E", baseNote = 76, isTop = true },
+  [15] = { key = "R", baseNote = 77, isTop = true }, [17] = { key = "T", baseNote = 79, isTop = true }, [16] = { key = "Y", baseNote = 81, isTop = true },
+  [32] = { key = "U", baseNote = 83, isTop = true }, [34] = { key = "I", baseNote = 84, isTop = true }, [31] = { key = "O", baseNote = 86, isTop = true },
+  [35] = { key = "P", baseNote = 88, isTop = true }, [33] = { key = "[", baseNote = 89, isTop = true }, [30] = { key = "]", baseNote = 91, isTop = true }
 }
 
-local upperRowKeys = {
-  [12] = { key = "Q", baseNote = 72 },
-  [13] = { key = "W", baseNote = 74 },
-  [14] = { key = "E", baseNote = 76 },
-  [15] = { key = "R", baseNote = 77 },
-  [17] = { key = "T", baseNote = 79 },
-  [16] = { key = "Y", baseNote = 81 },
-  [32] = { key = "U", baseNote = 83 },
-  [34] = { key = "I", baseNote = 84 },
-  [31] = { key = "O", baseNote = 86 },
-  [35] = { key = "P", baseNote = 88 },
-  [33] = { key = "[", baseNote = 89 },
-  [30] = { key = "]", baseNote = 91 }
+local defaultLowerRowKeys = {
+  [6]  = { key = "Z", baseNote = 60, isTop = false }, [7]  = { key = "X", baseNote = 62, isTop = false }, [8]  = { key = "C", baseNote = 64, isTop = false },
+  [9]  = { key = "V", baseNote = 65, isTop = false }, [11] = { key = "B", baseNote = 67, isTop = false }, [45] = { key = "N", baseNote = 69, isTop = false },
+  [46] = { key = "M", baseNote = 71, isTop = false }, [43] = { key = ",", baseNote = 72, isTop = false }, [47] = { key = ".", baseNote = 74, isTop = false },
+  [44] = { key = "/", baseNote = 76, isTop = false }, [39] = { key = "'", baseNote = 77, isTop = false }
 }
 
-local homeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "resetAll",   shiftName = "Reset" },
+local defaultHomeRowControls = {
+  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "sustain",    shiftName = "Sustain" },
   [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
-  [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topOctDown", shiftName = "TopOct -" },
-  [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topOctUp",   shiftName = "TopOct +" },
+  [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
+  [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topVolUp",   shiftName = "TopVol +" },
   [5]  = { key = "G",   name = "Mode -",  action = "modeDown",    shiftAction = "modWheelDown", shiftName = "Mod -" },
-  [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "topOctDown", shiftName = "TopOct -" },
+  [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "rootDown",   shiftName = "Root -" },
   [38] = { key = "J",   name = "Trnsp -", action = "trnspDown",   shiftAction = "volDown",    shiftName = "Vol -" },
   [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
-  [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "topOctUp",   shiftName = "TopOct -" },
+  [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
   [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" }
 }
+
+local ACTION_CATALOG = {
+  {
+    category = "Arpeggiator",
+    actions = {
+      { id = "arpToggle", name = "Arp On/Off", typeClass = "ctrl-arp", description = "Toggle arpeggiator engine" },
+      { id = "arpTopToggle", name = "Top Arp", typeClass = "ctrl-arptop", description = "Toggle top row arpeggiator" },
+      { id = "arpBottomToggle", name = "Bot Arp", typeClass = "ctrl-arpbot", description = "Toggle bottom row arpeggiator" },
+      { id = "arpDirUp", name = "Arp Dir +", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction up" },
+      { id = "arpDirDown", name = "Arp Dir -", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction down" },
+      { id = "arpRateUp", name = "Arp Rate +", typeClass = "ctrl-arprate", description = "Increase arpeggiator speed" },
+      { id = "arpRateDown", name = "Arp Rate -", typeClass = "ctrl-arprate", description = "Decrease arpeggiator speed" },
+      { id = "arpGateUp", name = "Arp Gate +", typeClass = "ctrl-arpgate", description = "Lengthen arpeggiator gate" },
+      { id = "arpGateDown", name = "Arp Gate -", typeClass = "ctrl-arpgate", description = "Shorten arpeggiator gate" }
+    }
+  },
+  {
+    category = "Scale & Pitch",
+    actions = {
+      { id = "rootUp", name = "Root +", typeClass = "ctrl-root", description = "Shift root note up" },
+      { id = "rootDown", name = "Root -", typeClass = "ctrl-root", description = "Shift root note down" },
+      { id = "modeUp", name = "Mode +", typeClass = "ctrl-mode", description = "Cycle scale/mode forward" },
+      { id = "modeDown", name = "Mode -", typeClass = "ctrl-mode", description = "Cycle scale/mode backward" },
+      { id = "trnspUp", name = "Trnsp +", typeClass = "ctrl-trnsp", description = "Transpose semitone up" },
+      { id = "trnspDown", name = "Trnsp -", typeClass = "ctrl-trnsp", description = "Transpose semitone down" },
+      { id = "octaveUp", name = "Main Oct +", typeClass = "ctrl-oct", description = "Shift main octave up" },
+      { id = "octaveDown", name = "Main Oct -", typeClass = "ctrl-oct", description = "Shift main octave down" },
+      { id = "botOctUp", name = "Bot Oct +", typeClass = "ctrl-oct", description = "Shift bottom octave up" },
+      { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
+      { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
+      { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
+      { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
+    }
+  },
+  {
+    category = "Volume & CC",
+    actions = {
+      { id = "sustain", name = "Sustain", typeClass = "latch-active", description = "Sustain pedal CC64 toggle/hold" },
+      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
+      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
+      { id = "topVolDown", name = "Top Vol -", typeClass = "ctrl-vol", description = "Decrease top row velocity" },
+      { id = "modWheelUp", name = "Mod +", typeClass = "ctrl-modw", description = "Increase modulation wheel CC1" },
+      { id = "modWheelDown", name = "Mod -", typeClass = "ctrl-modw", description = "Decrease modulation wheel CC1" },
+      { id = "panic", name = "Panic!", typeClass = "ctrl-panic", description = "Send all-notes-off MIDI panic" }
+    }
+  },
+  {
+    category = "Tempo & View",
+    actions = {
+      { id = "undoState", name = "Undo", typeClass = "ctrl-reset", description = "Undo last controller state change (scale, pitch, octave, etc.)" },
+      { id = "redoState", name = "Redo State", typeClass = "ctrl-reset", description = "Redo previous controller state change" },
+      { id = "bpmUp", name = "BPM +", typeClass = "ctrl-bpm", description = "Increase tempo" },
+      { id = "bpmDown", name = "BPM -", typeClass = "ctrl-bpm", description = "Decrease tempo" },
+      { id = "relUp", name = "Release +", typeClass = "ctrl-rel", description = "Increase release length" },
+      { id = "relDown", name = "Release -", typeClass = "ctrl-rel", description = "Decrease release length" },
+      { id = "zoomIn", name = "Zoom +", typeClass = "ctrl-zoom", description = "Zoom in HUD size" },
+      { id = "zoomOut", name = "Zoom -", typeClass = "ctrl-zoom", description = "Zoom out HUD size" },
+      { id = "resetAll", name = "Reset All", typeClass = "ctrl-reset", description = "Reset settings to defaults" },
+      { id = "none", name = "None", typeClass = "", description = "Unassigned key" }
+    }
+  }
+}
+
+local function deepCopy(orig)
+  if type(orig) ~= "table" then return orig end
+  local copy = {}
+  for k, v in pairs(orig) do
+    copy[k] = deepCopy(v)
+  end
+  return copy
+end
+
+local numberRowControls = deepCopy(defaultNumberRowControls)
+local upperRowKeys = deepCopy(defaultUpperRowKeys)
+local lowerRowKeys = deepCopy(defaultLowerRowKeys)
+local homeRowControls = deepCopy(defaultHomeRowControls)
+
+local function getActionIndex()
+  local idx = {}
+  for _, cat in ipairs(ACTION_CATALOG) do
+    for _, act in ipairs(cat.actions) do
+      idx[act.id] = act
+    end
+  end
+  return idx
+end
+
+local function applyCustomLayout(customData)
+  for k in pairs(numberRowControls) do numberRowControls[k] = nil end
+  for k, v in pairs(deepCopy(defaultNumberRowControls)) do numberRowControls[k] = v end
+
+  for k in pairs(upperRowKeys) do upperRowKeys[k] = nil end
+  for k, v in pairs(deepCopy(defaultUpperRowKeys)) do upperRowKeys[k] = v end
+
+  for k in pairs(homeRowControls) do homeRowControls[k] = nil end
+  for k, v in pairs(deepCopy(defaultHomeRowControls)) do homeRowControls[k] = v end
+
+  for k in pairs(lowerRowKeys) do lowerRowKeys[k] = nil end
+  for k, v in pairs(deepCopy(defaultLowerRowKeys)) do lowerRowKeys[k] = v end
+
+  if not customData or type(customData) ~= "table" then return end
+
+  local actionIdx = getActionIndex()
+
+  for codeStr, binding in pairs(customData) do
+    local code = tonumber(codeStr)
+    if code and type(binding) == "table" then
+      if binding.action == "none" or binding.isNote == true or (binding.action == nil and binding.shiftAction == nil and binding.baseNote == nil) then
+        -- Revert to default note or control for this keycode
+        local defaultDef = defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultHomeRowControls[code] or defaultNumberRowControls[code]
+        if defaultDef then
+          if defaultUpperRowKeys[code] then upperRowKeys[code] = deepCopy(defaultDef)
+          elseif defaultLowerRowKeys[code] then lowerRowKeys[code] = deepCopy(defaultDef)
+          elseif defaultHomeRowControls[code] then homeRowControls[code] = deepCopy(defaultDef)
+          elseif defaultNumberRowControls[code] then numberRowControls[code] = deepCopy(defaultDef)
+          end
+        end
+      elseif binding.action ~= nil or binding.shiftAction ~= nil then
+        local targetTable = nil
+        if defaultNumberRowControls[code] then targetTable = numberRowControls
+        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
+        elseif defaultUpperRowKeys[code] then targetTable = upperRowKeys
+        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
+        end
+
+        if targetTable then
+          local defaultDef = defaultNumberRowControls[code] or defaultHomeRowControls[code] or defaultUpperRowKeys[code] or defaultLowerRowKeys[code]
+          local actObj = actionIdx[binding.action]
+          local nameVal = binding.name
+          if not nameVal or nameVal == "Ctrl" or nameVal == "" then
+            nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+          end
+
+          targetTable[code] = {
+            key = binding.key or (defaultDef and defaultDef.key),
+            name = nameVal,
+            action = binding.action,
+            shiftAction = binding.shiftAction or (defaultDef and defaultDef.shiftAction),
+            shiftName = binding.shiftName or (defaultDef and defaultDef.shiftName)
+          }
+        end
+      elseif binding.baseNote ~= nil then
+        local targetTable = nil
+        if defaultUpperRowKeys[code] then targetTable = upperRowKeys
+        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
+        elseif defaultNumberRowControls[code] then targetTable = numberRowControls
+        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
+        end
+
+        if targetTable then
+          targetTable[code] = {
+            key = binding.key or (defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultNumberRowControls[code] or defaultHomeRowControls[code]).key,
+            baseNote = binding.baseNote,
+            isTop = (binding.isTop ~= nil) and binding.isTop or (defaultUpperRowKeys[code] ~= nil)
+          }
+        end
+      end
+    end
+  end
+end
+
+local function getPresetsMap()
+  local presets = hs.settings.get("qwertyMidi_layoutPresets")
+  if not presets or type(presets) ~= "table" or next(presets) == nil then
+    local legacyData = hs.settings.get("qwertyMidi_customKeyLayout") or {}
+    presets = {
+      ["default"] = { id = "default", name = "Default Layout", isBuiltin = true, data = legacyData }
+    }
+    hs.settings.set("qwertyMidi_layoutPresets", presets)
+  end
+  return presets
+end
+
+local function getActivePresetId()
+  return hs.settings.get("qwertyMidi_activePresetId") or "default"
+end
+
+local function getPresetsList()
+  local map = getPresetsMap()
+  local list = {}
+  for id, p in pairs(map) do
+    table.insert(list, {
+      id = p.id or id,
+      name = p.name or "Untitled Preset",
+      isBuiltin = (p.isBuiltin == true or id == "default"),
+      data = p.data or {}
+    })
+  end
+  table.sort(list, function(a, b)
+    if a.isBuiltin ~= b.isBuiltin then return a.isBuiltin end
+    return a.name < b.name
+  end)
+  return list
+end
+
+local function getActivePresetData()
+  local map = getPresetsMap()
+  local activeId = getActivePresetId()
+  local p = map[activeId] or map["default"]
+  return (p and p.data) or {}
+end
+
+local function selectPreset(presetId)
+  local map = getPresetsMap()
+  if not map[presetId] then
+    presetId = "default"
+  end
+  hs.settings.set("qwertyMidi_activePresetId", presetId)
+  local data = (map[presetId] and map[presetId].data) or {}
+  hs.settings.set("qwertyMidi_customKeyLayout", data)
+  applyCustomLayout(data)
+  saveSettings()
+end
+
+local function saveCustomLayout(newLayoutData)
+  local activeId = getActivePresetId()
+  local map = getPresetsMap()
+
+  if not map[activeId] then
+    activeId = "default"
+  end
+
+  map[activeId].data = newLayoutData or {}
+
+  hs.settings.set("qwertyMidi_layoutPresets", map)
+  hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
+  applyCustomLayout(newLayoutData)
+  saveSettings()
+end
+
+local function savePreset(presetId, name, layoutData)
+  local map = getPresetsMap()
+  if not presetId or presetId == "" or presetId == "new" then
+    presetId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
+  end
+
+  local isBuiltin = false
+  if map[presetId] then
+    isBuiltin = (map[presetId].isBuiltin == true or presetId == "default")
+  end
+
+  map[presetId] = {
+    id = presetId,
+    name = name or (map[presetId] and map[presetId].name) or "New Preset",
+    isBuiltin = isBuiltin,
+    data = layoutData or (map[presetId] and map[presetId].data) or {}
+  }
+
+  hs.settings.set("qwertyMidi_layoutPresets", map)
+  selectPreset(presetId)
+  return presetId
+end
+
+local function renamePreset(presetId, newName)
+  if not newName or newName:match("^%s*$") then return false end
+  local map = getPresetsMap()
+  if map[presetId] then
+    map[presetId].name = newName
+    hs.settings.set("qwertyMidi_layoutPresets", map)
+    saveSettings()
+    return true
+  end
+  return false
+end
+
+local function deletePreset(presetId)
+  local map = getPresetsMap()
+  if map[presetId] and not map[presetId].isBuiltin and presetId ~= "default" then
+    map[presetId] = nil
+    hs.settings.set("qwertyMidi_layoutPresets", map)
+    if getActivePresetId() == presetId then
+      selectPreset("default")
+    else
+      saveSettings()
+    end
+    return true
+  end
+  return false
+end
+
+local function duplicatePreset(presetId, newName)
+  local map = getPresetsMap()
+  local src = map[presetId] or map["default"]
+  if not src then return nil end
+
+  local newId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
+  local name = newName or (src.name .. " Copy")
+
+  local copyData = {}
+  if src.data then
+    for k, v in pairs(src.data) do
+      if type(v) == "table" then
+        local sub = {}
+        for sk, sv in pairs(v) do sub[sk] = sv end
+        copyData[k] = sub
+      else
+        copyData[k] = v
+      end
+    end
+  end
+
+  map[newId] = {
+    id = newId,
+    name = name,
+    isBuiltin = false,
+    data = copyData
+  }
+
+  hs.settings.set("qwertyMidi_layoutPresets", map)
+  selectPreset(newId)
+  return newId
+end
+
+local function resetLayout()
+  local activeId = getActivePresetId()
+  local map = getPresetsMap()
+  if map[activeId] then
+    map[activeId].data = {}
+    hs.settings.set("qwertyMidi_layoutPresets", map)
+  end
+  hs.settings.set("qwertyMidi_customKeyLayout", nil)
+  applyCustomLayout(nil)
+  saveSettings()
+end
+
+local function updateKeyMapping(code, newBinding)
+  local customData = getActivePresetData()
+  customData[tostring(code)] = newBinding
+  saveCustomLayout(customData)
+end
+
+local function getLayoutConfig()
+  local presetsList = getPresetsList()
+  local activePresetId = getActivePresetId()
+  local activeData = getActivePresetData()
+
+  return {
+    customized = (activeData ~= nil and next(activeData) ~= nil),
+    actionCatalog = ACTION_CATALOG,
+    presets = presetsList,
+    activePresetId = activePresetId,
+    defaults = {
+      numberRow = defaultNumberRowControls,
+      upperRow = defaultUpperRowKeys,
+      homeRow = defaultHomeRowControls,
+      lowerRow = defaultLowerRowKeys
+    },
+    active = {
+      numberRow = numberRowControls,
+      upperRow = upperRowKeys,
+      homeRow = homeRowControls,
+      lowerRow = lowerRowKeys
+    },
+    customLayout = activeData or {}
+  }
+end
+
+applyCustomLayout(getActivePresetData())
+
+local function getNoteKey(code)
+  local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
+  if k and k.baseNote ~= nil then return k end
+  return nil
+end
+
+local function getControlKey(code)
+  local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
+  if k and k.action ~= nil then return k end
+  return nil
+end
+
+local function getNumberControlKey(code)
+  local k = numberRowControls[code]
+  if k and k.action ~= nil then return k end
+  return nil
+end
+
+local function getActiveNoteKeysMap()
+  local map = {}
+  for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  return map
+end
+
+local function getActiveControlKeysMap()
+  local map = {}
+  for code, k in pairs(homeRowControls) do if k.action ~= nil then map[code] = k end end
+  for code, k in pairs(upperRowKeys) do if k.action ~= nil then map[code] = k end end
+  for code, k in pairs(lowerRowKeys) do if k.action ~= nil then map[code] = k end end
+  return map
+end
 
 return {
   state = state,
@@ -197,8 +604,29 @@ return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
   WHITE_KEY_INDEX = WHITE_KEY_INDEX,
+  ACTION_CATALOG = ACTION_CATALOG,
+  defaultNumberRowControls = defaultNumberRowControls,
+  defaultUpperRowKeys = defaultUpperRowKeys,
+  defaultLowerRowKeys = defaultLowerRowKeys,
+  defaultHomeRowControls = defaultHomeRowControls,
   numberRowControls = numberRowControls,
-  lowerRowKeys = lowerRowKeys,
   upperRowKeys = upperRowKeys,
-  homeRowControls = homeRowControls
+  lowerRowKeys = lowerRowKeys,
+  homeRowControls = homeRowControls,
+  applyCustomLayout = applyCustomLayout,
+  saveCustomLayout = saveCustomLayout,
+  selectPreset = selectPreset,
+  savePreset = savePreset,
+  renamePreset = renamePreset,
+  deletePreset = deletePreset,
+  duplicatePreset = duplicatePreset,
+  getPresetsList = getPresetsList,
+  resetLayout = resetLayout,
+  updateKeyMapping = updateKeyMapping,
+  getLayoutConfig = getLayoutConfig,
+  getNoteKey = getNoteKey,
+  getControlKey = getControlKey,
+  getNumberControlKey = getNumberControlKey,
+  getActiveNoteKeysMap = getActiveNoteKeysMap,
+  getActiveControlKeysMap = getActiveControlKeysMap
 }

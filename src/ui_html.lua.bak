@@ -17,7 +17,6 @@ local HTML_UI_CONTENT = [[
     justify-content: flex-end;
     align-items: center;
     border-radius: 14px;
-    padding-bottom: 6px;
   }
 
   #notification-zone {
@@ -34,7 +33,7 @@ local HTML_UI_CONTENT = [[
 
   #hud-container {
     width: 980px;
-    height: 280px;
+    height: 330px;
     background: rgba(24, 22, 20, 0.96);
     border: 2px solid rgba(70, 64, 58, 0.7);
     border-radius: 14px;
@@ -44,7 +43,7 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     padding: 12px 14px 14px 14px;
     position: relative;
-    transform-origin: bottom center;
+    transform-origin: center center;
     transform: scale(1.4);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
@@ -1463,7 +1462,7 @@ local HTML_UI_CONTENT = [[
           <span class="drawer-subtitle">Drag action to key slot or swap keys</span>
         </div>
         <div class="drawer-header-actions">
-          <!-- shift mode toggle removed -->
+          <button id="shift-mode-toggle-btn" class="drawer-icon-btn drawer-shift-btn" title="Toggle Shift Mode — when active, dropped actions become Shift actions (⇧)">&#8679; SHIFT</button>
           <button id="undo-layout-btn" class="drawer-icon-btn disabled" title="Undo (Cmd+Z)">&#x21A9;</button>
           <button id="redo-layout-btn" class="drawer-icon-btn disabled" title="Redo (Cmd+Shift+Z)">&#x21AA;</button>
           <button id="close-drawer-btn" class="drawer-close-btn" title="Close Drawer">&times;</button>
@@ -1522,16 +1521,6 @@ local HTML_UI_CONTENT = [[
   </div>
 
 <script>
-  function getBuiltInKey(code) {
-    if (typeof LAYOUT_DATA === 'undefined') return null;
-    for (const row in LAYOUT_DATA) {
-      const keys = LAYOUT_DATA[row];
-      for (let i = 0; i < keys.length; i++) {
-        if (keys[i].code == code) return keys[i];
-      }
-    }
-    return null;
-  }
   const LAYOUT_DATA = {
     number: [
       { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
@@ -1557,7 +1546,7 @@ local HTML_UI_CONTENT = [[
     ],
     home: [
       { code: 57, keyLabel: "Caps", isDummy: true, width: 95 },
-      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Arp" },
+      { code: 0,  keyLabel: "A", isControl: true, noteLabel: "Lcha" },
       { code: 1,  keyLabel: "S", isControl: true, noteLabel: "Random" },
       { code: 2,  keyLabel: "D", isControl: true, noteLabel: "Oct -" },
       { code: 3,  keyLabel: "F", isControl: true, noteLabel: "Oct +" },
@@ -1970,11 +1959,10 @@ local HTML_UI_CONTENT = [[
               : (binding.name || binding.shiftName || binding.shiftAction || '');
           }
           // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || binding.name || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
-          if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
+          if (halfBottom) halfBottom.textContent = binding.name || binding.shiftName || binding.shiftAction || '';
         }
       }
     }
@@ -2256,11 +2244,10 @@ local HTML_UI_CONTENT = [[
           }
           pad.className = 'key-pad control-pad ' + (binding.typeClass || '');
           // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || binding.name || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
-          if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
+          if (halfBottom) halfBottom.textContent = binding.name || binding.shiftName || binding.shiftAction || '';
         }
       }
     }
@@ -2351,11 +2338,10 @@ local HTML_UI_CONTENT = [[
         if (noteEl) noteEl.textContent = actionObj.name;
       }
       // Update vertical split halves
-      const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
       const halfTop = pad.querySelector('.key-half-top .key-note');
-      if (halfTop) halfTop.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].shiftName || currentWorkingLayout[code].shiftAction) || builtIn.shiftLabel || '';
+      if (halfTop) halfTop.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].shiftName || currentWorkingLayout[code].shiftAction) || actionObj.name;
       const halfBottom = pad.querySelector('.key-half-bottom .key-note');
-      if (halfBottom) halfBottom.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].name || currentWorkingLayout[code].action) || builtIn.noteLabel || builtIn.keyLabel || '';
+      if (halfBottom) halfBottom.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].name || currentWorkingLayout[code].action) || actionObj.name;
       // Always set bottom note when assigning normal action
       if (!isShift && halfBottom) halfBottom.textContent = actionObj.name;
       // Always set top note when assigning shift action
@@ -2619,7 +2605,7 @@ local HTML_UI_CONTENT = [[
           return;
         }
 
-        if (e.target.closest('.key-pad') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.mode-center-block') || e.target.closest('.bpm-editor') || (e.target.closest('.drawer-panel') && !e.target.closest('.drawer-header'))) return;
+        if (e.target.closest('.key-pad') || e.target.closest('select') || e.target.closest('button') || e.target.closest('.mode-center-block') || e.target.closest('.bpm-editor') || e.target.closest('.drawer-panel')) return;
 
         // Click on empty space: clear selection and hide context menu
         if (isEditMode) {
@@ -2687,19 +2673,6 @@ local HTML_UI_CONTENT = [[
     }
     addTextFocusListeners(document.getElementById('drawer-search-input'));
     addTextFocusListeners(document.getElementById('preset-modal-input'));
-    const drawerContainer = document.getElementById('drawer-categories-container');
-    if (drawerContainer) {
-      drawerContainer.addEventListener('mouseenter', function() {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
-          window.webkit.messageHandlers.midiController.postMessage({ type: 'hoverScrollable', state: true });
-        }
-      });
-      drawerContainer.addEventListener('mouseleave', function() {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
-          window.webkit.messageHandlers.midiController.postMessage({ type: 'hoverScrollable', state: false });
-        }
-      });
-    }
 
 
 
@@ -3477,23 +3450,22 @@ local HTML_UI_CONTENT = [[
           }
 
           // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = el.querySelector('.key-half-top .key-note');
           const halfBottom = el.querySelector('.key-half-bottom .key-note');
           if (halfTop) {
             if (currentWorkingLayout[code]) {
               const binding = currentWorkingLayout[code];
-              halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+              halfTop.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
             } else {
-              halfTop.textContent = builtIn.shiftLabel || '';
+              halfTop.textContent = k.note || '';
             }
           }
           if (halfBottom) {
             if (currentWorkingLayout[code]) {
               const binding = currentWorkingLayout[code];
-              halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              halfBottom.textContent = binding.name || binding.shiftName || binding.shiftAction || k.note || '';
             } else {
-              halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              halfBottom.textContent = k.note || '';
             }
           }
 
@@ -3534,13 +3506,6 @@ local HTML_UI_CONTENT = [[
   if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'initGrid took ' + (t1 - t0) + ' ms' });
   }
-
-  // Heartbeat: let Lua detect if the web content process silently dies
-  setInterval(() => {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'heartbeat' });
-    }
-  }, 2000);
 </script>
 </body>
 </html>

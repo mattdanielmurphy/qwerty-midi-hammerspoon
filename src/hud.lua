@@ -10,14 +10,14 @@ local state = config.state
 local SCALES = config.SCALES
 local NOTE_NAMES = config.NOTE_NAMES
 local numberRowControls = config.numberRowControls
-local upperRowKeys = config.upperRowKeys
-local lowerRowKeys = config.lowerRowKeys
-local homeRowControls = config.homeRowControls
 local ARP_DIRECTIONS = state.ARP_DIRECTIONS
 local ARP_RATES = state.ARP_RATES
 local ARP_GATES = state.ARP_GATES
 
 local HTML_UI_CONTENT = require("ui_html")
+local webviewGeneration = 0
+local lastHeartbeat = 0
+local evalFailCount = 0
 
 _G.activeWatchers = _G.activeWatchers or {}
 
@@ -27,18 +27,22 @@ local function setControlsModule(m)
   controlsModule = m
 end
 
+state.textInputActive = false
+
 local pendingSpotlightInfo = nil
 local pendingActiveArpPitch = nil
 local hudUpdateScheduled = false
 local lastFrameScale = nil
+local _savedNormalHeight = nil
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
-  local baseW, baseH = 980, 330
+  local baseW, baseH = 980, 280
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+  local NOTIF_BAND = math.floor(50 * effectiveScale)
   local newW = math.floor(baseW * effectiveScale)
-  local newH = math.floor(baseH * effectiveScale)
+  local newH = math.floor(baseH * effectiveScale) + NOTIF_BAND
 
   if lastFrameScale ~= effectiveScale then
     lastFrameScale = effectiveScale
@@ -61,11 +65,16 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
   
-  local modeFrac = (state.currentScaleIdx - 0.5) / #SCALES
-  local modeName = SCALES[state.currentScaleIdx].name
+  local currentScaleIdx = tonumber(state.currentScaleIdx) or 1
+  local modeFrac = (currentScaleIdx - 0.5) / #SCALES
+  local modeName = SCALES[currentScaleIdx].name
   
-  local octStr = (state.octaveShift >= 0 and "+" or "") .. (state.octaveShift / 12) .. " Oct"
-  local trnspStr = (state.transposeShift ~= 0) and ("Trnsp: " .. (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. "st") or ""
+  local octVal = tonumber(state.octaveShift) or 0
+  local topOctVal = tonumber(state.topRowOctaveOffset) or 0
+  local trnspVal = tonumber(state.transposeShift) or 0
+
+  local octStr = (octVal >= 0 and "+" or "") .. (octVal / 12) .. " Oct"
+  local trnspStr = (trnspVal ~= 0) and ("Trnsp: " .. (trnspVal >= 0 and "+" or "") .. trnspVal .. "st") or ""
   local susStr = state.sustainActive and "SUS: ON" or ""
   local latchStr = state.arpLatchActive and "LATCH" or (state.arpEnabled and "" or "")
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
@@ -77,8 +86,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
-  local topOctaveStr = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12)
-  local bottomOctaveStr = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12)
+  local topOctaveStr = (topOctVal >= 0 and "+" or "") .. math.floor(topOctVal / 12)
+  local bottomOctaveStr = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12)
 
   local keyUpdates = {}
 
@@ -89,6 +98,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeDown = "ctrl-mode", modeUp = "ctrl-mode",
     octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
     topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
+    topVolDown = "ctrl-vol", topVolUp = "ctrl-vol",
     modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
     volDown = "ctrl-vol", volUp = "ctrl-vol",
     
@@ -96,12 +106,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
     arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
     arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
+    relDown = "ctrl-rel", relUp = "ctrl-rel", releaseDown = "ctrl-rel", releaseUp = "ctrl-rel",
     bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
     zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
     
     -- Singletons / Toggles
     arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
-    bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset"
+    bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset",
+    undoState = "ctrl-reset", redoState = "ctrl-reset"
   }
 
   for code, cData in pairs(numberRowControls) do
@@ -110,10 +122,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     local isMainArp = (code == 50)
     local isTopArp = (code == 18)
     local isBotArp = (code == 19)
-    local isArpActive = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
+    local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
     local pairedClass = actionTypeClass[act] or ""
     keyUpdates[tostring(code)] = {
       note = label,
+      action = act,
       isControl = true,
       typeClass = pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -121,8 +134,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     }
   end
 
-  for code, kData in pairs(upperRowKeys) do
-    local noteNum = transposer.getTransposedPitch(kData.baseNote, true)
+  for code, kData in pairs(config.getActiveNoteKeysMap()) do
+    local noteNum = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
     local intervalIdx = transposer.getIntervalInfo(noteNum)
     local noteName = transposer.noteNumToName(noteNum)
     local typeClass = ""
@@ -136,51 +149,30 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and activeArpPitch and noteNum == activeArpPitch then
+    if state.arpEnabled and state.arpCurrentPitch and noteNum == state.arpCurrentPitch then
       isPressed = true
     end
+
+    local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
 
     keyUpdates[tostring(code)] = {
       note = noteName,
       typeClass = typeClass,
-      pressed = isPressed
+      pressed = isPressed,
+      latched = isLatched,
+      outOfBounds = (noteNum < 0 or noteNum > 127)
     }
   end
 
-  for code, kData in pairs(lowerRowKeys) do
-    local noteNum = transposer.getTransposedPitch(kData.baseNote, false)
-    local intervalIdx = transposer.getIntervalInfo(noteNum)
-    local noteName = transposer.noteNumToName(noteNum)
-    local typeClass = ""
-
-    if intervalIdx == 1 then
-      typeClass = "root-key"
-    elseif intervalIdx == 3 then
-      typeClass = "third-key"
-    elseif intervalIdx == 5 then
-      typeClass = "fifth-key"
-    end
-
-    local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and activeArpPitch and noteNum == activeArpPitch then
-      isPressed = true
-    end
-
-    keyUpdates[tostring(code)] = {
-      note = noteName,
-      typeClass = typeClass,
-      pressed = isPressed
-    }
-  end
-
-  for code, cData in pairs(homeRowControls) do
-    local label = state.shiftHeld and cData.shiftName or cData.name
-    local act = state.shiftHeld and cData.shiftAction or cData.action
+  for code, cData in pairs(config.getActiveControlKeysMap()) do
+    local label = state.shiftHeld and (cData.shiftName or cData.name) or cData.name
+    local act = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local isSustain = (code == 48)
     local isLatch = (code == 0)
     local pairedClass = actionTypeClass[act] or ""
     keyUpdates[tostring(code)] = {
       note = label,
+      action = act,
       isControl = true,
       typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
@@ -224,7 +216,29 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   local jsonStr = hs.json.encode(payload)
-  _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript("renderHud(" .. jsonStr .. ")")
+  end)
+  if ok then
+    evalFailCount = 0
+  else
+    evalFailCount = evalFailCount + 1
+    if evalFailCount >= 3 then
+      print("QWERTY MIDI: webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
+      evalFailCount = 0
+      hs.timer.doAfter(0.1, function()
+        if state.midiActive then
+          local rok, rerr = pcall(function()
+            local h = createMidiWebview()
+            h:show()
+          end)
+          if not rok then
+            print("QWERTY MIDI: webview recreate failed: " .. tostring(rerr))
+          end
+        end
+      end)
+    end
+  end
 end
 
 local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
@@ -250,15 +264,20 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
 end
 
 local function createMidiWebview()
+  webviewGeneration = webviewGeneration + 1
+  local myGen = webviewGeneration
   if _G.activeWatchers.midiWebview then
+    -- Clear callback BEFORE delete to prevent async race nuking new webview ref
+    _G.activeWatchers.midiWebview:windowCallback(nil)
     _G.activeWatchers.midiWebview:delete()
     _G.activeWatchers.midiWebview = nil
   end
 
   local screen = hs.screen.mainScreen():frame()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+  local NOTIF_BAND = math.floor(50 * effectiveScale)
   local width = math.floor(980 * effectiveScale)
-  local height = math.floor(330 * effectiveScale)
+  local height = math.floor(280 * effectiveScale) + NOTIF_BAND
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
   local hudX = savedX or _G.activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
@@ -269,7 +288,11 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "domReady" then
+      lastHeartbeat = os.time()
+      evalFailCount = 0
       updateWebviewHud()
+    elseif body.type == "heartbeat" then
+      lastHeartbeat = os.time()
     elseif body.type == "keyDown" and body.code then
       if controlsModule then controlsModule.handleKeyDown(body.code) end
     elseif body.type == "keyUp" and body.code then
@@ -323,6 +346,7 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "dragGate" and body.delta ~= nil then
       state.arpGatePercent = math.max(5.0, math.min(150.0, (state.arpGatePercent or 80.0) + body.delta))
+      arpeggiator.applyGatePercentChange()
       local spot = {
         title = "ARP NOTE LENGTH",
         value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -333,6 +357,7 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "gateUp" then
       state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+      arpeggiator.applyGatePercentChange()
       local spot = {
         title = "ARP NOTE LENGTH",
         value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -343,6 +368,7 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "gateDown" then
       state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
+      arpeggiator.applyGatePercentChange()
       local spot = {
         title = "ARP NOTE LENGTH",
         value = math.floor(state.arpGatePercent + 0.5) .. "%",
@@ -420,9 +446,11 @@ local function createMidiWebview()
       updateWebviewHud(spot)
     elseif body.type == "dragOctave" and body.row and body.direction then
       if body.row == "top" then
-        state.topRowOctaveOffset = math.max(-36, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
+        state.topRowOctaveOffset = math.max(-48, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
+        hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
       else
-        state.octaveShift = math.max(-36, math.min(36, state.octaveShift + (body.direction * 12)))
+        state.bottomRowOctaveOffset = math.max(-48, math.min(36, state.bottomRowOctaveOffset + (body.direction * 12)))
+        hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
       end
       updateWebviewHud()
     elseif body.type == "dragWindow" and body.dx and body.dy then
@@ -436,7 +464,83 @@ local function createMidiWebview()
         hs.settings.set("qwertyMidi_hudX", newX)
         hs.settings.set("qwertyMidi_hudY", newY)
       end
-    elseif body.type == "log" then
+    elseif body.type == "toggleEditMode" then
+      if _G.activeWatchers.midiWebview then
+        local wv = _G.activeWatchers.midiWebview
+        local frame = wv:frame()
+        if body.active then
+          _savedNormalHeight = frame.h
+          -- Shift Y up by the height difference so it expands upward instead of off-screen
+          wv:frame({ x = frame.x, y = frame.y - frame.h, w = frame.w, h = frame.h * 2 })
+        else
+          local restoreH = _savedNormalHeight or frame.h
+          _savedNormalHeight = nil
+          -- Shift Y back down by the same amount
+          wv:frame({ x = frame.x, y = frame.y + restoreH, w = frame.w, h = restoreH })
+        end
+      end
+    elseif body.type == "getLayoutConfig" then
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "saveCustomLayout" then
+      config.saveCustomLayout(body.layout or body.data)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "selectPreset" then
+      config.selectPreset(body.id)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "savePreset" then
+      config.savePreset(body.id, body.name, body.layout or body.data)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "renamePreset" then
+      config.renamePreset(body.id, body.newName)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "deletePreset" then
+      config.deletePreset(body.id)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "duplicatePreset" then
+      config.duplicatePreset(body.id, body.newName)
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "resetLayout" then
+      config.resetLayout()
+      updateWebviewHud(nil, nil, true)
+      if _G.activeWatchers.midiWebview then
+        local cfgJson = hs.json.encode(config.getLayoutConfig())
+        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+      end
+    elseif body.type == "updateKeyMapping" then
+      if body.code and body.binding then
+        config.updateKeyMapping(body.code, body.binding)
+        updateWebviewHud(nil, nil, true)
+      end
+    elseif body.type == "textInputFocus" then
+      state.textInputActive = (body.focused == true)
+    elseif body.type == "log" then    elseif body.type == "hoverScrollable" then
+      _G.activeWatchers.isHoveringScrollable = body.state
       os.execute("echo '" .. tostring(body.message) .. "' >> /tmp/wv_js.log")
     end
     config.saveSettings()
@@ -447,6 +551,7 @@ local function createMidiWebview()
   wv:windowTitle("MIDI Controller HUD")
   wv:windowStyle({ "borderless", "utility" })
   wv:transparent(true)
+
   wv:html(HTML_UI_CONTENT)
   wv:level(hs.canvas.windowLevels.floating)
   wv:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces)
@@ -454,7 +559,24 @@ local function createMidiWebview()
 
   wv:windowCallback(function(action, webview)
     if action == "closing" then
+      -- Ignore stale callbacks from old webview generations
+      if myGen ~= webviewGeneration then return end
       _G.activeWatchers.midiWebview = nil
+      -- If midiActive is still true, the webview crashed unexpectedly — auto-respawn
+      if state.midiActive then
+        print("QWERTY MIDI: webview closed unexpectedly — respawning in 0.5s")
+        hs.timer.doAfter(0.5, function()
+          if state.midiActive and myGen == webviewGeneration then
+            local ok, err = pcall(function()
+              local h = createMidiWebview()
+              h:show()
+            end)
+            if not ok then
+              print("QWERTY MIDI: webview respawn failed: " .. tostring(err))
+            end
+          end
+        end)
+      end
     end
   end)
 
@@ -470,6 +592,11 @@ local function createMidiWebview()
       updateWebviewHud()
     end
   end)
+  hs.timer.doAfter(1.0, function()
+    if _G.activeWatchers.midiWebview and myGen == webviewGeneration then
+      updateWebviewHud()
+    end
+  end)
 
   return wv
 end
@@ -477,5 +604,6 @@ end
 return {
   setControlsModule = setControlsModule,
   updateWebviewHud = updateWebviewHud,
-  createMidiWebview = createMidiWebview
+  createMidiWebview = createMidiWebview,
+  getLastHeartbeat = function() return lastHeartbeat end
 }

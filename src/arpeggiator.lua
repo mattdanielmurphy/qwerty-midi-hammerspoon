@@ -23,6 +23,13 @@ local function updateHud(spotlightInfo, activeArpPitch)
 end
 
 local function stopArpTimer()
+  if state.arpActiveGateTimers then
+    for pitch, timer in pairs(state.arpActiveGateTimers) do
+      if timer then timer:stop() end
+      midi.sendMidiNote("noteOff", pitch, 0)
+    end
+    state.arpActiveGateTimers = {}
+  end
   if state.arpGateTimer then
     state.arpGateTimer:stop()
     state.arpGateTimer = nil
@@ -48,7 +55,8 @@ end
 local function arpTick()
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
-    local isTop = lowerRowKeys[code] == nil and upperRowKeys[code] ~= nil
+    local noteKey = config.getNoteKey(code)
+    local isTop = noteKey and noteKey.isTop or false
     local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     if rowArpEnabled then
       table.insert(pitchList, pitch)
@@ -57,6 +65,13 @@ local function arpTick()
   table.sort(pitchList)
 
   if #pitchList == 0 then
+    if state.arpActiveGateTimers then
+      for pitch, timer in pairs(state.arpActiveGateTimers) do
+        if timer then timer:stop() end
+        midi.sendMidiNote("noteOff", pitch, 0)
+      end
+      state.arpActiveGateTimers = {}
+    end
     if state.arpGateTimer then
       state.arpGateTimer:stop()
       state.arpGateTimer = nil
@@ -150,13 +165,16 @@ local function arpTick()
     state.arpPos = (state.arpPos or 0) + 1
   end
 
-  if state.arpGateTimer then
-    state.arpGateTimer:stop()
-    state.arpGateTimer = nil
-  end
-
-  if state.arpCurrentPitch then
+  -- For gate <= 100%, kill any previous step pitch before starting the new pitch.
+  -- For gate > 100%, allow previous notes to remain sounding until their individual gate timer fires.
+  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+  if gateRatio <= 1.0 and state.arpCurrentPitch then
+    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
+      state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
+      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
+    end
     midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+    state.arpCurrentPitch = nil
   end
 
   local isTopRowArpNote = false
@@ -172,16 +190,24 @@ local function arpTick()
 
   updateHud(nil, nextPitch)
 
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
   local gateDuration = getArpIntervalSeconds() * gateRatio
-  state.arpGateTimer = hs.timer.doAfter(gateDuration, function()
-    if state.arpCurrentPitch == nextPitch then
-      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+  local pitchToRelease = nextPitch
+  local timer = hs.timer.doAfter(gateDuration, function()
+    midi.sendMidiNote("noteOff", pitchToRelease, 0)
+    if state.arpCurrentPitch == pitchToRelease then
       state.arpCurrentPitch = nil
       updateHud()
     end
-    state.arpGateTimer = nil
+    state.arpActiveGateTimers[pitchToRelease] = nil
   end)
+
+  state.arpActiveGateTimers = state.arpActiveGateTimers or {}
+  if state.arpActiveGateTimers[pitchToRelease] then
+    state.arpActiveGateTimers[pitchToRelease]:stop()
+    state.arpActiveGateTimers[pitchToRelease] = nil
+  end
+  state.arpActiveGateTimers[pitchToRelease] = timer
+  state.arpGateTimer = timer
 end
 
 local function startArpTimer(preserveState)
@@ -259,6 +285,23 @@ local function applyBpmChange()
     state.arpTimer:stop()
     state.arpTimer = nil
     startArpTimer(true)
+  end
+end
+
+local function applyGatePercentChange()
+  if state.arpTimer then
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    if state.arpActiveGateTimers then
+      if gateRatio <= 1.0 then
+        for pitch, timer in pairs(state.arpActiveGateTimers) do
+          if pitch ~= state.arpCurrentPitch then
+            if timer then timer:stop() end
+            midi.sendMidiNote("noteOff", pitch, 0)
+            state.arpActiveGateTimers[pitch] = nil
+          end
+        end
+      end
+    end
   end
 end
 
@@ -605,6 +648,7 @@ return {
   arpRemoveNote = arpRemoveNote,
   formatBpm = formatBpm,
   applyBpmChange = applyBpmChange,
+  applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,

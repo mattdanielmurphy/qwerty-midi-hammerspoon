@@ -4,6 +4,7 @@ local transposer = require("transposer")
 local arpeggiator = require("arpeggiator")
 local hud = require("hud")
 local controls = require("controls")
+local settings_ui = require("settings_ui")
 
 local function profileLog(msg)
   os.execute("echo '" .. os.clock() .. ": " .. msg .. "' >> /tmp/midi_startup.log")
@@ -24,6 +25,9 @@ function _G.toggleMidiMode(newState)
     state.midiActive = newState
   end
 
+  -- Persist window-open state so reload can auto-reopen if needed
+  hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
+
   if state.midiActive then
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
@@ -34,9 +38,14 @@ function _G.toggleMidiMode(newState)
     h:show()
     profileLog("After show")
   else
+    -- Stop all key repeats before tearing down
+    if controls.stopAllControlRepeats then
+      controls.stopAllControlRepeats()
+    end
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.pressedKeys = {}
+    state.sustainKeyDownTime = nil
     if _G.activeWatchers.midiWebview then
       _G.activeWatchers.midiWebview:hide()
     end
@@ -46,66 +55,114 @@ end
 _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(event)
   if not state.midiActive then return false end
 
-  local deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventDeltaAxis1) or 0
-  if deltaY == 0 then
-    deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
-  end
-
-  -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
-  local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-  local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
-
-  if deltaY ~= 0 then
-    if state.shiftHeld then
-      local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
-      _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
-      local sensitivity = 0.25 * inertiaScale
-      _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
-      local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
-
-      local deltaVol = newVol - math.floor(avgVol + 0.5)
-      if deltaVol ~= 0 then
-        state.topRowVolume = math.max(0, math.min(127, state.topRowVolume + deltaVol))
-        state.bottomRowVolume = math.max(0, math.min(127, state.bottomRowVolume + deltaVol))
-        local spot = {
-          title = "ROW VOLUMES",
-          value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-          subtext = "Dual Row Volume Level",
-          targetId = "header",
-          color = "#d4a359"
-        }
-        hud.updateWebviewHud(spot)
-      end
-    else
-      local currentMod = state.ccStates[1] or 0
-      _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-      local sensitivity = state.scrollSensitivity * inertiaScale
-      _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
-      local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
-
-      if newMod ~= state.ccStates[1] then
-        state.ccStates[1] = newMod
-        midi.sendMidiCC(1, newMod)
-        local spot = {
-          title = "MOD WHEEL (CC #1)",
-          value = tostring(newMod),
-          subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
-          targetId = "header",
-          color = "#d4a359"
-        }
-        hud.updateWebviewHud(spot)
-      end
+  local ok, result = pcall(function()
+    local deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventDeltaAxis1) or 0
+    if deltaY == 0 then
+      deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
     end
-    return true
-  end
 
-  return false
+    -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
+    local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
+    local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
+
+    -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
+    if _G.activeWatchers.isHoveringScrollable then
+      return false
+    end
+
+        if deltaY ~= 0 then
+      if state.shiftHeld then
+        local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
+        _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
+        local sensitivity = 0.25 * inertiaScale
+        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
+        local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
+
+        local deltaVol = newVol - math.floor(avgVol + 0.5)
+        if deltaVol ~= 0 then
+          state.topRowVolume = math.max(0, math.min(127, state.topRowVolume + deltaVol))
+          state.bottomRowVolume = math.max(0, math.min(127, state.bottomRowVolume + deltaVol))
+          local spot = {
+            title = "ROW VOLUMES",
+            value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+            subtext = "Dual Row Volume Level",
+            targetId = "header",
+            color = "#d4a359"
+          }
+          hud.updateWebviewHud(spot)
+        end
+      else
+        local currentMod = state.ccStates[1] or 0
+        _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
+        local sensitivity = state.scrollSensitivity * inertiaScale
+        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
+        local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
+
+        if newMod ~= state.ccStates[1] then
+          state.ccStates[1] = newMod
+          midi.sendMidiCC(1, newMod)
+          local spot = {
+            title = "MOD WHEEL (CC #1)",
+            value = tostring(newMod),
+            subtext = math.floor((newMod / 127) * 100) .. "% Intensity",
+            targetId = "header",
+            color = "#d4a359"
+          }
+          hud.updateWebviewHud(spot)
+        end
+      end
+      return true
+    end
+
+    return false
+  end)
+
+  if not ok then
+    print("QWERTY MIDI: scrollTap error: " .. tostring(result))
+    return false
+  end
+  return result
 end)
 
 _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp, hs.eventtap.event.types.flagsChanged }, function(event)
   if not state.midiActive then return false end
 
+  -- Exception: Let text input fields receive keystrokes natively
+  if state.textInputActive then
+    return false
+  end
+
+  -- Exception: Let Delete/Backspace work in the webview's edit mode
+  local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+  local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+  if code == 51 or code == 117 then -- Delete (51) or Forward Delete (117)
+    if event:getType() == hs.eventtap.event.types.keyDown then
+      return false
+    end
+    return true
+  end
+
+  -- Exception: Pass keys through natively ONLY if Web Inspector or DevTools window is focused
+  local focusedWin = hs.window.focusedWindow()
+  if focusedWin then
+    local title = focusedWin:title() or ""
+    if string.find(title, "Inspector") or string.find(title, "DevTools") then
+      return false
+    end
+  end
+
   local flags = event:getFlags()
+
+  -- Handle Cmd-, for QWERTY MIDI settings while MIDI controller is enabled
+  if flags.cmd and not flags.alt and not flags.ctrl then
+    local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+    if code == 43 then -- keycode 43 is ','
+      if event:getType() == hs.eventtap.event.types.keyDown then
+        settings_ui.toggleSettingsWindow()
+      end
+      return true
+    end
+  end
 
   if state.bpmInputMode then
     if event:getType() == hs.eventtap.event.types.flagsChanged then
@@ -120,7 +177,7 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
     return true
   end
 
-  if flags.cmd or flags.alt or flags.ctrl then
+  if flags.cmd or flags.alt or flags.ctrl or flags.capslock then
     return false
   end
 
@@ -138,26 +195,77 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
   local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
   if isDown then
-    return controls.handleKeyDown(code)
+    local ok, status = pcall(controls.handleKeyDown, code)
+    if not ok then
+      print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
+      return false
+    end
+    return status
   else
-    return controls.handleKeyUp(code)
+    local ok, status = pcall(controls.handleKeyUp, code)
+    if not ok then
+      print("QWERTY MIDI: handleKeyUp error: " .. tostring(status))
+      return false
+    end
+    return status
   end
 end)
 
-local settings_ui = require("settings_ui")
+-- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
+-- Also checks webview liveness via JS heartbeat — if no heartbeat for 6s, web process is dead
+_G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
+  if state.midiActive then
+    if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
+      print("QWERTY MIDI: Watchdog detected dead keyTap, restarting...")
+      _G.activeWatchers.midiKeyTap:start()
+    end
+    if _G.activeWatchers.midiScrollTap and not _G.activeWatchers.midiScrollTap:isEnabled() then
+      print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
+      _G.activeWatchers.midiScrollTap:start()
+    end
+    -- Webview liveness: if heartbeat stopped for 6s, web content process is dead
+    if _G.activeWatchers.midiWebview and hud.getLastHeartbeat() > 0 then
+      local elapsed = os.time() - hud.getLastHeartbeat()
+      if elapsed >= 6 then
+        print("QWERTY MIDI: Watchdog detected dead webview (no heartbeat for " .. elapsed .. "s) — recreating")
+        local ok, err = pcall(function()
+          local h = hud.createMidiWebview()
+          h:show()
+        end)
+        if not ok then
+          print("QWERTY MIDI: Watchdog webview recreate failed: " .. tostring(err))
+        end
+      end
+    end
+  end
+end)
 
 _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
   _G.toggleMidiMode()
 end)
 
-_G.activeWatchers.settingsHotkey = hs.hotkey.bind({ "cmd" }, ",", function()
-  settings_ui.toggleSettingsWindow()
-end)
+if _G.activeWatchers.settingsHotkey then
+  _G.activeWatchers.settingsHotkey:delete()
+  _G.activeWatchers.settingsHotkey = nil
+end
 
 profileLog("Before panicAllChannels")
 midi.panicAllChannels()
-profileLog("Before toggleMidiMode")
-_G.toggleMidiMode(true)
+
+-- Auto-reopen window if it was open when the last reload occurred
+local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
+if wasOpen then
+  profileLog("Auto-reopening controller window (was open before reload)")
+  hs.timer.doAfter(0.3, function()
+    local ok, err = pcall(function()
+      _G.toggleMidiMode(true)
+    end)
+    if not ok then
+      print("QWERTY MIDI: auto-reopen failed: " .. tostring(err))
+    end
+  end)
+end
+
 profileLog("Init complete!")
 
 return {

@@ -11,9 +11,11 @@
 - `install.sh`: Symlinks `qwerty_midi.lua` into `~/.hammerspoon/modules/qwerty_midi.lua`.
 
 ## Development Guidelines & Rules
-- **Modular Development**: Edit files inside `src/`. The Launch Agent (`com.matt.agent.qwerty-midi-bundler`) watches `src/` and automatically bundles into `qwerty_midi.lua` and triggers Hammerspoon reload with a macOS notification.
-- **Never Restart App**: Do not kill or restart the Hammerspoon process directly.
-- **Manual Reload Required**: The watcher is unreliable. After ANY change to `src/`, ALWAYS manually run `bash /Users/matt/projects/qwerty-midi-hammerspoon/bin/bundle_and_reload.sh` to re-bundle and reload Hammerspoon.
+- **Modular Development**: Edit files inside `src/` (Lua) or `src/web/index.html` (UI HTML/CSS/JS).
+- **Watcher Daemon**: The `watch_src.sh` daemon watches `src/` for Lua changes and auto-reloads. `src/web/` is explicitly excluded from `watch_src.sh` so web edits don't trigger full Hammerspoon reloads.
+- **Manual Reload Required for Lua**: After changing any Lua module in `src/`, run `bash /Users/matt/projects/qwerty-midi-hammerspoon/bin/bundle_and_reload.sh`.
+- **Web UI HMR (No Reload Needed)**: Run `bun x vite` from the project root to start the dev server (`http://localhost:5173`). When running, `src/hud.lua` connects directly to Vite. Edits to `src/web/index.html` (CSS/JS/HTML) hot-reload instantly in the webview without touching Hammerspoon or destroying MIDI state!
+- **UI Production Build**: Running `bin/bundle_and_reload.sh` automatically syncs `src/web/index.html` into `src/ui_html.lua` for offline production distribution.
 - **HUD Layout & Controls**: 4-row webview layout (`number`, `upper`, `home`, `lower`) using Fraunces Google Font and dark neutral theme. Trackpad scroll supports Mod Wheel (normal) and Volume (Shift held).
 
 

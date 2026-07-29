@@ -32,6 +32,7 @@ local function getMidiDevice()
 end
 
 local function sendMidiNote(cmd, noteNum, vel)
+  if noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
     dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = 0 })
@@ -55,6 +56,10 @@ local function panicAllChannels()
     dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
     dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
+    -- Send Note Off for all 128 pitches on each channel to ensure synths ignore/bypass CC #64 or CC #123 release held notes
+    for note = 0, 127 do
+      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
+    end
   end
 end
 
