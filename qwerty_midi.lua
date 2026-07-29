@@ -183,7 +183,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
     keyUpdates[tostring(code)] = {
       note = noteName,
-      shiftNote = noteName,
+      action = kData.action,
+      shiftNote = kData.shiftName or noteName,
+      shiftAction = kData.shiftAction,
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
@@ -218,6 +220,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
     shiftHeld = state.shiftHeld,
     rootIdx = state.currentRoot,
     modeName = modeName,
@@ -2935,8 +2938,14 @@ local HTML_UI_CONTENT = [[
     max-width: 70px;
   }
 
-  /* ===== DUAL-STACKED KEY RENDERING (PERFORMANCE & EDIT MODE) ===== */
-  .key-pad:not(.dummy-pad) {
+  /* Hide split halves by default in single-label performance mode */
+  .key-pad .key-half {
+    display: none;
+  }
+
+  /* ===== DUAL-STACKED KEY RENDERING (EDIT MODE & STACKED PERFORMANCE MODE) ===== */
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad),
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) {
     display: flex;
     flex-direction: column;
     justify-content: stretch;
@@ -2945,11 +2954,13 @@ local HTML_UI_CONTENT = [[
     padding: 0;
     position: relative;
   }
-  /* Hide original single center key-note label in key pads */
-  .key-pad:not(.dummy-pad) > .key-note {
+  /* Hide original single center key-note label in key pads when stacked */
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-note,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-note {
     display: none;
   }
-  .key-pad:not(.dummy-pad) > .key-code {
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-code,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-code {
     position: absolute;
     top: 2px;
     left: 3px;
@@ -2962,10 +2973,12 @@ local HTML_UI_CONTENT = [[
     border-radius: 3px;
     pointer-events: none;
   }
-  .key-pad:not(.dummy-pad) > .key-row-icon {
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-row-icon,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-row-icon {
     display: none !important;
   }
-  .key-pad .key-half {
+  #hud-container.edit-mode-active .key-pad .key-half,
+  #hud-container.stacked-labels-active .key-pad .key-half {
     display: flex;
     flex: 1;
     align-items: center;
@@ -3545,12 +3558,13 @@ local HTML_UI_CONTENT = [[
           pad.appendChild(dotSpan);
 
           // ===== VERTICAL SPLIT HALVES for Edit Mode =====
+          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
           const halfTop = document.createElement('div');
           halfTop.className = 'key-half key-half-top';
           halfTop.dataset.half = 'shift';
           const noteTop = document.createElement('span');
           noteTop.className = 'key-note';
-          noteTop.textContent = k.noteLabel || k.shiftLabel || '';
+          noteTop.textContent = k.shiftLabel || builtIn.shiftLabel || k.noteLabel || k.keyLabel || '';
           const labelTop = document.createElement('span');
           labelTop.className = 'half-label';
           labelTop.textContent = '⇧';
@@ -3562,7 +3576,7 @@ local HTML_UI_CONTENT = [[
           halfBottom.dataset.half = 'normal';
           const noteBottom = document.createElement('span');
           noteBottom.className = 'key-note';
-          noteBottom.textContent = k.noteLabel || '';
+          noteBottom.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
           const labelBottom = document.createElement('span');
           labelBottom.className = 'half-label';
           labelBottom.textContent = 'ACT';
@@ -3743,7 +3757,7 @@ local HTML_UI_CONTENT = [[
           // Update vertical split halves
           const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || builtIn.noteLabel || builtIn.keyLabel || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
           if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
         }
@@ -4316,6 +4330,9 @@ local HTML_UI_CONTENT = [[
       }
     }
 
+    if (mode === 'saveAs' || mode === 'duplicate') {
+      currentWorkingLayout = JSON.parse(JSON.stringify(currentWorkingLayout || {}));
+    }
     setHasUnsavedChanges(false);
     closePresetModal();
   }
@@ -5087,6 +5104,17 @@ local HTML_UI_CONTENT = [[
   function renderHud(data) {
     if (!data) return;
 
+    if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
+      const container = document.getElementById('hud-container');
+      if (container) {
+        if (data.stackedKeyLabelsInPerformanceMode) {
+          container.classList.add('stacked-labels-active');
+        } else {
+          container.classList.remove('stacked-labels-active');
+        }
+      }
+    }
+
     if (data.zoomLevel !== undefined) {
       const container = document.getElementById('hud-container');
       if (container) {
@@ -5257,9 +5285,9 @@ local HTML_UI_CONTENT = [[
           if (halfTop) {
             if (currentWorkingLayout[code]) {
               const binding = currentWorkingLayout[code];
-              halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+              halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             } else {
-              halfTop.textContent = builtIn.shiftLabel || '';
+              halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             }
           }
           if (halfBottom) {
@@ -5955,7 +5983,8 @@ local state = {
 
   pressedKeys = {},
   sustainedPitches = {},
-  spotlightInfo = nil
+  spotlightInfo = nil,
+  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false)
 }
 
 local function saveSettings()
@@ -5997,6 +6026,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
+  hs.settings.set("qwertyMidi_stackedKeyLabelsInPerformanceMode", state.stackedKeyLabelsInPerformanceMode == true)
 end
 
 local SCALES = {
@@ -6162,6 +6192,9 @@ local function applyCustomLayout(customData)
   for k in pairs(lowerRowKeys) do lowerRowKeys[k] = nil end
   for k, v in pairs(deepCopy(defaultLowerRowKeys)) do lowerRowKeys[k] = v end
 
+  _cachedActiveNoteKeysMap = nil
+  _cachedActiveControlKeysMap = nil
+
   if not customData or type(customData) ~= "table" then return end
 
   local actionIdx = getActionIndex()
@@ -6221,7 +6254,9 @@ local function applyCustomLayout(customData)
             name = nameVal,
             action = actionVal,
             shiftAction = shiftActionVal,
-            shiftName = shiftNameVal
+            shiftName = shiftNameVal,
+            baseNote = defaultDef and defaultDef.baseNote,
+            isTop = defaultDef and defaultDef.isTop
           }
         end
       elseif binding.baseNote ~= nil then
@@ -6309,9 +6344,9 @@ local function saveCustomLayout(newLayoutData)
   if presetObj and not (presetObj.isBuiltin or activeId == "default") then
     presetObj.data = newLayoutData or {}
     hs.settings.set("qwertyMidi_layoutPresets", map)
+    hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   end
 
-  hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   applyCustomLayout(newLayoutData)
   saveSettings()
 end
@@ -6396,6 +6431,7 @@ local function duplicatePreset(presetId, newName)
   }
 
   hs.settings.set("qwertyMidi_layoutPresets", map)
+  hs.settings.set("qwertyMidi_activePresetId", newId)
   selectPreset(newId)
   return newId
 end
@@ -6454,13 +6490,13 @@ end
 
 local function getControlKey(code)
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
-  if k and k.action ~= nil then return k end
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
 local function getNumberControlKey(code)
   local k = numberRowControls[code]
-  if k and k.action ~= nil then return k end
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
@@ -6482,9 +6518,9 @@ end
 local function getActiveControlKeysMap()
   if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
-  for code, k in pairs(homeRowControls) do if k.action ~= nil then map[code] = k end end
-  for code, k in pairs(upperRowKeys) do if k.action ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.action ~= nil then map[code] = k end end
+  for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   _cachedActiveControlKeysMap = map
   return map
 end
@@ -7405,100 +7441,14 @@ local function executeControlAction(act, code)
 end
 
 local function handleKeyDown(code)
-  if code == 50 then -- Backtick
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      arpeggiator.toggleArp()
-    end
-    return true
-  end
+  if state.pressedKeys[code] then return true end
 
-  local noteKey = config.getNoteKey(code)
-  if noteKey then
-    local isTop = noteKey.isTop
-    if not state.pressedKeys[code] then
-      local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-      local arpActive = state.arpEnabled and arpEnabledForRow
-      local sustainActive = state.sustainActive
-
-      local isArpNote = false
-      local isSustainedNote = false
-
-      if state.shiftHeld then
-        isArpNote = not arpActive
-        isSustainedNote = not sustainActive
-      else
-        isArpNote = arpActive
-        isSustainedNote = sustainActive
-      end
-
-      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-
-      state.pressedKeys[code] = {
-        pitch = transposedPitch,
-        isArpNote = isArpNote,
-        isSustainedNote = isSustainedNote,
-        channel = ch
-      }
-
-      if isArpNote then
-        arpeggiator.arpAddNote(code, transposedPitch)
-      else
-        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
-      end
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  local numCtrlKey = config.getNumberControlKey(code)
-  if numCtrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-      executeControlAction(act, code)
-      stopControlRepeat(code)
-      local entry = {}
-      controlRepeatTimers[code] = entry
-      entry.timer = hs.timer.doAfter(0.35, function()
-        if not controlRepeatTimers[code] then return end
-        if state.pressedKeys[code] then
-          entry.interval = hs.timer.doEvery(0.08, function()
-            if not controlRepeatTimers[code] then return end
-            local ok, err = pcall(function()
-              if state.pressedKeys[code] then
-                local currentAct = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-                -- Suppress undo push during key repeat (already captured on first press)
-                local savedFn = pushStateSnapshot
-                pushStateSnapshot = function() end
-                local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                pushStateSnapshot = savedFn
-                if not ok2 then
-                  print("QWERTY MIDI: numCtrl repeat error: " .. tostring(err2))
-                end
-              else
-                stopControlRepeat(code)
-              end
-            end)
-            if not ok then
-              print("QWERTY MIDI: numCtrl interval error: " .. tostring(err))
-              stopControlRepeat(code)
-            end
-          end)
-        end
-      end)
-    end
-    return true
-  end
-
-  local ctrlKey = config.getControlKey(code)
-  if ctrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-      executeControlAction(act, code)
-      if act ~= "sustain" then
+  if state.shiftHeld then
+    local k = config.getNumberControlKey(code) or config.getControlKey(code)
+    if k and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
+      state.pressedKeys[code] = { isControl = true, action = k.shiftAction }
+      executeControlAction(k.shiftAction, code)
+      if k.shiftAction ~= "sustain" then
         stopControlRepeat(code)
         local entry = {}
         controlRepeatTimers[code] = entry
@@ -7507,30 +7457,57 @@ local function handleKeyDown(code)
           if state.pressedKeys[code] then
             entry.interval = hs.timer.doEvery(0.08, function()
               if not controlRepeatTimers[code] then return end
-              local ok, err = pcall(function()
-                if state.pressedKeys[code] then
-                  local currentAct = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-                  -- Suppress undo push during key repeat (already captured on first press)
-                  local savedFn = pushStateSnapshot
-                  pushStateSnapshot = function() end
-                  local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                  pushStateSnapshot = savedFn
-                  if not ok2 then
-                    print("QWERTY MIDI: ctrl repeat error: " .. tostring(err2))
-                  end
-                else
-                  stopControlRepeat(code)
-                end
-              end)
-              if not ok then
-                print("QWERTY MIDI: ctrl interval error: " .. tostring(err))
-                stopControlRepeat(code)
-              end
+              local savedFn = pushStateSnapshot
+              pushStateSnapshot = function() end
+              pcall(executeControlAction, k.shiftAction, code)
+              pushStateSnapshot = savedFn
             end)
           end
         end)
       end
+      return true
     end
+  end
+
+  local k = config.getNumberControlKey(code) or config.getControlKey(code)
+  if k and k.action and k.action ~= "" and k.action ~= "none" then
+    state.pressedKeys[code] = { isControl = true, action = k.action }
+    executeControlAction(k.action, code)
+    if k.action ~= "sustain" then
+      stopControlRepeat(code)
+      local entry = {}
+      controlRepeatTimers[code] = entry
+      entry.timer = hs.timer.doAfter(0.35, function()
+        if not controlRepeatTimers[code] then return end
+        if state.pressedKeys[code] then
+          entry.interval = hs.timer.doEvery(0.08, function()
+            if not controlRepeatTimers[code] then return end
+            local savedFn = pushStateSnapshot
+            pushStateSnapshot = function() end
+            pcall(executeControlAction, k.action, code)
+            pushStateSnapshot = savedFn
+          end)
+        end
+      end)
+    end
+    return true
+  end
+
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    local isTop = noteKey.isTop
+    local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
+    local arpActive = state.arpEnabled and arpEnabledForRow
+    local sustainActive = state.sustainActive
+    local isArpNote = state.shiftHeld and (not arpActive) or arpActive
+    local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
+    local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    state.pressedKeys[code] = { pitch = transposedPitch, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
+    if isArpNote then arpeggiator.arpAddNote(code, transposedPitch)
+    else midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
+    end
+    hud.updateWebviewHud()
     return true
   end
 

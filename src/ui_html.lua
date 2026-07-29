@@ -1197,8 +1197,14 @@ local HTML_UI_CONTENT = [[
     max-width: 70px;
   }
 
-  /* ===== DUAL-STACKED KEY RENDERING (PERFORMANCE & EDIT MODE) ===== */
-  .key-pad:not(.dummy-pad) {
+  /* Hide split halves by default in single-label performance mode */
+  .key-pad .key-half {
+    display: none;
+  }
+
+  /* ===== DUAL-STACKED KEY RENDERING (EDIT MODE & STACKED PERFORMANCE MODE) ===== */
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad),
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) {
     display: flex;
     flex-direction: column;
     justify-content: stretch;
@@ -1207,11 +1213,13 @@ local HTML_UI_CONTENT = [[
     padding: 0;
     position: relative;
   }
-  /* Hide original single center key-note label in key pads */
-  .key-pad:not(.dummy-pad) > .key-note {
+  /* Hide original single center key-note label in key pads when stacked */
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-note,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-note {
     display: none;
   }
-  .key-pad:not(.dummy-pad) > .key-code {
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-code,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-code {
     position: absolute;
     top: 2px;
     left: 3px;
@@ -1224,10 +1232,12 @@ local HTML_UI_CONTENT = [[
     border-radius: 3px;
     pointer-events: none;
   }
-  .key-pad:not(.dummy-pad) > .key-row-icon {
+  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-row-icon,
+  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-row-icon {
     display: none !important;
   }
-  .key-pad .key-half {
+  #hud-container.edit-mode-active .key-pad .key-half,
+  #hud-container.stacked-labels-active .key-pad .key-half {
     display: flex;
     flex: 1;
     align-items: center;
@@ -1807,12 +1817,13 @@ local HTML_UI_CONTENT = [[
           pad.appendChild(dotSpan);
 
           // ===== VERTICAL SPLIT HALVES for Edit Mode =====
+          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
           const halfTop = document.createElement('div');
           halfTop.className = 'key-half key-half-top';
           halfTop.dataset.half = 'shift';
           const noteTop = document.createElement('span');
           noteTop.className = 'key-note';
-          noteTop.textContent = k.noteLabel || k.shiftLabel || '';
+          noteTop.textContent = k.shiftLabel || builtIn.shiftLabel || k.noteLabel || k.keyLabel || '';
           const labelTop = document.createElement('span');
           labelTop.className = 'half-label';
           labelTop.textContent = '⇧';
@@ -1824,7 +1835,7 @@ local HTML_UI_CONTENT = [[
           halfBottom.dataset.half = 'normal';
           const noteBottom = document.createElement('span');
           noteBottom.className = 'key-note';
-          noteBottom.textContent = k.noteLabel || '';
+          noteBottom.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
           const labelBottom = document.createElement('span');
           labelBottom.className = 'half-label';
           labelBottom.textContent = 'ACT';
@@ -2005,7 +2016,7 @@ local HTML_UI_CONTENT = [[
           // Update vertical split halves
           const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || builtIn.noteLabel || builtIn.keyLabel || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
           if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
         }
@@ -2578,6 +2589,9 @@ local HTML_UI_CONTENT = [[
       }
     }
 
+    if (mode === 'saveAs' || mode === 'duplicate') {
+      currentWorkingLayout = JSON.parse(JSON.stringify(currentWorkingLayout || {}));
+    }
     setHasUnsavedChanges(false);
     closePresetModal();
   }
@@ -3349,6 +3363,17 @@ local HTML_UI_CONTENT = [[
   function renderHud(data) {
     if (!data) return;
 
+    if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
+      const container = document.getElementById('hud-container');
+      if (container) {
+        if (data.stackedKeyLabelsInPerformanceMode) {
+          container.classList.add('stacked-labels-active');
+        } else {
+          container.classList.remove('stacked-labels-active');
+        }
+      }
+    }
+
     if (data.zoomLevel !== undefined) {
       const container = document.getElementById('hud-container');
       if (container) {
@@ -3519,9 +3544,9 @@ local HTML_UI_CONTENT = [[
           if (halfTop) {
             if (currentWorkingLayout[code]) {
               const binding = currentWorkingLayout[code];
-              halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+              halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             } else {
-              halfTop.textContent = builtIn.shiftLabel || '';
+              halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             }
           }
           if (halfBottom) {

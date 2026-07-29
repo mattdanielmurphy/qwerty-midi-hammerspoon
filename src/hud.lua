@@ -166,7 +166,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
     keyUpdates[tostring(code)] = {
       note = noteName,
-      shiftNote = noteName,
+      action = kData.action,
+      shiftNote = kData.shiftName or noteName,
+      shiftAction = kData.shiftAction,
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
@@ -201,6 +203,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
     shiftHeld = state.shiftHeld,
     rootIdx = state.currentRoot,
     modeName = modeName,

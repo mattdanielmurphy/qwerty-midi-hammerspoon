@@ -100,7 +100,8 @@ local state = {
 
   pressedKeys = {},
   sustainedPitches = {},
-  spotlightInfo = nil
+  spotlightInfo = nil,
+  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false)
 }
 
 local function saveSettings()
@@ -142,6 +143,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
+  hs.settings.set("qwertyMidi_stackedKeyLabelsInPerformanceMode", state.stackedKeyLabelsInPerformanceMode == true)
 end
 
 local SCALES = {
@@ -307,6 +309,9 @@ local function applyCustomLayout(customData)
   for k in pairs(lowerRowKeys) do lowerRowKeys[k] = nil end
   for k, v in pairs(deepCopy(defaultLowerRowKeys)) do lowerRowKeys[k] = v end
 
+  _cachedActiveNoteKeysMap = nil
+  _cachedActiveControlKeysMap = nil
+
   if not customData or type(customData) ~= "table" then return end
 
   local actionIdx = getActionIndex()
@@ -366,7 +371,9 @@ local function applyCustomLayout(customData)
             name = nameVal,
             action = actionVal,
             shiftAction = shiftActionVal,
-            shiftName = shiftNameVal
+            shiftName = shiftNameVal,
+            baseNote = defaultDef and defaultDef.baseNote,
+            isTop = defaultDef and defaultDef.isTop
           }
         end
       elseif binding.baseNote ~= nil then
@@ -454,9 +461,9 @@ local function saveCustomLayout(newLayoutData)
   if presetObj and not (presetObj.isBuiltin or activeId == "default") then
     presetObj.data = newLayoutData or {}
     hs.settings.set("qwertyMidi_layoutPresets", map)
+    hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   end
 
-  hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
   applyCustomLayout(newLayoutData)
   saveSettings()
 end
@@ -541,6 +548,7 @@ local function duplicatePreset(presetId, newName)
   }
 
   hs.settings.set("qwertyMidi_layoutPresets", map)
+  hs.settings.set("qwertyMidi_activePresetId", newId)
   selectPreset(newId)
   return newId
 end
@@ -599,13 +607,13 @@ end
 
 local function getControlKey(code)
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
-  if k and k.action ~= nil then return k end
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
 local function getNumberControlKey(code)
   local k = numberRowControls[code]
-  if k and k.action ~= nil then return k end
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
@@ -627,9 +635,9 @@ end
 local function getActiveControlKeysMap()
   if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
-  for code, k in pairs(homeRowControls) do if k.action ~= nil then map[code] = k end end
-  for code, k in pairs(upperRowKeys) do if k.action ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.action ~= nil then map[code] = k end end
+  for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   _cachedActiveControlKeysMap = map
   return map
 end

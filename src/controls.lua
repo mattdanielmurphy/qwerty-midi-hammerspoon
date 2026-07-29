@@ -877,100 +877,14 @@ local function executeControlAction(act, code)
 end
 
 local function handleKeyDown(code)
-  if code == 50 then -- Backtick
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      arpeggiator.toggleArp()
-    end
-    return true
-  end
+  if state.pressedKeys[code] then return true end
 
-  local noteKey = config.getNoteKey(code)
-  if noteKey then
-    local isTop = noteKey.isTop
-    if not state.pressedKeys[code] then
-      local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-      local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-      local arpActive = state.arpEnabled and arpEnabledForRow
-      local sustainActive = state.sustainActive
-
-      local isArpNote = false
-      local isSustainedNote = false
-
-      if state.shiftHeld then
-        isArpNote = not arpActive
-        isSustainedNote = not sustainActive
-      else
-        isArpNote = arpActive
-        isSustainedNote = sustainActive
-      end
-
-      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-
-      state.pressedKeys[code] = {
-        pitch = transposedPitch,
-        isArpNote = isArpNote,
-        isSustainedNote = isSustainedNote,
-        channel = ch
-      }
-
-      if isArpNote then
-        arpeggiator.arpAddNote(code, transposedPitch)
-      else
-        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
-      end
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  local numCtrlKey = config.getNumberControlKey(code)
-  if numCtrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-      executeControlAction(act, code)
-      stopControlRepeat(code)
-      local entry = {}
-      controlRepeatTimers[code] = entry
-      entry.timer = hs.timer.doAfter(0.35, function()
-        if not controlRepeatTimers[code] then return end
-        if state.pressedKeys[code] then
-          entry.interval = hs.timer.doEvery(0.08, function()
-            if not controlRepeatTimers[code] then return end
-            local ok, err = pcall(function()
-              if state.pressedKeys[code] then
-                local currentAct = state.shiftHeld and numCtrlKey.shiftAction or numCtrlKey.action
-                -- Suppress undo push during key repeat (already captured on first press)
-                local savedFn = pushStateSnapshot
-                pushStateSnapshot = function() end
-                local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                pushStateSnapshot = savedFn
-                if not ok2 then
-                  print("QWERTY MIDI: numCtrl repeat error: " .. tostring(err2))
-                end
-              else
-                stopControlRepeat(code)
-              end
-            end)
-            if not ok then
-              print("QWERTY MIDI: numCtrl interval error: " .. tostring(err))
-              stopControlRepeat(code)
-            end
-          end)
-        end
-      end)
-    end
-    return true
-  end
-
-  local ctrlKey = config.getControlKey(code)
-  if ctrlKey then
-    if not state.pressedKeys[code] then
-      state.pressedKeys[code] = { isControl = true }
-      local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-      executeControlAction(act, code)
-      if act ~= "sustain" then
+  if state.shiftHeld then
+    local k = config.getNumberControlKey(code) or config.getControlKey(code)
+    if k and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
+      state.pressedKeys[code] = { isControl = true, action = k.shiftAction }
+      executeControlAction(k.shiftAction, code)
+      if k.shiftAction ~= "sustain" then
         stopControlRepeat(code)
         local entry = {}
         controlRepeatTimers[code] = entry
@@ -979,30 +893,57 @@ local function handleKeyDown(code)
           if state.pressedKeys[code] then
             entry.interval = hs.timer.doEvery(0.08, function()
               if not controlRepeatTimers[code] then return end
-              local ok, err = pcall(function()
-                if state.pressedKeys[code] then
-                  local currentAct = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
-                  -- Suppress undo push during key repeat (already captured on first press)
-                  local savedFn = pushStateSnapshot
-                  pushStateSnapshot = function() end
-                  local ok2, err2 = pcall(executeControlAction, currentAct, code)
-                  pushStateSnapshot = savedFn
-                  if not ok2 then
-                    print("QWERTY MIDI: ctrl repeat error: " .. tostring(err2))
-                  end
-                else
-                  stopControlRepeat(code)
-                end
-              end)
-              if not ok then
-                print("QWERTY MIDI: ctrl interval error: " .. tostring(err))
-                stopControlRepeat(code)
-              end
+              local savedFn = pushStateSnapshot
+              pushStateSnapshot = function() end
+              pcall(executeControlAction, k.shiftAction, code)
+              pushStateSnapshot = savedFn
             end)
           end
         end)
       end
+      return true
     end
+  end
+
+  local k = config.getNumberControlKey(code) or config.getControlKey(code)
+  if k and k.action and k.action ~= "" and k.action ~= "none" then
+    state.pressedKeys[code] = { isControl = true, action = k.action }
+    executeControlAction(k.action, code)
+    if k.action ~= "sustain" then
+      stopControlRepeat(code)
+      local entry = {}
+      controlRepeatTimers[code] = entry
+      entry.timer = hs.timer.doAfter(0.35, function()
+        if not controlRepeatTimers[code] then return end
+        if state.pressedKeys[code] then
+          entry.interval = hs.timer.doEvery(0.08, function()
+            if not controlRepeatTimers[code] then return end
+            local savedFn = pushStateSnapshot
+            pushStateSnapshot = function() end
+            pcall(executeControlAction, k.action, code)
+            pushStateSnapshot = savedFn
+          end)
+        end
+      end)
+    end
+    return true
+  end
+
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    local isTop = noteKey.isTop
+    local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
+    local arpActive = state.arpEnabled and arpEnabledForRow
+    local sustainActive = state.sustainActive
+    local isArpNote = state.shiftHeld and (not arpActive) or arpActive
+    local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
+    local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    state.pressedKeys[code] = { pitch = transposedPitch, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
+    if isArpNote then arpeggiator.arpAddNote(code, transposedPitch)
+    else midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
+    end
+    hud.updateWebviewHud()
     return true
   end
 
