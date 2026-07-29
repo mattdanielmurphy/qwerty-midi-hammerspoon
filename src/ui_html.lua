@@ -1603,7 +1603,6 @@ local HTML_UI_CONTENT = [[
   let selectedKeys = new Set();
   let isMarqueeSelecting = false;
   let marqueeStartX = 0, marqueeStartY = 0;
-  let isShiftClickSelect = false;
 
   function clearSelection() {
     document.querySelectorAll('.key-pad.selected-key').forEach(el => el.classList.remove('selected-key'));
@@ -1730,7 +1729,7 @@ local HTML_UI_CONTENT = [[
     ['number', 'upper', 'home', 'lower'].forEach(rowName => {
       const rowEl = document.getElementById('row-' + rowName);
       if (!rowEl) return;
-      rowEl.innerHTML = '';
+      rowEl.textContent = '';
       if (l[rowName]) {
         l[rowName].forEach(k => {
           const pad = document.createElement('div');
@@ -1839,12 +1838,6 @@ local HTML_UI_CONTENT = [[
           pad.addEventListener('mouseup', releasePad);
           pad.addEventListener('mouseleave', releasePad);
 
-          // Shared helper to get half note element
-          const getHalfNote = (pad, halfClass) => {
-            const half = pad.querySelector('.' + halfClass + ' .key-note');
-            return half;
-          };
-
           // Drag & Drop handlers for layout editor
           pad.addEventListener('dragstart', (e) => {
             if (!isEditMode || k.isDummy) {
@@ -1902,7 +1895,6 @@ local HTML_UI_CONTENT = [[
               if (!data) return;
 
               if (data.type === 'action') {
-                const halfType = isShift ? 'shiftAction' : 'action';
                 assignActionToKey(k.code, data.action, isShift);
                 pad.classList.add('just-updated-glow');
                 setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
@@ -2139,7 +2131,7 @@ local HTML_UI_CONTENT = [[
   function renderDrawerCategories(catalog, searchQuery) {
     const container = document.getElementById('drawer-categories-container');
     if (!container) return;
-    container.innerHTML = '';
+    container.textContent = '';
 
     const query = (searchQuery || '').toLowerCase().trim();
     const cats = catalog || DEFAULT_ACTION_CATALOG;
@@ -2167,9 +2159,9 @@ local HTML_UI_CONTENT = [[
         const label = document.createElement('span');
         label.className = 'item-label';
         if (act.id === 'undoState') {
-          label.innerHTML = '&#x21A9; ' + act.name;
+          label.textContent = '\u21A9 ' + act.name;
         } else if (act.id === 'redoState') {
-          label.innerHTML = '&#x21AA; ' + act.name;
+          label.textContent = '\u21AA ' + act.name;
         } else {
           label.textContent = act.name;
         }
@@ -2443,7 +2435,7 @@ local HTML_UI_CONTENT = [[
     const select = document.getElementById('preset-select');
     if (!select) return;
 
-    select.innerHTML = '';
+    select.textContent = '';
     activePresetsList.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;

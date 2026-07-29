@@ -35,6 +35,17 @@ local hudUpdateScheduled = false
 local lastFrameScale = nil
 local _savedNormalHeight = nil
 
+local function safeEvaluateJS(js)
+  if not _G.activeWatchers.midiWebview then return end
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
+  end)
+  if not ok then
+    print("QWERTY MIDI: evaluateJavaScript error: " .. tostring(err))
+  end
+  return ok
+end
+
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview then return end
 
@@ -72,11 +83,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local octVal = tonumber(state.octaveShift) or 0
   local topOctVal = tonumber(state.topRowOctaveOffset) or 0
   local trnspVal = tonumber(state.transposeShift) or 0
-
-  local octStr = (octVal >= 0 and "+" or "") .. (octVal / 12) .. " Oct"
   local trnspStr = (trnspVal ~= 0) and ("Trnsp: " .. (trnspVal >= 0 and "+" or "") .. trnspVal .. "st") or ""
   local susStr = state.sustainActive and "SUS: ON" or ""
-  local latchStr = state.arpLatchActive and "LATCH" or (state.arpEnabled and "" or "")
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
 
   local statusParts = {}
@@ -482,55 +490,55 @@ local function createMidiWebview()
     elseif body.type == "getLayoutConfig" then
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "saveCustomLayout" then
       config.saveCustomLayout(body.layout or body.data)
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "selectPreset" then
       config.selectPreset(body.id)
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "savePreset" then
       config.savePreset(body.id, body.name, body.layout or body.data)
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "renamePreset" then
       config.renamePreset(body.id, body.newName)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "deletePreset" then
       config.deletePreset(body.id)
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "duplicatePreset" then
       config.duplicatePreset(body.id, body.newName)
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "resetLayout" then
       config.resetLayout()
       updateWebviewHud(nil, nil, true)
       if _G.activeWatchers.midiWebview then
         local cfgJson = hs.json.encode(config.getLayoutConfig())
-        _G.activeWatchers.midiWebview:evaluateJavaScript("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
+        safeEvaluateJS("if (window.onLayoutConfigLoaded) window.onLayoutConfigLoaded(" .. cfgJson .. ");")
       end
     elseif body.type == "updateKeyMapping" then
       if body.code and body.binding then
@@ -539,9 +547,21 @@ local function createMidiWebview()
       end
     elseif body.type == "textInputFocus" then
       state.textInputActive = (body.focused == true)
-    elseif body.type == "log" then    elseif body.type == "hoverScrollable" then
+    elseif body.type == "log" then
+      if body.message then
+        local f = io.open("/tmp/wv_js.log", "a")
+        if f then f:write(tostring(body.message) .. "\n"); f:close() end
+      end
+    elseif body.type == "hoverScrollable" then
       _G.activeWatchers.isHoveringScrollable = body.state
-      os.execute("echo '" .. tostring(body.message) .. "' >> /tmp/wv_js.log")
+      -- Safer file logging replacing os.execute
+      if body.message then
+        local f = io.open("/tmp/wv_js.log", "a")
+        if f then
+          f:write(tostring(body.message) .. "\n")
+          f:close()
+        end
+      end
     end
     config.saveSettings()
   end)
