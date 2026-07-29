@@ -31,18 +31,18 @@ local function getMidiDevice()
   return _G.activeWatchers.midiDevice
 end
 
-local function sendMidiNote(cmd, noteNum, vel)
+local function sendMidiNote(cmd, noteNum, vel, channel)
   if noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = 0 })
+    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = channel or 0 })
   end
 end
 
-local function sendMidiCC(controllerNum, val)
+local function sendMidiCC(controllerNum, val, channel)
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = 0 })
+    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = channel or 0 })
   end
 end
 

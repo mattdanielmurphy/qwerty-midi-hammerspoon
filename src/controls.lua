@@ -905,16 +905,19 @@ local function handleKeyDown(code)
         isSustainedNote = sustainActive
       end
 
+      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+
       state.pressedKeys[code] = {
         pitch = transposedPitch,
         isArpNote = isArpNote,
-        isSustainedNote = isSustainedNote
+        isSustainedNote = isSustainedNote,
+        channel = ch
       }
 
       if isArpNote then
         arpeggiator.arpAddNote(code, transposedPitch)
       else
-        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop))
+        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
       end
       hud.updateWebviewHud()
     end
@@ -1021,14 +1024,15 @@ local function handleKeyUp(code)
       local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
       local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
 
+      local keyChannel = type(keyInfo) == "table" and keyInfo.channel or 0
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
         if isSustainedNote and state.sustainActive then
           state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[playedPitch] = true
+          state.sustainedPitches[playedPitch] = { channel = keyChannel }
         else
-          midi.sendMidiNote("noteOff", playedPitch, 0)
+          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
         end
       end
       state.pressedKeys[code] = nil

@@ -990,9 +990,11 @@ end
 
 local function stopArpTimer()
   if state.arpActiveGateTimers then
-    for pitch, timer in pairs(state.arpActiveGateTimers) do
+    for pitchInfo, timer in pairs(state.arpActiveGateTimers) do
       if timer then timer:stop() end
-      midi.sendMidiNote("noteOff", pitch, 0)
+      local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
+      local ch = type(pitchInfo) == "table" and pitchInfo.channel or 0
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
     end
     state.arpActiveGateTimers = {}
   end
@@ -1005,7 +1007,9 @@ local function stopArpTimer()
     state.arpTimer = nil
   end
   if state.arpCurrentPitch then
-    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+    local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+    local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+    midi.sendMidiNote("noteOff", p, 0, c)
     state.arpCurrentPitch = nil
   end
   state.arpStepIndex = 1
@@ -1132,18 +1136,7 @@ local function arpTick()
     state.arpPos = (state.arpPos or 0) + 1
   end
 
-  -- For gate <= 100%, kill any previous step pitch before starting the new pitch.
-  -- For gate > 100%, allow previous notes to remain sounding until their individual gate timer fires.
   local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  if gateRatio <= 1.0 and state.arpCurrentPitch then
-    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
-      state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
-      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
-    end
-    midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
-    state.arpCurrentPitch = nil
-  end
-
   local isTopRowArpNote = false
   for code, p in pairs(state.arpHeldNotes) do
     if p == nextPitch then
@@ -1155,25 +1148,43 @@ local function arpTick()
     end
   end
   local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
-  midi.sendMidiNote("noteOn", nextPitch, vel)
-  state.arpCurrentPitch = nextPitch
+  local ch = isTopRowArpNote and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+  
+  if gateRatio <= 1.0 and state.arpCurrentPitch then
+    local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+    local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
+      if type(state.arpActiveGateTimers[state.arpCurrentPitch]) == "table" and state.arpActiveGateTimers[state.arpCurrentPitch].stop then
+        state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
+      end
+      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
+    end
+    midi.sendMidiNote("noteOff", oldP, 0, oldCh)
+    state.arpCurrentPitch = nil
+  end
+
+  midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+  state.arpCurrentPitch = { pitch = nextPitch, channel = ch }
 
   updateHud(nil, nextPitch)
 
   local gateDuration = getArpIntervalSeconds() * gateRatio
   local pitchToRelease = nextPitch
+  local releaseCh = ch
   local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0)
-    if state.arpCurrentPitch == pitchToRelease then
+    midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+    if state.arpCurrentPitch and (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitchToRelease then
       state.arpCurrentPitch = nil
       updateHud()
     end
-    state.arpActiveGateTimers[pitchToRelease] = nil
+    if state.arpActiveGateTimers then state.arpActiveGateTimers[pitchToRelease] = nil end
   end)
 
   state.arpActiveGateTimers = state.arpActiveGateTimers or {}
   if state.arpActiveGateTimers[pitchToRelease] then
-    state.arpActiveGateTimers[pitchToRelease]:stop()
+    if type(state.arpActiveGateTimers[pitchToRelease]) == "table" and state.arpActiveGateTimers[pitchToRelease].stop then
+      state.arpActiveGateTimers[pitchToRelease]:stop()
+    end
     state.arpActiveGateTimers[pitchToRelease] = nil
   end
   state.arpActiveGateTimers[pitchToRelease] = timer
@@ -5861,6 +5872,8 @@ local state = {
 
   topRowVolume = getSetting("topRowVolume", 100),
   bottomRowVolume = getSetting("bottomRowVolume", 100),
+  topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
+  bottomRowChannel = getSetting("bottomRowChannel", 0),    -- MIDI Channel 0 (Ch 1 in 1-based indexing)
   splitArpTopBoost = 20,
 
   ccStates = {
@@ -7324,16 +7337,19 @@ local function handleKeyDown(code)
         isSustainedNote = sustainActive
       end
 
+      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+
       state.pressedKeys[code] = {
         pitch = transposedPitch,
         isArpNote = isArpNote,
-        isSustainedNote = isSustainedNote
+        isSustainedNote = isSustainedNote,
+        channel = ch
       }
 
       if isArpNote then
         arpeggiator.arpAddNote(code, transposedPitch)
       else
-        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop))
+        midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
       end
       hud.updateWebviewHud()
     end
@@ -7440,14 +7456,15 @@ local function handleKeyUp(code)
       local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
       local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
 
+      local keyChannel = type(keyInfo) == "table" and keyInfo.channel or 0
       if isArpNote then
         arpeggiator.arpRemoveNote(code)
       else
         if isSustainedNote and state.sustainActive then
           state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[playedPitch] = true
+          state.sustainedPitches[playedPitch] = { channel = keyChannel }
         else
-          midi.sendMidiNote("noteOff", playedPitch, 0)
+          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
         end
       end
       state.pressedKeys[code] = nil
@@ -7568,18 +7585,18 @@ local function getMidiDevice()
   return _G.activeWatchers.midiDevice
 end
 
-local function sendMidiNote(cmd, noteNum, vel)
+local function sendMidiNote(cmd, noteNum, vel, channel)
   if noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = 0 })
+    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = channel or 0 })
   end
 end
 
-local function sendMidiCC(controllerNum, val)
+local function sendMidiCC(controllerNum, val, channel)
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = 0 })
+    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = channel or 0 })
   end
 end
 

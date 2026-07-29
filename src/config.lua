@@ -87,6 +87,8 @@ local state = {
 
   topRowVolume = getSetting("topRowVolume", 100),
   bottomRowVolume = getSetting("bottomRowVolume", 100),
+  topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
+  bottomRowChannel = getSetting("bottomRowChannel", 0),    -- MIDI Channel 0 (Ch 1 in 1-based indexing)
   splitArpTopBoost = 20,
 
   ccStates = {
