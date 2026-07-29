@@ -437,7 +437,8 @@ local function createMidiWebview()
       state.arpTopEnabled = not state.arpTopEnabled
       if not state.arpTopEnabled then
         for code in pairs(state.arpHeldNotes) do
-          if upperRowKeys[code] then
+          local noteKey = config.getNoteKey(code)
+          if noteKey and noteKey.isTop then
             state.arpHeldNotes[code] = nil
             state.arpKeysCurrentlyHeld[code] = nil
           end
@@ -455,7 +456,8 @@ local function createMidiWebview()
       state.arpBottomEnabled = not state.arpBottomEnabled
       if not state.arpBottomEnabled then
         for code in pairs(state.arpHeldNotes) do
-          if lowerRowKeys[code] then
+          local noteKey = config.getNoteKey(code)
+          if noteKey and not noteKey.isTop then
             state.arpHeldNotes[code] = nil
             state.arpKeysCurrentlyHeld[code] = nil
           end
@@ -1274,10 +1276,9 @@ end
 local function updateLatchedArpNotes()
   if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
   for code, _ in pairs(state.arpHeldNotes) do
-    if lowerRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(lowerRowKeys[code].baseNote, false)
-    elseif upperRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(upperRowKeys[code].baseNote, true)
+    local noteKey = config.getNoteKey(code)
+    if noteKey then
+      state.arpHeldNotes[code] = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
     end
   end
 end

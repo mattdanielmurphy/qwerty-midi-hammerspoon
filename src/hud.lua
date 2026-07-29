@@ -420,7 +420,8 @@ local function createMidiWebview()
       state.arpTopEnabled = not state.arpTopEnabled
       if not state.arpTopEnabled then
         for code in pairs(state.arpHeldNotes) do
-          if upperRowKeys[code] then
+          local noteKey = config.getNoteKey(code)
+          if noteKey and noteKey.isTop then
             state.arpHeldNotes[code] = nil
             state.arpKeysCurrentlyHeld[code] = nil
           end
@@ -438,7 +439,8 @@ local function createMidiWebview()
       state.arpBottomEnabled = not state.arpBottomEnabled
       if not state.arpBottomEnabled then
         for code in pairs(state.arpHeldNotes) do
-          if lowerRowKeys[code] then
+          local noteKey = config.getNoteKey(code)
+          if noteKey and not noteKey.isTop then
             state.arpHeldNotes[code] = nil
             state.arpKeysCurrentlyHeld[code] = nil
           end

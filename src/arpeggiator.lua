@@ -317,10 +317,9 @@ end
 local function updateLatchedArpNotes()
   if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
   for code, _ in pairs(state.arpHeldNotes) do
-    if lowerRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(lowerRowKeys[code].baseNote, false)
-    elseif upperRowKeys[code] then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(upperRowKeys[code].baseNote, true)
+    local noteKey = config.getNoteKey(code)
+    if noteKey then
+      state.arpHeldNotes[code] = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
     end
   end
 end
