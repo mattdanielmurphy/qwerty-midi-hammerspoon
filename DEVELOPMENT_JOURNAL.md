@@ -1,6 +1,8 @@
 # Development Journal
 
 ## 2026-07-29
+- **Clean Manual UI Refresh (Cmd+Alt+R):** Removed debug log clipboard dumping and notification popups from the `midiRefreshHotkey` (`Cmd+Alt+R`) in [src/init.lua](file:///Users/matt/projects/qwerty-midi-hammerspoon/src/init.lua), ensuring manual refresh cleanly reloads the webview HUD without replacing user clipboard contents. Link: [2026-07-29_11-27_clean-manual-ui-refresh.md](file:///Users/matt/.gemini/antigravity/brain/7e80cbef-fc1f-4960-832d-13f1b85458c9/2026-07-29_11-27_clean-manual-ui-refresh.md)
+
 - **Key Layout Editor Redesign & Stability:** Resolved IPC sync loops, preset CRUD persistence, 460px edit mode height, and shift action dispatching in [src/controls.lua](file:///Users/matt/projects/qwerty-midi-hammerspoon/src/controls.lua) / [src/hud.lua](file:///Users/matt/projects/qwerty-midi-hammerspoon/src/hud.lua). Implemented dual-stacked key cap rendering in Edit Mode with default shift labels, restored single-label performance view as default with optional stacked setting toggle, and enforced subagent workflow rules. Link: [2026-07-29_11-00_key-layout-editor-redesign.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-29_11-00_key-layout-editor-redesign.md)
 
 ## 2026-07-25
