@@ -48,6 +48,7 @@ function _G.toggleMidiMode(newState)
     end
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
+    state.bpmInputMode = false
     state.pressedKeys = {}
     state.sustainKeyDownTime = nil
     if _G.activeWatchers.midiWebview then
