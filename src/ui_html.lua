@@ -3564,6 +3564,7 @@ local HTML_UI_CONTENT = [[
             } else {
               halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             }
+          }
           el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
           if (k.latched) el.classList.add('latched-key');
           if (k.pressed) el.classList.add('pressed');

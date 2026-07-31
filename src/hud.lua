@@ -633,7 +633,11 @@ local function createMidiWebview()
 end
 
 local function reloadMidiWebview()
+  lastFrameScale = nil
   if _G.activeWatchers.midiWebview then
+    pcall(function()
+      _G.activeWatchers.midiWebview:reload()
+    end)
     pcall(function()
       _G.activeWatchers.midiWebview:windowCallback(nil)
       _G.activeWatchers.midiWebview:delete()

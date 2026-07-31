@@ -650,7 +650,11 @@ local function createMidiWebview()
 end
 
 local function reloadMidiWebview()
+  lastFrameScale = nil
   if _G.activeWatchers.midiWebview then
+    pcall(function()
+      _G.activeWatchers.midiWebview:reload()
+    end)
     pcall(function()
       _G.activeWatchers.midiWebview:windowCallback(nil)
       _G.activeWatchers.midiWebview:delete()
@@ -5352,6 +5356,7 @@ local HTML_UI_CONTENT = [[
             } else {
               halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
             }
+          }
           el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
           if (k.latched) el.classList.add('latched-key');
           if (k.pressed) el.classList.add('pressed');
