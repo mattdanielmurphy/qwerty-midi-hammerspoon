@@ -948,17 +948,56 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  -- 1. Rescue UI state & re-bind eventtaps
   if state.midiActive then
-    local ok, err = pcall(function()
+    pcall(function()
+      if _G.activeWatchers.midiKeyTap then
+        _G.activeWatchers.midiKeyTap:stop()
+        _G.activeWatchers.midiKeyTap:start()
+      end
+      if _G.activeWatchers.midiScrollTap then
+        _G.activeWatchers.midiScrollTap:stop()
+        _G.activeWatchers.midiScrollTap:start()
+      end
+      midi.panicAllChannels()
+      state.pressedKeys = {}
+      state.arpHeldNotes = {}
       local h = hud.reloadMidiWebview()
       if h then h:show() end
     end)
-    if ok then
-      hs.notify.new({title="QWERTY MIDI", informativeText="UI refreshed"}):send()
-    else
-      print("QWERTY MIDI: webview manual refresh failed: " .. tostring(err))
-    end
   end
+
+  -- 2. Gather & copy diagnostic logs to clipboard
+  local logs = {}
+  table.insert(logs, "=== QWERTY MIDI DIAGNOSTIC LOG ===")
+  table.insert(logs, "Timestamp: " .. os.date("%Y-%m-%d %H:%M:%S"))
+  table.insert(logs, "MIDI Active: " .. tostring(state.midiActive))
+  table.insert(logs, "Zoom Level: " .. tostring(state.zoomLevel))
+  table.insert(logs, "Root Note: " .. tostring(state.rootNote))
+  table.insert(logs, "Scale Idx: " .. tostring(state.scaleIdx))
+
+  local f = io.open("/tmp/midi_startup.log", "r")
+  if f then
+    table.insert(logs, "\n--- Startup Log ---")
+    table.insert(logs, f:read("*a"))
+    f:close()
+  end
+  local fjs = io.open("/tmp/wv_js.log", "r")
+  if fjs then
+    table.insert(logs, "\n--- Webview JS Log ---")
+    table.insert(logs, fjs:read("*a"))
+    fjs:close()
+  end
+
+  local fullLogStr = table.concat(logs, "\n")
+  hs.pasteboard.setContents(fullLogStr)
+
+  -- 3. Display user notification & HUD overlay
+  hs.alert.show("UI Rescued — Diagnostic Logs Copied to Clipboard", 2.0)
+  hs.notify.new({
+    title = "QWERTY MIDI",
+    informativeText = "UI rescued and diagnostic logs copied to clipboard."
+  }):send()
 end)
 
 if _G.activeWatchers.settingsHotkey then
