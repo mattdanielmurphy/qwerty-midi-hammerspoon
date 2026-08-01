@@ -895,19 +895,17 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       if isDown then
-        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return false end)
+        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
         if not ok then
           print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
-          return false
         end
-        return status
+        return true
       else
-        local ok, status = xpcall(function() return controls.handleKeyUp(code) end, function(err) print('QWERTY MIDI: handleKeyUp error: '..tostring(err)); print(debug.traceback()); return false end)
+        local ok, status = xpcall(function() return controls.handleKeyUp(code) end, function(err) print('QWERTY MIDI: handleKeyUp error: '..tostring(err)); print(debug.traceback()); return true end)
         if not ok then
           print("QWERTY MIDI: handleKeyUp error: " .. tostring(status))
-          return false
         end
-        return status
+        return true
       end
 
   end, errorHandler)
@@ -7502,7 +7500,9 @@ local function executeControlAction(act, code)
 end
 
 local function handleKeyDown(code)
-  if state.pressedKeys[code] then return true end
+  if state.pressedKeys[code] then
+    return true
+  end
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
@@ -7673,7 +7673,7 @@ local function handleKeyUp(code)
     state.pressedKeys[code] = nil
   end
 
-  return false
+  return true
 end
 
 return {

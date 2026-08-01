@@ -877,7 +877,9 @@ local function executeControlAction(act, code)
 end
 
 local function handleKeyDown(code)
-  if state.pressedKeys[code] then return true end
+  if state.pressedKeys[code] then
+    return true
+  end
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
@@ -947,7 +949,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  return false
+  return true
 end
 
 local function handleKeyUp(code)
@@ -1048,7 +1050,7 @@ local function handleKeyUp(code)
     state.pressedKeys[code] = nil
   end
 
-  return false
+  return true
 end
 
 return {
