@@ -148,13 +148,12 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   for code, cData in pairs(numberRowControls) do
-    local isMainArp = (cData.action == "arpToggle")
-    local isTopArp = (cData.action == "arpTopToggle")
-    local isBotArp = (cData.action == "arpBottomToggle")
-    local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
+    local isMainArp = (activeAct == "arpToggle")
+    local isTopArp = (activeAct == "arpTopToggle")
+    local isBotArp = (activeAct == "arpBottomToggle")
     local isActiveToggle = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
+    local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     keyUpdates[tostring(code)] = {
       note = cData.name,
       action = cData.action,
@@ -227,12 +226,12 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local isSustain = (cData.action == "sustain" or cData.shiftAction == "sustain")
-    local isChordToggle = (cData.action == "chordToggle" or cData.shiftAction == "chordToggle")
-    local isMainArp = (cData.action == "arpToggle" or cData.shiftAction == "arpToggle")
-    local isTopArp = (cData.action == "arpTopToggle" or cData.shiftAction == "arpTopToggle")
-    local isBotArp = (cData.action == "arpBottomToggle" or cData.shiftAction == "arpBottomToggle")
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
+    local isSustain = (activeAct == "sustain")
+    local isChordToggle = (activeAct == "chordToggle")
+    local isMainArp = (activeAct == "arpToggle")
+    local isTopArp = (activeAct == "arpTopToggle")
+    local isBotArp = (activeAct == "arpBottomToggle")
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     
     local isActiveToggle = false
