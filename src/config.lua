@@ -28,6 +28,17 @@ local state = {
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
+  -- Chord Trigger State
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = {
+    { name = "Triad", offsets = { 0, 2, 4 } },
+    { name = "7th", offsets = { 0, 2, 4, 6 } },
+    { name = "9th", offsets = { 0, 2, 4, 6, 8 } },
+    { name = "Power (1-5)", offsets = { 0, 4 } },
+    { name = "Octaves", offsets = { 0, 7 } }
+  },
+
   -- Arpeggiator State
   arpEnabled = getSetting("arpEnabled", false),
   arpDirectionIdx = getSetting("arpDirectionIdx", 1),    -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
@@ -98,6 +109,9 @@ local state = {
     [72] = 64
   },
 
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = { { name = "Triad", offsets = { 0, 2, 4 } }, { name = "7th", offsets = { 0, 2, 4, 6 } }, { name = "9th", offsets = { 0, 2, 4, 6, 8 } }, { name = "Power (1-5)", offsets = { 0, 4 } }, { name = "Octaves", offsets = { 0, 7 } } },
   pressedKeys = {},
   sustainedPitches = {},
   spotlightInfo = nil,
@@ -129,6 +143,8 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
   hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
   hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled == true)
+  hs.settings.set("qwertyMidi_chordModeActive", state.chordModeActive == true)
+  hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
   hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
@@ -192,7 +208,7 @@ local defaultLowerRowKeys = {
   [6]  = { key = "Z", baseNote = 60, isTop = false }, [7]  = { key = "X", baseNote = 62, isTop = false }, [8]  = { key = "C", baseNote = 64, isTop = false },
   [9]  = { key = "V", baseNote = 65, isTop = false }, [11] = { key = "B", baseNote = 67, isTop = false }, [45] = { key = "N", baseNote = 69, isTop = false },
   [46] = { key = "M", baseNote = 71, isTop = false }, [43] = { key = ",", baseNote = 72, isTop = false }, [47] = { key = ".", baseNote = 74, isTop = false },
-  [44] = { key = "/", baseNote = 76, isTop = false }, [39] = { key = "'", baseNote = 77, isTop = false }
+  [44] = { key = "/", baseNote = 76, isTop = false }
 }
 
 local defaultHomeRowControls = {
@@ -239,6 +255,8 @@ local ACTION_CATALOG = {
       { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
       { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
       { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
+      { id = "chordUp", name = "Chord +", typeClass = "ctrl-mode", description = "Cycle chord pattern forward" },
+      { id = "chordDown", name = "Chord -", typeClass = "ctrl-mode", description = "Cycle chord pattern backward" },
       { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
     }
   },

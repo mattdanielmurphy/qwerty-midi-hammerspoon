@@ -615,6 +615,36 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
     arpeggiator.toggleArpPower()
+  elseif act == "chordToggle" then
+    state.chordModeActive = not state.chordModeActive
+    local spot = {
+      title = "CHORD MODE",
+      value = state.chordModeActive and "ON" or "OFF",
+      subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordUp" then
+    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local spot = {
+      title = "CHORD TYPE",
+      value = state.CHORDS[state.chordIdx].name,
+      subtext = "Cycle chord type",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local spot = {
+      title = "CHORD TYPE",
+      value = state.CHORDS[state.chordIdx].name,
+      subtext = "Cycle chord type",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
   elseif act == "modWheelDown" then
     local currentVal = state.ccStates[1] or 0
     local newVal = math.max(0, currentVal - 4)
@@ -740,6 +770,28 @@ local function executeControlAction(act, code)
       value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-bottom-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordUp" then
+    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
@@ -931,19 +983,39 @@ local function handleKeyDown(code)
     return true
   end
 
+  if code == 39 then
+    state.quoteHeld = true
+    local spot = { 
+      title = "CHORD MODIFIER", 
+      value = state.CHORDS[state.chordIdx].name, 
+      subtext = "Hold ' + play notes for chords", 
+      targetId = "header", 
+      color = "#d4a359" 
+    }
+    hud.updateWebviewHud(spot)
+    return true
+  end
+
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
     local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     local arpActive = state.arpEnabled and arpEnabledForRow
     local sustainActive = state.sustainActive
     local isArpNote = state.shiftHeld and (not arpActive) or arpActive
     local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-    state.pressedKeys[code] = { pitch = transposedPitch, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
-    if isArpNote then arpeggiator.arpAddNote(code, transposedPitch)
-    else midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
+    
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
+    
+    if isArpNote then 
+      for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
+    else 
+      for _, p in ipairs(chordPitches) do
+        midi.sendMidiNote("noteOn", p, transposer.getEffectiveRowVelocity(isTop), ch)
+      end
     end
     hud.updateWebviewHud()
     return true
@@ -953,6 +1025,11 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
+  if code == 39 then
+    state.quoteHeld = false
+    hud.updateWebviewHud()
+    return true
+  end
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
@@ -963,19 +1040,21 @@ local function handleKeyUp(code)
   if noteKey then
     local keyInfo = state.pressedKeys[code]
     if keyInfo then
-      local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo
+      local pitches = type(keyInfo) == "table" and keyInfo.pitches or { keyInfo.pitch }
       local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
       local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
 
       local keyChannel = type(keyInfo) == "table" and keyInfo.channel or 0
       if isArpNote then
-        arpeggiator.arpRemoveNote(code)
+        for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
       else
-        if isSustainedNote and state.sustainActive then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[playedPitch] = { channel = keyChannel }
-        else
-          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+        for _, playedPitch in ipairs(pitches) do
+          if isSustainedNote and state.sustainActive then
+            state.sustainedPitches = state.sustainedPitches or {}
+            state.sustainedPitches[playedPitch] = { channel = keyChannel }
+          else
+            midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+          end
         end
       end
       state.pressedKeys[code] = nil

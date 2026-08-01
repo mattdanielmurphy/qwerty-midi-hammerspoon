@@ -1782,7 +1782,38 @@ return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
   noteNumToName = noteNumToName,
-  getIntervalInfo = getIntervalInfo
+  getIntervalInfo = getIntervalInfo,
+  getTransposedChordPitches = function(basePitch, isTopRow)
+    local rootPitch = getTransposedPitch(basePitch, isTopRow)
+    if not (state.quoteHeld or state.chordModeActive) then
+      return { rootPitch }
+    end
+    local chordDef = state.CHORDS[state.chordIdx] or state.CHORDS[1]
+    local offsets = chordDef.offsets or { 0 }
+    
+    local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
+    local noteInOctave = effectivePitch % 12
+    local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
+    if not scaleIndex or scaleIndex == -1 then
+      return { rootPitch }
+    end
+    
+    local intervals = SCALES[state.currentScaleIdx].intervals
+    local numIntervals = #intervals
+    local baseTransposedIndex = scaleIndex + state.transposeShift
+    local octave = math.floor(effectivePitch / 12) - 1
+    
+    local pitches = {}
+    for _, off in ipairs(offsets) do
+      local transposedIndex = baseTransposedIndex + off
+      local octaveOffset = math.floor(transposedIndex / numIntervals)
+      local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
+      local targetInterval = intervals[idxInScale]
+      local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
+      table.insert(pitches, newPitch)
+    end
+    return pitches
+  end
 }
 
 end
@@ -5970,6 +6001,17 @@ local state = {
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
+  -- Chord Trigger State
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = {
+    { name = "Triad", offsets = { 0, 2, 4 } },
+    { name = "7th", offsets = { 0, 2, 4, 6 } },
+    { name = "9th", offsets = { 0, 2, 4, 6, 8 } },
+    { name = "Power (1-5)", offsets = { 0, 4 } },
+    { name = "Octaves", offsets = { 0, 7 } }
+  },
+
   -- Arpeggiator State
   arpEnabled = getSetting("arpEnabled", false),
   arpDirectionIdx = getSetting("arpDirectionIdx", 1),    -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
@@ -6040,6 +6082,9 @@ local state = {
     [72] = 64
   },
 
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = { { name = "Triad", offsets = { 0, 2, 4 } }, { name = "7th", offsets = { 0, 2, 4, 6 } }, { name = "9th", offsets = { 0, 2, 4, 6, 8 } }, { name = "Power (1-5)", offsets = { 0, 4 } }, { name = "Octaves", offsets = { 0, 7 } } },
   pressedKeys = {},
   sustainedPitches = {},
   spotlightInfo = nil,
@@ -6071,6 +6116,8 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
   hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
   hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled == true)
+  hs.settings.set("qwertyMidi_chordModeActive", state.chordModeActive == true)
+  hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
   hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
@@ -6134,7 +6181,7 @@ local defaultLowerRowKeys = {
   [6]  = { key = "Z", baseNote = 60, isTop = false }, [7]  = { key = "X", baseNote = 62, isTop = false }, [8]  = { key = "C", baseNote = 64, isTop = false },
   [9]  = { key = "V", baseNote = 65, isTop = false }, [11] = { key = "B", baseNote = 67, isTop = false }, [45] = { key = "N", baseNote = 69, isTop = false },
   [46] = { key = "M", baseNote = 71, isTop = false }, [43] = { key = ",", baseNote = 72, isTop = false }, [47] = { key = ".", baseNote = 74, isTop = false },
-  [44] = { key = "/", baseNote = 76, isTop = false }, [39] = { key = "'", baseNote = 77, isTop = false }
+  [44] = { key = "/", baseNote = 76, isTop = false }
 }
 
 local defaultHomeRowControls = {
@@ -6181,6 +6228,8 @@ local ACTION_CATALOG = {
       { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
       { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
       { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
+      { id = "chordUp", name = "Chord +", typeClass = "ctrl-mode", description = "Cycle chord pattern forward" },
+      { id = "chordDown", name = "Chord -", typeClass = "ctrl-mode", description = "Cycle chord pattern backward" },
       { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
     }
   },
@@ -7238,6 +7287,36 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
     arpeggiator.toggleArpPower()
+  elseif act == "chordToggle" then
+    state.chordModeActive = not state.chordModeActive
+    local spot = {
+      title = "CHORD MODE",
+      value = state.chordModeActive and "ON" or "OFF",
+      subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordUp" then
+    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local spot = {
+      title = "CHORD TYPE",
+      value = state.CHORDS[state.chordIdx].name,
+      subtext = "Cycle chord type",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local spot = {
+      title = "CHORD TYPE",
+      value = state.CHORDS[state.chordIdx].name,
+      subtext = "Cycle chord type",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
   elseif act == "modWheelDown" then
     local currentVal = state.ccStates[1] or 0
     local newVal = math.max(0, currentVal - 4)
@@ -7363,6 +7442,28 @@ local function executeControlAction(act, code)
       value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-bottom-toggle",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordUp" then
+    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
@@ -7554,28 +7655,53 @@ local function handleKeyDown(code)
     return true
   end
 
+  if code == 39 then
+    state.quoteHeld = true
+    local spot = { 
+      title = "CHORD MODIFIER", 
+      value = state.CHORDS[state.chordIdx].name, 
+      subtext = "Hold ' + play notes for chords", 
+      targetId = "header", 
+      color = "#d4a359" 
+    }
+    hud.updateWebviewHud(spot)
+    return true
+  end
+
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
     local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     local arpActive = state.arpEnabled and arpEnabledForRow
     local sustainActive = state.sustainActive
     local isArpNote = state.shiftHeld and (not arpActive) or arpActive
     local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-    state.pressedKeys[code] = { pitch = transposedPitch, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
-    if isArpNote then arpeggiator.arpAddNote(code, transposedPitch)
-    else midi.sendMidiNote("noteOn", transposedPitch, transposer.getEffectiveRowVelocity(isTop), ch)
+    
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
+    
+    if isArpNote then 
+      for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
+    else 
+      for _, p in ipairs(chordPitches) do
+        midi.sendMidiNote("noteOn", p, transposer.getEffectiveRowVelocity(isTop), ch)
+      end
     end
     hud.updateWebviewHud()
     return true
   end
 
-  return false
+  return true
 end
 
 local function handleKeyUp(code)
+  if code == 39 then
+    state.quoteHeld = false
+    hud.updateWebviewHud()
+    return true
+  end
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
@@ -7586,19 +7712,21 @@ local function handleKeyUp(code)
   if noteKey then
     local keyInfo = state.pressedKeys[code]
     if keyInfo then
-      local playedPitch = type(keyInfo) == "table" and keyInfo.pitch or keyInfo
+      local pitches = type(keyInfo) == "table" and keyInfo.pitches or { keyInfo.pitch }
       local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
       local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
 
       local keyChannel = type(keyInfo) == "table" and keyInfo.channel or 0
       if isArpNote then
-        arpeggiator.arpRemoveNote(code)
+        for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
       else
-        if isSustainedNote and state.sustainActive then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[playedPitch] = { channel = keyChannel }
-        else
-          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+        for _, playedPitch in ipairs(pitches) do
+          if isSustainedNote and state.sustainActive then
+            state.sustainedPitches = state.sustainedPitches or {}
+            state.sustainedPitches[playedPitch] = { channel = keyChannel }
+          else
+            midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+          end
         end
       end
       state.pressedKeys[code] = nil
