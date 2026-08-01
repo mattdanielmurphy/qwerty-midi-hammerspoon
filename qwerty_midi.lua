@@ -35,6 +35,9 @@ local HTML_UI_CONTENT = __require("ui_html")
 local webviewGeneration = 0
 local lastHeartbeat = 0
 local evalFailCount = 0
+local lastPongTime = 0
+local lastLatencyMs = 0
+local pendingPingTime = 0
 
 _G.activeWatchers = _G.activeWatchers or {}
 
@@ -335,6 +338,15 @@ local function createMidiWebview()
       lastHeartbeat = os.time()
       evalFailCount = 0
       updateWebviewHud()
+    elseif body.type == "pong" then
+      lastPongTime = os.time()
+      lastHeartbeat = os.time()
+      if pendingPingTime > 0 then
+        lastLatencyMs = math.max(0, math.floor((hs.timer.absoluteTime() - pendingPingTime) / 1000000))
+        pendingPingTime = 0
+      end
+    elseif body.type == "ping" then
+      safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
     elseif body.type == "heartbeat" then
       lastHeartbeat = os.time()
     elseif body.type == "keyDown" and body.code then
@@ -661,18 +673,36 @@ local function createMidiWebview()
   return wv
 end
 
+local function pingWebview()
+  if not _G.activeWatchers.midiWebview then return false end
+  pendingPingTime = hs.timer.absoluteTime()
+  safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
+  return true
+end
+
+local function pingController()
+  pingWebview()
+  hs.timer.doAfter(0.15, function()
+    local now = os.time()
+    if (now - lastPongTime) < 2 then
+      hs.alert.show(string.format("🟢 QWERTY MIDI UI Responsive (Latency: %dms)", lastLatencyMs), 2)
+    else
+      hs.alert.show("🔴 QWERTY MIDI UI Unresponsive", 2)
+    end
+  end)
+  return (os.time() - lastPongTime) < 2
+end
+
 local function reloadMidiWebview()
   lastFrameScale = nil
   if _G.activeWatchers.midiWebview then
     pcall(function()
-      _G.activeWatchers.midiWebview:reload()
-    end)
-    pcall(function()
       _G.activeWatchers.midiWebview:windowCallback(nil)
       _G.activeWatchers.midiWebview:delete()
-      _G.activeWatchers.midiWebview = nil
     end)
+    _G.activeWatchers.midiWebview = nil
   end
+  _G.activeWatchers.domIsReady = false
   return createMidiWebview()
 end
 
@@ -681,7 +711,11 @@ return {
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,
-  getLastHeartbeat = function() return lastHeartbeat end
+  getLastHeartbeat = function() return lastHeartbeat end,
+  pingWebview = pingWebview,
+  pingController = pingController,
+  getLastPongTime = function() return lastPongTime end,
+  getLastLatencyMs = function() return lastLatencyMs end
 }
 
 end
@@ -929,7 +963,8 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
 end)
 
 -- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
--- Also checks webview liveness via JS heartbeat — if no heartbeat for 6s, web process is dead
+-- Also checks webview liveness via JS ping/pong — if no response for 5s, web process is dead
+local lastRefreshClickTime = 0
 _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   if state.midiActive then
     if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
@@ -940,18 +975,20 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
       _G.activeWatchers.midiScrollTap:start()
     end
-    -- Webview liveness: if heartbeat stopped for 6s, web content process is dead
-    if _G.activeWatchers.midiWebview and hud.getLastHeartbeat() > 0 then
-      local elapsed = os.time() - hud.getLastHeartbeat()
-      if elapsed >= 6 then
-        print("QWERTY MIDI: Watchdog detected dead webview (no heartbeat for " .. elapsed .. "s) — recreating")
-        local ok, err = pcall(function()
-          local h = hud.createMidiWebview()
-          h:show()
+    
+    hud.pingWebview()
+    local hb = hud.getLastHeartbeat()
+    local pong = hud.getLastPongTime()
+    local lastSeen = math.max(hb, pong)
+    if _G.activeWatchers.midiWebview and lastSeen > 0 then
+      local elapsed = os.time() - lastSeen
+      if elapsed >= 5 then
+        print("QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn")
+        pcall(function()
+          local h = hud.reloadMidiWebview()
+          if h then h:show() end
+          hs.alert.show("UI Auto-Recovered by Watchdog", 2.0)
         end)
-        if not ok then
-          print("QWERTY MIDI: Watchdog webview recreate failed: " .. tostring(err))
-        end
       end
     end
   end
@@ -962,6 +999,15 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  local now = os.time()
+  if (now - lastRefreshClickTime) < 1.5 then
+    hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+    hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+    hs.timer.doAfter(0.1, function() hs.reload() end)
+    return
+  end
+  lastRefreshClickTime = now
+
   -- 1. Rescue UI state & re-bind eventtaps
   if state.midiActive then
     pcall(function()
@@ -981,37 +1027,8 @@ _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", func
     end)
   end
 
-  -- 2. Gather & copy diagnostic logs to clipboard
-  local logs = {}
-  table.insert(logs, "=== QWERTY MIDI DIAGNOSTIC LOG ===")
-  table.insert(logs, "Timestamp: " .. os.date("%Y-%m-%d %H:%M:%S"))
-  table.insert(logs, "MIDI Active: " .. tostring(state.midiActive))
-  table.insert(logs, "Zoom Level: " .. tostring(state.zoomLevel))
-  table.insert(logs, "Root Note: " .. tostring(state.rootNote))
-  table.insert(logs, "Scale Idx: " .. tostring(state.scaleIdx))
-
-  local f = io.open("/tmp/midi_startup.log", "r")
-  if f then
-    table.insert(logs, "\n--- Startup Log ---")
-    table.insert(logs, f:read("*a"))
-    f:close()
-  end
-  local fjs = io.open("/tmp/wv_js.log", "r")
-  if fjs then
-    table.insert(logs, "\n--- Webview JS Log ---")
-    table.insert(logs, fjs:read("*a"))
-    fjs:close()
-  end
-
-  local fullLogStr = table.concat(logs, "\n")
-  hs.pasteboard.setContents(fullLogStr)
-
   -- 3. Display user notification & HUD overlay
-  hs.alert.show("UI Rescued — Diagnostic Logs Copied to Clipboard", 2.0)
-  hs.notify.new({
-    title = "QWERTY MIDI",
-    informativeText = "UI rescued and diagnostic logs copied to clipboard."
-  }):send()
+  hs.alert.show("UI Refreshed (Press Cmd+Alt+R again within 1.5s for Full Hammerspoon Hard Reload)", 2.0)
 end)
 
 if _G.activeWatchers.settingsHotkey then
@@ -1035,6 +1052,9 @@ if wasOpen then
     end
   end)
 end
+
+_G.pingController = function() return hud.pingController() end
+_G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
 
 profileLog("Init complete!")
 
@@ -5209,240 +5229,243 @@ local HTML_UI_CONTENT = [[
   }
 
   function renderHud(data) {
-    if (!data) return;
+    try {
+      if (!data) return;
 
-    const container = document.getElementById('hud-container');
-    if (container) {
-      if (shiftModeActive || data.shiftHeld) {
-        container.classList.add('shift-active-labels');
-      } else {
-        container.classList.remove('shift-active-labels');
-      }
+      currentWorkingLayout = (configData && configData.customLayout) ? configData.customLayout : {};
 
-      if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
-        if (data.stackedKeyLabelsInPerformanceMode) {
-          container.classList.add('stacked-labels-active');
-        } else {
-          container.classList.remove('stacked-labels-active');
-        }
-      }
-    }
-
-    if (data.zoomLevel !== undefined) {
       const container = document.getElementById('hud-container');
       if (container) {
-        const targetTransform = 'scale(' + data.zoomLevel + ')';
-        if (container.style.transform !== targetTransform) {
-          container.style.transform = targetTransform;
-        }
-      }
-    }
-
-    if (data.spotlight) {
-      showSpotlight(data.spotlight);
-    }
-
-    if (data.rootIdx !== undefined) {
-      const rootSelect = document.getElementById('root-select');
-      if (rootSelect) rootSelect.value = data.rootIdx;
-    }
-
-    if (data.modeName) {
-      document.getElementById('mode-name').textContent = data.modeName;
-    }
-
-    if (data.arpEnabled !== undefined) {
-      const arpPowerBtn = document.getElementById('arp-power-btn');
-      if (arpPowerBtn) {
-        const latch = data.arpLatchActive;
-        if (!data.arpEnabled) {
-          arpPowerBtn.textContent = 'ARP: OFF';
-          arpPowerBtn.classList.remove('arp-active', 'arp-latch');
-        } else if (latch) {
-          arpPowerBtn.textContent = 'ARP: LATCH';
-          arpPowerBtn.classList.add('arp-active', 'arp-latch');
+        if (shiftModeActive || data.shiftHeld) {
+          container.classList.add('shift-active-labels');
         } else {
-          arpPowerBtn.textContent = 'ARP: ON';
-          arpPowerBtn.classList.add('arp-active');
-          arpPowerBtn.classList.remove('arp-latch');
+          container.classList.remove('shift-active-labels');
+        }
+
+        if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
+          if (data.stackedKeyLabelsInPerformanceMode) {
+            container.classList.add('stacked-labels-active');
+          } else {
+            container.classList.remove('stacked-labels-active');
+          }
         }
       }
-    }
 
-    if (data.arpDirectionIdx !== undefined) {
-      const arpDirSelect = document.getElementById('arp-dir-select');
-      if (arpDirSelect) arpDirSelect.value = data.arpDirectionIdx;
-    }
+      if (data.zoomLevel !== undefined) {
+        const container = document.getElementById('hud-container');
+        if (container) {
+          const targetTransform = 'scale(' + data.zoomLevel + ')';
+          if (container.style.transform !== targetTransform) {
+            container.style.transform = targetTransform;
+          }
+        }
+      }
 
-    if (data.arpRateIdx !== undefined) {
-      const arpRateSelect = document.getElementById('arp-rate-select');
-      if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
-    }
+      if (data.spotlight) {
+        showSpotlight(data.spotlight);
+      }
 
-    if (data.arpGatePercent !== undefined) {
-      const gateVal = document.getElementById('gate-value');
-      if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
-    }
+      if (data.rootIdx !== undefined) {
+        const rootSelect = document.getElementById('root-select');
+        if (rootSelect) rootSelect.value = data.rootIdx;
+      }
 
-    if (data.bpmDisplay !== undefined) {
-      const bpmVal = document.getElementById('bpm-value');
-      if (bpmVal) {
-        bpmVal.textContent = data.bpmDisplay;
-        if (data.bpmEditing) {
-          bpmVal.classList.add('editing');
+      if (data.modeName) {
+        document.getElementById('mode-name').textContent = data.modeName;
+      }
+
+      if (data.arpEnabled !== undefined) {
+        const arpPowerBtn = document.getElementById('arp-power-btn');
+        if (arpPowerBtn) {
+          const latch = data.arpLatchActive;
+          if (!data.arpEnabled) {
+            arpPowerBtn.textContent = 'ARP: OFF';
+            arpPowerBtn.classList.remove('arp-active', 'arp-latch');
+          } else if (latch) {
+            arpPowerBtn.textContent = 'ARP: LATCH';
+            arpPowerBtn.classList.add('arp-active', 'arp-latch');
+          } else {
+            arpPowerBtn.textContent = 'ARP: ON';
+            arpPowerBtn.classList.add('arp-active');
+            arpPowerBtn.classList.remove('arp-latch');
+          }
+        }
+      }
+
+      if (data.arpDirectionIdx !== undefined) {
+        const arpDirSelect = document.getElementById('arp-dir-select');
+        if (arpDirSelect) arpDirSelect.value = data.arpDirectionIdx;
+      }
+
+      if (data.arpRateIdx !== undefined) {
+        const arpRateSelect = document.getElementById('arp-rate-select');
+        if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
+      }
+
+      if (data.arpGatePercent !== undefined) {
+        const gateVal = document.getElementById('gate-value');
+        if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
+      }
+
+      if (data.bpmDisplay !== undefined) {
+        const bpmVal = document.getElementById('bpm-value');
+        if (bpmVal) {
+          bpmVal.textContent = data.bpmDisplay;
+          if (data.bpmEditing) {
+            bpmVal.classList.add('editing');
+          } else {
+            bpmVal.classList.remove('editing');
+          }
+        }
+      }
+
+      if (data.logicSyncEnabled !== undefined) {
+        const syncBtn = document.getElementById('logic-sync-btn');
+        if (syncBtn) {
+          syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
+          if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
+          else syncBtn.style.color = '#7a7067';
+        }
+      }
+
+      if (data.arpTopEnabled !== undefined) {
+        const topToggle = document.getElementById('arp-top-toggle');
+        if (topToggle) {
+          if (data.arpTopEnabled) topToggle.classList.add('active');
+          else topToggle.classList.remove('active');
+        }
+      }
+
+      if (data.arpBottomEnabled !== undefined) {
+        const botToggle = document.getElementById('arp-bottom-toggle');
+        if (botToggle) {
+          if (data.arpBottomEnabled) botToggle.classList.add('active');
+          else botToggle.classList.remove('active');
+        }
+      }
+
+      if (data.statusText !== undefined) {
+        document.getElementById('status-text').textContent = data.statusText;
+      }
+
+      if (data.topOctaveStr !== undefined) {
+        const topTxt = document.getElementById('top-oct-text');
+        if (topTxt) topTxt.textContent = 'TOP ' + data.topOctaveStr;
+      }
+
+      if (data.bottomOctaveStr !== undefined) {
+        const botTxt = document.getElementById('bottom-oct-text');
+        if (botTxt) botTxt.textContent = 'BOT ' + data.bottomOctaveStr;
+      }
+
+      if (data.topVolPercent !== undefined) {
+        const topVolFill = document.getElementById('vol-fill-top');
+        const effVol = (data.effectiveTopVolPercent !== undefined) ? data.effectiveTopVolPercent : data.topVolPercent;
+        if (topVolFill) topVolFill.style.height = Math.min(100, Math.max(0, effVol)) + '%';
+      }
+
+      if (data.bottomVolPercent !== undefined) {
+        const botVolFill = document.getElementById('vol-fill-bottom');
+        if (botVolFill) botVolFill.style.height = Math.min(100, Math.max(0, data.bottomVolPercent)) + '%';
+      }
+
+      if (data.modeFrac !== undefined && !isModeDragging) {
+        document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
+      }
+
+      if (data.modWheel !== undefined) {
+        const intensity = (data.modWheel / 127.0).toFixed(2);
+        document.body.style.setProperty('--mod-intensity', intensity);
+        const container = document.getElementById('hud-container');
+        const fillEl = document.getElementById('mod-wheel-fill');
+        const labelEl = document.getElementById('mod-wheel-label');
+        const widgetEl = document.getElementById('mod-wheel-widget');
+        if (data.modWheel > 0) {
+          container.classList.add('mod-active');
+          widgetEl.classList.add('active');
         } else {
-          bpmVal.classList.remove('editing');
+          container.classList.remove('mod-active');
+          widgetEl.classList.remove('active');
         }
-      }
-    }
-
-    if (data.logicSyncEnabled !== undefined) {
-      const syncBtn = document.getElementById('logic-sync-btn');
-      if (syncBtn) {
-        syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
-        if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
-        else syncBtn.style.color = '#7a7067';
-      }
-    }
-
-    if (data.arpTopEnabled !== undefined) {
-      const topToggle = document.getElementById('arp-top-toggle');
-      if (topToggle) {
-        if (data.arpTopEnabled) topToggle.classList.add('active');
-        else topToggle.classList.remove('active');
-      }
-    }
-
-    if (data.arpBottomEnabled !== undefined) {
-      const botToggle = document.getElementById('arp-bottom-toggle');
-      if (botToggle) {
-        if (data.arpBottomEnabled) botToggle.classList.add('active');
-        else botToggle.classList.remove('active');
-      }
-    }
-
-    if (data.statusText !== undefined) {
-      document.getElementById('status-text').textContent = data.statusText;
-    }
-
-    if (data.topOctaveStr !== undefined) {
-      const topTxt = document.getElementById('top-oct-text');
-      if (topTxt) topTxt.textContent = 'TOP ' + data.topOctaveStr;
-    }
-
-    if (data.bottomOctaveStr !== undefined) {
-      const botTxt = document.getElementById('bottom-oct-text');
-      if (botTxt) botTxt.textContent = 'BOT ' + data.bottomOctaveStr;
-    }
-
-    if (data.topVolPercent !== undefined) {
-      const topVolFill = document.getElementById('vol-fill-top');
-      const effVol = (data.effectiveTopVolPercent !== undefined) ? data.effectiveTopVolPercent : data.topVolPercent;
-      if (topVolFill) topVolFill.style.height = Math.min(100, Math.max(0, effVol)) + '%';
-    }
-
-    if (data.bottomVolPercent !== undefined) {
-      const botVolFill = document.getElementById('vol-fill-bottom');
-      if (botVolFill) botVolFill.style.height = Math.min(100, Math.max(0, data.bottomVolPercent)) + '%';
-    }
-
-    if (data.modeFrac !== undefined && !isModeDragging) {
-      document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
-    }
-
-    if (data.modWheel !== undefined) {
-      const intensity = (data.modWheel / 127.0).toFixed(2);
-      document.body.style.setProperty('--mod-intensity', intensity);
-      const container = document.getElementById('hud-container');
-      const fillEl = document.getElementById('mod-wheel-fill');
-      const labelEl = document.getElementById('mod-wheel-label');
-      const widgetEl = document.getElementById('mod-wheel-widget');
-      if (data.modWheel > 0) {
-        container.classList.add('mod-active');
-        widgetEl.classList.add('active');
-      } else {
-        container.classList.remove('mod-active');
-        widgetEl.classList.remove('active');
-      }
-      if (fillEl) {
-        fillEl.style.width = (intensity * 100) + '%';
-        if (data.modWheel >= 80) {
-          fillEl.classList.add('hot');
-        } else {
-          fillEl.classList.remove('hot');
+        if (fillEl) {
+          fillEl.style.width = (intensity * 100) + '%';
+          if (data.modWheel >= 80) {
+            fillEl.classList.add('hot');
+          } else {
+            fillEl.classList.remove('hot');
+          }
         }
+        if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
       }
-      if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
-    }
 
-    if (data.keys) {
-      for (const [code, k] of Object.entries(data.keys)) {
-        const el = document.getElementById('key-' + code);
-        if (el) {
-          const noteEl = el.querySelector(':scope > .key-note');
-          if (noteEl) {
-            // Respect JS shiftModeActive: if shift mode is toggled in editor,
-            // prefer shift labels from currentWorkingLayout over Lua data
-            if (shiftModeActive && currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
-            } else if (data.shiftHeld && k.shiftNote !== undefined) {
-              noteEl.textContent = k.shiftNote;
-            } else if (k.note !== undefined) {
-              noteEl.textContent = k.note;
+      if (data.keys) {
+        for (const [code, k] of Object.entries(data.keys)) {
+          const el = document.getElementById('key-' + code);
+          if (el) {
+            const noteEl = el.querySelector(':scope > .key-note');
+            if (noteEl) {
+              if (shiftModeActive && (currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
+              } else if (data.shiftHeld && k.shiftNote !== undefined) {
+                noteEl.textContent = k.shiftNote;
+              } else if (k.note !== undefined) {
+                noteEl.textContent = k.note;
+              }
             }
-          }
 
-          // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
-          const halfTop = el.querySelector('.key-half-top .key-note');
-          const halfBottom = el.querySelector('.key-half-bottom .key-note');
-          if (halfTop) {
-            if (currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
-            } else {
-              halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+            const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
+            const halfTop = el.querySelector('.key-half-top .key-note');
+            const halfBottom = el.querySelector('.key-half-bottom .key-note');
+            if (halfTop) {
+              if ((currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              } else {
+                halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              }
             }
-          }
-          if (halfBottom) {
-            if (currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
-            } else {
-              halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+            if (halfBottom) {
+              if ((currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              } else {
+                halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              }
             }
-          }
-          el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
-          if (k.latched) el.classList.add('latched-key');
-          if (k.pressed) el.classList.add('pressed');
-          if (k.sustainActive) el.classList.add('sustain-active');
+            el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
+            if (k.latched) el.classList.add('latched-key');
+            if (k.pressed) el.classList.add('pressed');
+            if (k.sustainActive) el.classList.add('sustain-active');
 
-          const isShift = data.shiftHeld || shiftModeActive;
-          const effAction = isShift ? (k.shiftAction || k.action) : k.action;
+            const isShift = data.shiftHeld || shiftModeActive;
+            const effAction = isShift ? (k.shiftAction || k.action) : k.action;
 
-          const iconEl = el.querySelector('.key-row-icon');
-          if (iconEl) {
-            iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
-            if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
-              iconEl.classList.add('top-active');
-            } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
-              iconEl.classList.add('bottom-active');
-            } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
-              iconEl.classList.add('both-active');
+            const iconEl = el.querySelector('.key-row-icon');
+            if (iconEl) {
+              iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
+              if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
+                iconEl.classList.add('top-active');
+              } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
+                iconEl.classList.add('bottom-active');
+              } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
+                iconEl.classList.add('both-active');
+              }
             }
           }
         }
       }
-    }
 
-    if (data.arpHeldNotes) {
-      for (const [code, isHeld] of Object.entries(data.arpHeldNotes)) {
-        const el = document.getElementById('key-' + code);
-        if (el && isHeld) {
-          el.classList.add('latched-key');
+      if (data.arpHeldNotes) {
+        for (const [code, isHeld] of Object.entries(data.arpHeldNotes)) {
+          const el = document.getElementById('key-' + code);
+          if (el && isHeld) {
+            el.classList.add('latched-key');
+          }
         }
       }
+    } catch (err) {
+      console.error('HUD render error:', err);
     }
   }
 
@@ -5460,6 +5483,12 @@ local HTML_UI_CONTENT = [[
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'heartbeat' });
     }
   }, 2000);
+
+  window.pingHudController = function() {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'pong', timestamp: Date.now() });
+    }
+  };
 </script>
 </body>
 </html>

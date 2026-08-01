@@ -240,7 +240,8 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
 end)
 
 -- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
--- Also checks webview liveness via JS heartbeat — if no heartbeat for 6s, web process is dead
+-- Also checks webview liveness via JS ping/pong — if no response for 5s, web process is dead
+local lastRefreshClickTime = 0
 _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   if state.midiActive then
     if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
@@ -251,18 +252,20 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
       _G.activeWatchers.midiScrollTap:start()
     end
-    -- Webview liveness: if heartbeat stopped for 6s, web content process is dead
-    if _G.activeWatchers.midiWebview and hud.getLastHeartbeat() > 0 then
-      local elapsed = os.time() - hud.getLastHeartbeat()
-      if elapsed >= 6 then
-        print("QWERTY MIDI: Watchdog detected dead webview (no heartbeat for " .. elapsed .. "s) — recreating")
-        local ok, err = pcall(function()
-          local h = hud.createMidiWebview()
-          h:show()
+    
+    hud.pingWebview()
+    local hb = hud.getLastHeartbeat()
+    local pong = hud.getLastPongTime()
+    local lastSeen = math.max(hb, pong)
+    if _G.activeWatchers.midiWebview and lastSeen > 0 then
+      local elapsed = os.time() - lastSeen
+      if elapsed >= 5 then
+        print("QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn")
+        pcall(function()
+          local h = hud.reloadMidiWebview()
+          if h then h:show() end
+          hs.alert.show("UI Auto-Recovered by Watchdog", 2.0)
         end)
-        if not ok then
-          print("QWERTY MIDI: Watchdog webview recreate failed: " .. tostring(err))
-        end
       end
     end
   end
@@ -273,6 +276,15 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  local now = os.time()
+  if (now - lastRefreshClickTime) < 1.5 then
+    hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+    hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+    hs.timer.doAfter(0.1, function() hs.reload() end)
+    return
+  end
+  lastRefreshClickTime = now
+
   -- 1. Rescue UI state & re-bind eventtaps
   if state.midiActive then
     pcall(function()
@@ -292,37 +304,8 @@ _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", func
     end)
   end
 
-  -- 2. Gather & copy diagnostic logs to clipboard
-  local logs = {}
-  table.insert(logs, "=== QWERTY MIDI DIAGNOSTIC LOG ===")
-  table.insert(logs, "Timestamp: " .. os.date("%Y-%m-%d %H:%M:%S"))
-  table.insert(logs, "MIDI Active: " .. tostring(state.midiActive))
-  table.insert(logs, "Zoom Level: " .. tostring(state.zoomLevel))
-  table.insert(logs, "Root Note: " .. tostring(state.rootNote))
-  table.insert(logs, "Scale Idx: " .. tostring(state.scaleIdx))
-
-  local f = io.open("/tmp/midi_startup.log", "r")
-  if f then
-    table.insert(logs, "\n--- Startup Log ---")
-    table.insert(logs, f:read("*a"))
-    f:close()
-  end
-  local fjs = io.open("/tmp/wv_js.log", "r")
-  if fjs then
-    table.insert(logs, "\n--- Webview JS Log ---")
-    table.insert(logs, fjs:read("*a"))
-    fjs:close()
-  end
-
-  local fullLogStr = table.concat(logs, "\n")
-  hs.pasteboard.setContents(fullLogStr)
-
   -- 3. Display user notification & HUD overlay
-  hs.alert.show("UI Rescued — Diagnostic Logs Copied to Clipboard", 2.0)
-  hs.notify.new({
-    title = "QWERTY MIDI",
-    informativeText = "UI rescued and diagnostic logs copied to clipboard."
-  }):send()
+  hs.alert.show("UI Refreshed (Press Cmd+Alt+R again within 1.5s for Full Hammerspoon Hard Reload)", 2.0)
 end)
 
 if _G.activeWatchers.settingsHotkey then
@@ -346,6 +329,9 @@ if wasOpen then
     end
   end)
 end
+
+_G.pingController = function() return hud.pingController() end
+_G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
 
 profileLog("Init complete!")
 

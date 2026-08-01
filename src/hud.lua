@@ -18,6 +18,9 @@ local HTML_UI_CONTENT = require("ui_html")
 local webviewGeneration = 0
 local lastHeartbeat = 0
 local evalFailCount = 0
+local lastPongTime = 0
+local lastLatencyMs = 0
+local pendingPingTime = 0
 
 _G.activeWatchers = _G.activeWatchers or {}
 
@@ -318,6 +321,15 @@ local function createMidiWebview()
       lastHeartbeat = os.time()
       evalFailCount = 0
       updateWebviewHud()
+    elseif body.type == "pong" then
+      lastPongTime = os.time()
+      lastHeartbeat = os.time()
+      if pendingPingTime > 0 then
+        lastLatencyMs = math.max(0, math.floor((hs.timer.absoluteTime() - pendingPingTime) / 1000000))
+        pendingPingTime = 0
+      end
+    elseif body.type == "ping" then
+      safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
     elseif body.type == "heartbeat" then
       lastHeartbeat = os.time()
     elseif body.type == "keyDown" and body.code then
@@ -644,18 +656,36 @@ local function createMidiWebview()
   return wv
 end
 
+local function pingWebview()
+  if not _G.activeWatchers.midiWebview then return false end
+  pendingPingTime = hs.timer.absoluteTime()
+  safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
+  return true
+end
+
+local function pingController()
+  pingWebview()
+  hs.timer.doAfter(0.15, function()
+    local now = os.time()
+    if (now - lastPongTime) < 2 then
+      hs.alert.show(string.format("🟢 QWERTY MIDI UI Responsive (Latency: %dms)", lastLatencyMs), 2)
+    else
+      hs.alert.show("🔴 QWERTY MIDI UI Unresponsive", 2)
+    end
+  end)
+  return (os.time() - lastPongTime) < 2
+end
+
 local function reloadMidiWebview()
   lastFrameScale = nil
   if _G.activeWatchers.midiWebview then
     pcall(function()
-      _G.activeWatchers.midiWebview:reload()
-    end)
-    pcall(function()
       _G.activeWatchers.midiWebview:windowCallback(nil)
       _G.activeWatchers.midiWebview:delete()
-      _G.activeWatchers.midiWebview = nil
     end)
+    _G.activeWatchers.midiWebview = nil
   end
+  _G.activeWatchers.domIsReady = false
   return createMidiWebview()
 end
 
@@ -664,5 +694,9 @@ return {
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,
-  getLastHeartbeat = function() return lastHeartbeat end
+  getLastHeartbeat = function() return lastHeartbeat end,
+  pingWebview = pingWebview,
+  pingController = pingController,
+  getLastPongTime = function() return lastPongTime end,
+  getLastLatencyMs = function() return lastLatencyMs end
 }

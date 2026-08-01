@@ -1,6 +1,9 @@
 # Development Journal
 
-## 2026-07-29
+## 2026-07-31
+- **UI Stability, Ping Helper & Double-Tap Hard Reset:** Added `try...catch` error isolation in `renderHud`, bidirectional ping/pong liveness checks (`_G.pingController()`), active 5s watchdog auto-recovery, and double-press `Cmd+Alt+R` for full Hammerspoon hard reload (`hs.reload()`). Link: [2026-07-31_23-44_ui-stability-ping-helper-hard-reset.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-31_23-44_ui-stability-ping-helper-hard-reset.md)
+
+
 - **Dynamic Shift-Key Label Rendering Fix:** Updated `renderHud(data)` in `src/web/index.html` to evaluate `data.shiftHeld`. Dynamically toggles `.shift-active-labels` on `#hud-container` and renders `k.shiftNote` on single-label key caps when physical Shift is held down. Link: [2026-07-29_11-46_dynamic-shift-key-labels-fix.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-29_11-46_dynamic-shift-key-labels-fix.md)
 - **In-Place Manual UI Refresh (Cmd+Alt+R):** Replaced window deletion/recreation in `Cmd+Alt+R` (`midiRefreshHotkey`) with `hud.reloadMidiWebview()`. Reads fresh HTML from `src/web/index.html` on disk and injects via `:html(freshHtml)` to perform clean in-place reload without window destruction or cached string lockup. Link: [2026-07-29_11-36_in-place-ui-refresh-fix.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-29_11-36_in-place-ui-refresh-fix.md)
 

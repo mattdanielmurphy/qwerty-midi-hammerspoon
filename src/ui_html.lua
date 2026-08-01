@@ -3361,240 +3361,243 @@ local HTML_UI_CONTENT = [[
   }
 
   function renderHud(data) {
-    if (!data) return;
+    try {
+      if (!data) return;
 
-    const container = document.getElementById('hud-container');
-    if (container) {
-      if (shiftModeActive || data.shiftHeld) {
-        container.classList.add('shift-active-labels');
-      } else {
-        container.classList.remove('shift-active-labels');
-      }
+      currentWorkingLayout = (configData && configData.customLayout) ? configData.customLayout : {};
 
-      if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
-        if (data.stackedKeyLabelsInPerformanceMode) {
-          container.classList.add('stacked-labels-active');
-        } else {
-          container.classList.remove('stacked-labels-active');
-        }
-      }
-    }
-
-    if (data.zoomLevel !== undefined) {
       const container = document.getElementById('hud-container');
       if (container) {
-        const targetTransform = 'scale(' + data.zoomLevel + ')';
-        if (container.style.transform !== targetTransform) {
-          container.style.transform = targetTransform;
-        }
-      }
-    }
-
-    if (data.spotlight) {
-      showSpotlight(data.spotlight);
-    }
-
-    if (data.rootIdx !== undefined) {
-      const rootSelect = document.getElementById('root-select');
-      if (rootSelect) rootSelect.value = data.rootIdx;
-    }
-
-    if (data.modeName) {
-      document.getElementById('mode-name').textContent = data.modeName;
-    }
-
-    if (data.arpEnabled !== undefined) {
-      const arpPowerBtn = document.getElementById('arp-power-btn');
-      if (arpPowerBtn) {
-        const latch = data.arpLatchActive;
-        if (!data.arpEnabled) {
-          arpPowerBtn.textContent = 'ARP: OFF';
-          arpPowerBtn.classList.remove('arp-active', 'arp-latch');
-        } else if (latch) {
-          arpPowerBtn.textContent = 'ARP: LATCH';
-          arpPowerBtn.classList.add('arp-active', 'arp-latch');
+        if (shiftModeActive || data.shiftHeld) {
+          container.classList.add('shift-active-labels');
         } else {
-          arpPowerBtn.textContent = 'ARP: ON';
-          arpPowerBtn.classList.add('arp-active');
-          arpPowerBtn.classList.remove('arp-latch');
+          container.classList.remove('shift-active-labels');
+        }
+
+        if (data.stackedKeyLabelsInPerformanceMode !== undefined) {
+          if (data.stackedKeyLabelsInPerformanceMode) {
+            container.classList.add('stacked-labels-active');
+          } else {
+            container.classList.remove('stacked-labels-active');
+          }
         }
       }
-    }
 
-    if (data.arpDirectionIdx !== undefined) {
-      const arpDirSelect = document.getElementById('arp-dir-select');
-      if (arpDirSelect) arpDirSelect.value = data.arpDirectionIdx;
-    }
+      if (data.zoomLevel !== undefined) {
+        const container = document.getElementById('hud-container');
+        if (container) {
+          const targetTransform = 'scale(' + data.zoomLevel + ')';
+          if (container.style.transform !== targetTransform) {
+            container.style.transform = targetTransform;
+          }
+        }
+      }
 
-    if (data.arpRateIdx !== undefined) {
-      const arpRateSelect = document.getElementById('arp-rate-select');
-      if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
-    }
+      if (data.spotlight) {
+        showSpotlight(data.spotlight);
+      }
 
-    if (data.arpGatePercent !== undefined) {
-      const gateVal = document.getElementById('gate-value');
-      if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
-    }
+      if (data.rootIdx !== undefined) {
+        const rootSelect = document.getElementById('root-select');
+        if (rootSelect) rootSelect.value = data.rootIdx;
+      }
 
-    if (data.bpmDisplay !== undefined) {
-      const bpmVal = document.getElementById('bpm-value');
-      if (bpmVal) {
-        bpmVal.textContent = data.bpmDisplay;
-        if (data.bpmEditing) {
-          bpmVal.classList.add('editing');
+      if (data.modeName) {
+        document.getElementById('mode-name').textContent = data.modeName;
+      }
+
+      if (data.arpEnabled !== undefined) {
+        const arpPowerBtn = document.getElementById('arp-power-btn');
+        if (arpPowerBtn) {
+          const latch = data.arpLatchActive;
+          if (!data.arpEnabled) {
+            arpPowerBtn.textContent = 'ARP: OFF';
+            arpPowerBtn.classList.remove('arp-active', 'arp-latch');
+          } else if (latch) {
+            arpPowerBtn.textContent = 'ARP: LATCH';
+            arpPowerBtn.classList.add('arp-active', 'arp-latch');
+          } else {
+            arpPowerBtn.textContent = 'ARP: ON';
+            arpPowerBtn.classList.add('arp-active');
+            arpPowerBtn.classList.remove('arp-latch');
+          }
+        }
+      }
+
+      if (data.arpDirectionIdx !== undefined) {
+        const arpDirSelect = document.getElementById('arp-dir-select');
+        if (arpDirSelect) arpDirSelect.value = data.arpDirectionIdx;
+      }
+
+      if (data.arpRateIdx !== undefined) {
+        const arpRateSelect = document.getElementById('arp-rate-select');
+        if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
+      }
+
+      if (data.arpGatePercent !== undefined) {
+        const gateVal = document.getElementById('gate-value');
+        if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
+      }
+
+      if (data.bpmDisplay !== undefined) {
+        const bpmVal = document.getElementById('bpm-value');
+        if (bpmVal) {
+          bpmVal.textContent = data.bpmDisplay;
+          if (data.bpmEditing) {
+            bpmVal.classList.add('editing');
+          } else {
+            bpmVal.classList.remove('editing');
+          }
+        }
+      }
+
+      if (data.logicSyncEnabled !== undefined) {
+        const syncBtn = document.getElementById('logic-sync-btn');
+        if (syncBtn) {
+          syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
+          if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
+          else syncBtn.style.color = '#7a7067';
+        }
+      }
+
+      if (data.arpTopEnabled !== undefined) {
+        const topToggle = document.getElementById('arp-top-toggle');
+        if (topToggle) {
+          if (data.arpTopEnabled) topToggle.classList.add('active');
+          else topToggle.classList.remove('active');
+        }
+      }
+
+      if (data.arpBottomEnabled !== undefined) {
+        const botToggle = document.getElementById('arp-bottom-toggle');
+        if (botToggle) {
+          if (data.arpBottomEnabled) botToggle.classList.add('active');
+          else botToggle.classList.remove('active');
+        }
+      }
+
+      if (data.statusText !== undefined) {
+        document.getElementById('status-text').textContent = data.statusText;
+      }
+
+      if (data.topOctaveStr !== undefined) {
+        const topTxt = document.getElementById('top-oct-text');
+        if (topTxt) topTxt.textContent = 'TOP ' + data.topOctaveStr;
+      }
+
+      if (data.bottomOctaveStr !== undefined) {
+        const botTxt = document.getElementById('bottom-oct-text');
+        if (botTxt) botTxt.textContent = 'BOT ' + data.bottomOctaveStr;
+      }
+
+      if (data.topVolPercent !== undefined) {
+        const topVolFill = document.getElementById('vol-fill-top');
+        const effVol = (data.effectiveTopVolPercent !== undefined) ? data.effectiveTopVolPercent : data.topVolPercent;
+        if (topVolFill) topVolFill.style.height = Math.min(100, Math.max(0, effVol)) + '%';
+      }
+
+      if (data.bottomVolPercent !== undefined) {
+        const botVolFill = document.getElementById('vol-fill-bottom');
+        if (botVolFill) botVolFill.style.height = Math.min(100, Math.max(0, data.bottomVolPercent)) + '%';
+      }
+
+      if (data.modeFrac !== undefined && !isModeDragging) {
+        document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
+      }
+
+      if (data.modWheel !== undefined) {
+        const intensity = (data.modWheel / 127.0).toFixed(2);
+        document.body.style.setProperty('--mod-intensity', intensity);
+        const container = document.getElementById('hud-container');
+        const fillEl = document.getElementById('mod-wheel-fill');
+        const labelEl = document.getElementById('mod-wheel-label');
+        const widgetEl = document.getElementById('mod-wheel-widget');
+        if (data.modWheel > 0) {
+          container.classList.add('mod-active');
+          widgetEl.classList.add('active');
         } else {
-          bpmVal.classList.remove('editing');
+          container.classList.remove('mod-active');
+          widgetEl.classList.remove('active');
         }
-      }
-    }
-
-    if (data.logicSyncEnabled !== undefined) {
-      const syncBtn = document.getElementById('logic-sync-btn');
-      if (syncBtn) {
-        syncBtn.textContent = data.logicSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF';
-        if (data.logicSyncEnabled) syncBtn.style.color = '#d4a359';
-        else syncBtn.style.color = '#7a7067';
-      }
-    }
-
-    if (data.arpTopEnabled !== undefined) {
-      const topToggle = document.getElementById('arp-top-toggle');
-      if (topToggle) {
-        if (data.arpTopEnabled) topToggle.classList.add('active');
-        else topToggle.classList.remove('active');
-      }
-    }
-
-    if (data.arpBottomEnabled !== undefined) {
-      const botToggle = document.getElementById('arp-bottom-toggle');
-      if (botToggle) {
-        if (data.arpBottomEnabled) botToggle.classList.add('active');
-        else botToggle.classList.remove('active');
-      }
-    }
-
-    if (data.statusText !== undefined) {
-      document.getElementById('status-text').textContent = data.statusText;
-    }
-
-    if (data.topOctaveStr !== undefined) {
-      const topTxt = document.getElementById('top-oct-text');
-      if (topTxt) topTxt.textContent = 'TOP ' + data.topOctaveStr;
-    }
-
-    if (data.bottomOctaveStr !== undefined) {
-      const botTxt = document.getElementById('bottom-oct-text');
-      if (botTxt) botTxt.textContent = 'BOT ' + data.bottomOctaveStr;
-    }
-
-    if (data.topVolPercent !== undefined) {
-      const topVolFill = document.getElementById('vol-fill-top');
-      const effVol = (data.effectiveTopVolPercent !== undefined) ? data.effectiveTopVolPercent : data.topVolPercent;
-      if (topVolFill) topVolFill.style.height = Math.min(100, Math.max(0, effVol)) + '%';
-    }
-
-    if (data.bottomVolPercent !== undefined) {
-      const botVolFill = document.getElementById('vol-fill-bottom');
-      if (botVolFill) botVolFill.style.height = Math.min(100, Math.max(0, data.bottomVolPercent)) + '%';
-    }
-
-    if (data.modeFrac !== undefined && !isModeDragging) {
-      document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
-    }
-
-    if (data.modWheel !== undefined) {
-      const intensity = (data.modWheel / 127.0).toFixed(2);
-      document.body.style.setProperty('--mod-intensity', intensity);
-      const container = document.getElementById('hud-container');
-      const fillEl = document.getElementById('mod-wheel-fill');
-      const labelEl = document.getElementById('mod-wheel-label');
-      const widgetEl = document.getElementById('mod-wheel-widget');
-      if (data.modWheel > 0) {
-        container.classList.add('mod-active');
-        widgetEl.classList.add('active');
-      } else {
-        container.classList.remove('mod-active');
-        widgetEl.classList.remove('active');
-      }
-      if (fillEl) {
-        fillEl.style.width = (intensity * 100) + '%';
-        if (data.modWheel >= 80) {
-          fillEl.classList.add('hot');
-        } else {
-          fillEl.classList.remove('hot');
+        if (fillEl) {
+          fillEl.style.width = (intensity * 100) + '%';
+          if (data.modWheel >= 80) {
+            fillEl.classList.add('hot');
+          } else {
+            fillEl.classList.remove('hot');
+          }
         }
+        if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
       }
-      if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
-    }
 
-    if (data.keys) {
-      for (const [code, k] of Object.entries(data.keys)) {
-        const el = document.getElementById('key-' + code);
-        if (el) {
-          const noteEl = el.querySelector(':scope > .key-note');
-          if (noteEl) {
-            // Respect JS shiftModeActive: if shift mode is toggled in editor,
-            // prefer shift labels from currentWorkingLayout over Lua data
-            if (shiftModeActive && currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
-            } else if (data.shiftHeld && k.shiftNote !== undefined) {
-              noteEl.textContent = k.shiftNote;
-            } else if (k.note !== undefined) {
-              noteEl.textContent = k.note;
+      if (data.keys) {
+        for (const [code, k] of Object.entries(data.keys)) {
+          const el = document.getElementById('key-' + code);
+          if (el) {
+            const noteEl = el.querySelector(':scope > .key-note');
+            if (noteEl) {
+              if (shiftModeActive && (currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
+              } else if (data.shiftHeld && k.shiftNote !== undefined) {
+                noteEl.textContent = k.shiftNote;
+              } else if (k.note !== undefined) {
+                noteEl.textContent = k.note;
+              }
             }
-          }
 
-          // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
-          const halfTop = el.querySelector('.key-half-top .key-note');
-          const halfBottom = el.querySelector('.key-half-bottom .key-note');
-          if (halfTop) {
-            if (currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
-            } else {
-              halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+            const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
+            const halfTop = el.querySelector('.key-half-top .key-note');
+            const halfBottom = el.querySelector('.key-half-bottom .key-note');
+            if (halfTop) {
+              if ((currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              } else {
+                halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              }
             }
-          }
-          if (halfBottom) {
-            if (currentWorkingLayout[code]) {
-              const binding = currentWorkingLayout[code];
-              halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
-            } else {
-              halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+            if (halfBottom) {
+              if ((currentWorkingLayout || {})[code]) {
+                const binding = (currentWorkingLayout || {})[code];
+                halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              } else {
+                halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
+              }
             }
-          }
-          el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
-          if (k.latched) el.classList.add('latched-key');
-          if (k.pressed) el.classList.add('pressed');
-          if (k.sustainActive) el.classList.add('sustain-active');
+            el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
+            if (k.latched) el.classList.add('latched-key');
+            if (k.pressed) el.classList.add('pressed');
+            if (k.sustainActive) el.classList.add('sustain-active');
 
-          const isShift = data.shiftHeld || shiftModeActive;
-          const effAction = isShift ? (k.shiftAction || k.action) : k.action;
+            const isShift = data.shiftHeld || shiftModeActive;
+            const effAction = isShift ? (k.shiftAction || k.action) : k.action;
 
-          const iconEl = el.querySelector('.key-row-icon');
-          if (iconEl) {
-            iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
-            if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
-              iconEl.classList.add('top-active');
-            } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
-              iconEl.classList.add('bottom-active');
-            } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
-              iconEl.classList.add('both-active');
+            const iconEl = el.querySelector('.key-row-icon');
+            if (iconEl) {
+              iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
+              if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
+                iconEl.classList.add('top-active');
+              } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
+                iconEl.classList.add('bottom-active');
+              } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
+                iconEl.classList.add('both-active');
+              }
             }
           }
         }
       }
-    }
 
-    if (data.arpHeldNotes) {
-      for (const [code, isHeld] of Object.entries(data.arpHeldNotes)) {
-        const el = document.getElementById('key-' + code);
-        if (el && isHeld) {
-          el.classList.add('latched-key');
+      if (data.arpHeldNotes) {
+        for (const [code, isHeld] of Object.entries(data.arpHeldNotes)) {
+          const el = document.getElementById('key-' + code);
+          if (el && isHeld) {
+            el.classList.add('latched-key');
+          }
         }
       }
+    } catch (err) {
+      console.error('HUD render error:', err);
     }
   }
 
@@ -3612,6 +3615,12 @@ local HTML_UI_CONTENT = [[
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'heartbeat' });
     }
   }, 2000);
+
+  window.pingHudController = function() {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'pong', timestamp: Date.now() });
+    }
+  };
 </script>
 </body>
 </html>
