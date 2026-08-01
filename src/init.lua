@@ -279,36 +279,9 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
-  local now = os.time()
-  if (now - lastRefreshClickTime) < 1.5 then
-    hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-    hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
-    hs.timer.doAfter(0.1, function() hs.reload() end)
-    return
-  end
-  lastRefreshClickTime = now
-
-  -- 1. Rescue UI state & re-bind eventtaps
-  if state.midiActive then
-    pcall(function()
-      if _G.activeWatchers.midiKeyTap then
-        _G.activeWatchers.midiKeyTap:stop()
-        _G.activeWatchers.midiKeyTap:start()
-      end
-      if _G.activeWatchers.midiScrollTap then
-        _G.activeWatchers.midiScrollTap:stop()
-        _G.activeWatchers.midiScrollTap:start()
-      end
-      midi.panicAllChannels()
-      state.pressedKeys = {}
-      state.arpHeldNotes = {}
-      local h = hud.reloadMidiWebview()
-      if h then h:show() end
-    end)
-  end
-
-  -- 3. Display user notification & HUD overlay
-  hs.alert.show("UI Refreshed (Press Cmd+Alt+R again within 1.5s for Full Hammerspoon Hard Reload)", 2.0)
+  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+  hs.timer.doAfter(0.1, function() hs.reload() end)
 end)
 
 if _G.activeWatchers.settingsHotkey then

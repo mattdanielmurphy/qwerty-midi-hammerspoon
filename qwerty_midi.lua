@@ -1110,36 +1110,9 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
-  local now = os.time()
-  if (now - lastRefreshClickTime) < 1.5 then
-    hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-    hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
-    hs.timer.doAfter(0.1, function() hs.reload() end)
-    return
-  end
-  lastRefreshClickTime = now
-
-  -- 1. Rescue UI state & re-bind eventtaps
-  if state.midiActive then
-    pcall(function()
-      if _G.activeWatchers.midiKeyTap then
-        _G.activeWatchers.midiKeyTap:stop()
-        _G.activeWatchers.midiKeyTap:start()
-      end
-      if _G.activeWatchers.midiScrollTap then
-        _G.activeWatchers.midiScrollTap:stop()
-        _G.activeWatchers.midiScrollTap:start()
-      end
-      midi.panicAllChannels()
-      state.pressedKeys = {}
-      state.arpHeldNotes = {}
-      local h = hud.reloadMidiWebview()
-      if h then h:show() end
-    end)
-  end
-
-  -- 3. Display user notification & HUD overlay
-  hs.alert.show("UI Refreshed (Press Cmd+Alt+R again within 1.5s for Full Hammerspoon Hard Reload)", 2.0)
+  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+  hs.timer.doAfter(0.1, function() hs.reload() end)
 end)
 
 if _G.activeWatchers.settingsHotkey then
@@ -1203,8 +1176,15 @@ local function setHudModule(m)
   hudModule = m
 end
 
+local lastArpHudUpdateTime = 0
+
 local function updateHud(spotlightInfo, activeArpPitch)
   if hudModule and hudModule.updateWebviewHud then
+    local now = hs.timer.absoluteTime() / 1e9
+    if not spotlightInfo and (now - lastArpHudUpdateTime) < 0.04 then
+      return
+    end
+    lastArpHudUpdateTime = now
     hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
   end
 end
@@ -2108,7 +2088,7 @@ local HTML_UI_CONTENT = [[
     border: 1.5px solid #d4a359;
     border-radius: 8px;
     padding: 6px 20px;
-    box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(212, 163, 89, 0.35);
+    box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 0 12px rgba(212, 163, 89, 0.35);
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -5433,7 +5413,7 @@ local HTML_UI_CONTENT = [[
 
     const color = spotlight.color || '#d4a359';
     card.style.borderColor = color;
-    card.style.boxShadow = '0 4px 20px rgba(0,0,0,0.85), 0 0 15px ' + color + '66';
+    card.style.boxShadow = '0 0 0 1px ' + color + '66, 0 0 12px ' + color + '55';
     subEl.style.color = color;
 
     card.classList.remove('hidden');

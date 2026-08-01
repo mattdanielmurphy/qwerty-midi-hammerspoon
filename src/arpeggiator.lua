@@ -23,8 +23,15 @@ local function setHudModule(m)
   hudModule = m
 end
 
+local lastArpHudUpdateTime = 0
+
 local function updateHud(spotlightInfo, activeArpPitch)
   if hudModule and hudModule.updateWebviewHud then
+    local now = hs.timer.absoluteTime() / 1e9
+    if not spotlightInfo and (now - lastArpHudUpdateTime) < 0.04 then
+      return
+    end
+    lastArpHudUpdateTime = now
     hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
   end
 end
