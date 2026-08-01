@@ -223,7 +223,7 @@ local defaultHomeRowControls = {
   [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
   [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
   [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
-  [39] = { key = "'",   name = "Chord",   action = "chordMod",    shiftAction = "chordUp",      shiftName = "Chord +" }
+  [39] = { key = "'",   name = "Chord",   action = "chordToggle",    shiftAction = "chordUp",      shiftName = "Chord +" }
 }
 
 local ACTION_CATALOG = {

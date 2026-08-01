@@ -47,7 +47,7 @@ local function safeEvaluateJS(js)
 end
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
-  if not _G.activeWatchers.midiWebview then return end
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local baseW, baseH = 980, 280
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
@@ -121,7 +121,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     -- Singletons / Toggles
     arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
     bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset",
-    undoState = "ctrl-reset", redoState = "ctrl-reset"
+    undoState = "ctrl-reset", redoState = "ctrl-reset",
+    chordToggle = "ctrl-mode", chordMod = "ctrl-mode", chordUp = "ctrl-mode", chordDown = "ctrl-mode"
   }
 
   for code, cData in pairs(numberRowControls) do
@@ -177,19 +178,24 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local isSustain = (code == 48)
-    local isLatch = (code == 0)
+    local isSustain = (cData.action == "sustain" or cData.shiftAction == "sustain")
+    local isChordToggle = (cData.action == "chordToggle" or cData.shiftAction == "chordToggle")
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
+    
+    local isActiveToggle = false
+    if isSustain and state.sustainActive then isActiveToggle = true end
+    if isChordToggle and state.chordModeActive then isActiveToggle = true end
+
     keyUpdates[tostring(code)] = {
       note = cData.name,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
+      typeClass = isActiveToggle and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
+      sustainActive = isActiveToggle
     }
   end
 
@@ -280,6 +286,9 @@ end
 
 local function createMidiWebview()
   webviewGeneration = webviewGeneration + 1
+  lastHeartbeat = os.time()
+  evalFailCount = 0
+  _G.activeWatchers.domIsReady = false
   local myGen = webviewGeneration
   if _G.activeWatchers.midiWebview then
     -- Clear callback BEFORE delete to prevent async race nuking new webview ref
@@ -303,6 +312,7 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "domReady" then
+      _G.activeWatchers.domIsReady = true
       lastHeartbeat = os.time()
       evalFailCount = 0
       updateWebviewHud()

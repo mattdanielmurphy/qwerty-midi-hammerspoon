@@ -616,7 +616,9 @@ local function executeControlAction(act, code)
   elseif act == "arpToggle" then
     arpeggiator.toggleArpPower()
   elseif act == "chordToggle" then
-    state.chordModeActive = not state.chordModeActive
+    state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.chordWasActiveOnPress = state.chordModeActive
+    state.chordModeActive = true
     local spot = {
       title = "CHORD MODE",
       value = state.chordModeActive and "ON" or "OFF",
@@ -635,16 +637,7 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "chordMod" then
-    state.quoteHeld = true
-    local spot = {
-      title = "CHORD MODIFIER",
-      value = state.CHORDS[state.chordIdx].name,
-      subtext = "Hold ' + play notes for chords",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
     local spot = {
@@ -943,19 +936,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  if code == 39 then
-    state.pressedKeys[code] = { isControl = true, action = "chordMod" }
-    state.quoteHeld = true
-    local spot = {
-      title = "CHORD MODIFIER",
-      value = state.CHORDS[state.chordIdx] and state.CHORDS[state.chordIdx].name or "Triad",
-      subtext = "Hold ' + play notes for chords",
-      targetId = "key-39",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return true
-  end
+
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
@@ -1036,12 +1017,7 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
-  if code == 39 then
-    state.pressedKeys[code] = nil
-    state.quoteHeld = false
-    hud.updateWebviewHud()
-    return true
-  end
+
 
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
@@ -1131,9 +1107,26 @@ local function handleKeyUp(code)
         color = state.sustainActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
-    elseif act == "chordMod" then
-      state.quoteHeld = false
-      hud.updateWebviewHud()
+    elseif act == "chordToggle" then
+      local holdDuration = state.chordKeyDownTime and (hs.timer.secondsSinceEpoch() - state.chordKeyDownTime) or 0
+      if holdDuration > 0.25 then
+        state.chordModeActive = false
+      else
+        if state.chordWasActiveOnPress then
+          state.chordModeActive = false
+        else
+          state.chordModeActive = true
+        end
+      end
+      
+      local spot = {
+        title = "CHORD MODE",
+        value = state.chordModeActive and "ON" or "OFF",
+        subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
+        targetId = "header",
+        color = state.chordModeActive and "#d4a359" or "#b5aba0"
+      }
+      hud.updateWebviewHud(spot)
     else
       hud.updateWebviewHud()
     end

@@ -19,7 +19,7 @@ LAST_TRIGGER=0
 # Use fswatch in line-based mode (one path per line, no null delimiter).
 # --latency sets the minimum event coalescing window (seconds) before events fire.
 # This replaces the broken bash 3.2 null-delimited drain loops entirely.
-"$FSWATCH_BIN" --latency "$DEBOUNCE_DELAY" --exclude "src/web/" --recursive "$PROJECT_DIR/src" 2>/dev/null | \
+"$FSWATCH_BIN" --latency "$DEBOUNCE_DELAY" --exclude "src/web/" --exclude "src/ui_html.lua" --recursive "$PROJECT_DIR/src" 2>/dev/null | \
 while IFS= read -r changed_file; do
     NOW=$(date +%s)
     # Guard: skip if we already triggered within the last debounce window

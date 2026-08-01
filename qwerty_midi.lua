@@ -64,7 +64,7 @@ local function safeEvaluateJS(js)
 end
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
-  if not _G.activeWatchers.midiWebview then return end
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local baseW, baseH = 980, 280
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
@@ -138,7 +138,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     -- Singletons / Toggles
     arpToggle = "ctrl-arp", arpTopToggle = "ctrl-arptop", arpBottomToggle = "ctrl-arpbot",
     bpmEdit = "ctrl-bpmedit", randomScale = "ctrl-rand", panic = "ctrl-panic", resetAll = "ctrl-reset",
-    undoState = "ctrl-reset", redoState = "ctrl-reset"
+    undoState = "ctrl-reset", redoState = "ctrl-reset",
+    chordToggle = "ctrl-mode", chordMod = "ctrl-mode", chordUp = "ctrl-mode", chordDown = "ctrl-mode"
   }
 
   for code, cData in pairs(numberRowControls) do
@@ -194,19 +195,24 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local isSustain = (code == 48)
-    local isLatch = (code == 0)
+    local isSustain = (cData.action == "sustain" or cData.shiftAction == "sustain")
+    local isChordToggle = (cData.action == "chordToggle" or cData.shiftAction == "chordToggle")
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
+    
+    local isActiveToggle = false
+    if isSustain and state.sustainActive then isActiveToggle = true end
+    if isChordToggle and state.chordModeActive then isActiveToggle = true end
+
     keyUpdates[tostring(code)] = {
       note = cData.name,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = isLatch and (state.arpLatchActive or state.arpEnabled) and "latch-active" or pairedClass,
+      typeClass = isActiveToggle and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = (isSustain and state.sustainActive) or (isLatch and state.arpEnabled)
+      sustainActive = isActiveToggle
     }
   end
 
@@ -297,6 +303,9 @@ end
 
 local function createMidiWebview()
   webviewGeneration = webviewGeneration + 1
+  lastHeartbeat = os.time()
+  evalFailCount = 0
+  _G.activeWatchers.domIsReady = false
   local myGen = webviewGeneration
   if _G.activeWatchers.midiWebview then
     -- Clear callback BEFORE delete to prevent async race nuking new webview ref
@@ -320,6 +329,7 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "domReady" then
+      _G.activeWatchers.domIsReady = true
       lastHeartbeat = os.time()
       evalFailCount = 0
       updateWebviewHud()
@@ -1780,42 +1790,45 @@ local function getIntervalInfo(noteNum)
   return nil, semitonesFromRoot
 end
 
+local function getTransposedChordPitches(basePitch, isTopRow)
+  local rootPitch = getTransposedPitch(basePitch, isTopRow)
+  if not (state.quoteHeld or state.chordModeActive) then
+    return { rootPitch }
+  end
+  local chordDef = state.CHORDS[state.chordIdx] or state.CHORDS[1]
+  local offsets = chordDef.offsets or { 0 }
+  
+  local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
+  local noteInOctave = effectivePitch % 12
+  local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
+  if not scaleIndex or scaleIndex == -1 then
+    return { rootPitch }
+  end
+  
+  local intervals = SCALES[state.currentScaleIdx].intervals
+  local numIntervals = #intervals
+  local baseTransposedIndex = scaleIndex + state.transposeShift
+  local octave = math.floor(effectivePitch / 12) - 1
+  
+  local pitches = {}
+  for _, off in ipairs(offsets) do
+    local transposedIndex = baseTransposedIndex + off
+    local octaveOffset = math.floor(transposedIndex / numIntervals)
+    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
+    local targetInterval = intervals[idxInScale]
+    local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
+    table.insert(pitches, newPitch)
+  end
+  return pitches
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
   noteNumToName = noteNumToName,
   getIntervalInfo = getIntervalInfo,
-  getTransposedChordPitches = function(basePitch, isTopRow)
-    local rootPitch = getTransposedPitch(basePitch, isTopRow)
-    if not (state.quoteHeld or state.chordModeActive) then
-      return { rootPitch }
-    end
-    local chordDef = state.CHORDS[state.chordIdx] or state.CHORDS[1]
-    local offsets = chordDef.offsets or { 0 }
-    
-    local effectivePitch = basePitch + (isTopRow and state.topRowOctaveOffset or state.bottomRowOctaveOffset)
-    local noteInOctave = effectivePitch % 12
-    local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
-    if not scaleIndex or scaleIndex == -1 then
-      return { rootPitch }
-    end
-    
-    local intervals = SCALES[state.currentScaleIdx].intervals
-    local numIntervals = #intervals
-    local baseTransposedIndex = scaleIndex + state.transposeShift
-    local octave = math.floor(effectivePitch / 12) - 1
-    
-    local pitches = {}
-    for _, off in ipairs(offsets) do
-      local transposedIndex = baseTransposedIndex + off
-      local octaveOffset = math.floor(transposedIndex / numIntervals)
-      local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
-      local targetInterval = intervals[idxInScale]
-      local newPitch = ((octave + 1 + octaveOffset) * 12) + state.currentRoot + targetInterval + state.octaveShift
-      table.insert(pitches, newPitch)
-    end
-    return pitches
-  end
+  getTransposedChordPitches = getTransposedChordPitches,
+  getChordPitches = getTransposedChordPitches
 }
 
 end
@@ -5165,9 +5178,9 @@ local HTML_UI_CONTENT = [[
     card.classList.remove('hidden');
     card.style.transition = 'none';
     card.style.opacity = '1';
-    card.style.transform = 'translate(-50%, -100%) scale(1.0)';
-    card.style.left = '50%';
-    card.style.top = '-5px';
+    card.style.transform = 'translateY(0) scale(1.0)';
+    card.style.left = '';
+    card.style.top = '';
 
     card.offsetHeight;
 
@@ -5175,7 +5188,7 @@ local HTML_UI_CONTENT = [[
 
     spotlightTimer1 = setTimeout(() => {
       card.style.opacity = '0';
-      card.style.transform = 'translate(-50%, -100%) scale(0.85)';
+      card.style.transform = 'translateY(-10px) scale(0.85)';
 
       spotlightTimer2 = setTimeout(() => {
         card.classList.add('hidden');
@@ -6198,7 +6211,7 @@ local defaultHomeRowControls = {
   [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
   [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
   [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
-  [39] = { key = "'",   name = "Chord",   action = "chordMod",    shiftAction = "chordUp",      shiftName = "Chord +" }
+  [39] = { key = "'",   name = "Chord",   action = "chordToggle",    shiftAction = "chordUp",      shiftName = "Chord +" }
 }
 
 local ACTION_CATALOG = {
@@ -7292,7 +7305,9 @@ local function executeControlAction(act, code)
   elseif act == "arpToggle" then
     arpeggiator.toggleArpPower()
   elseif act == "chordToggle" then
-    state.chordModeActive = not state.chordModeActive
+    state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.chordWasActiveOnPress = state.chordModeActive
+    state.chordModeActive = true
     local spot = {
       title = "CHORD MODE",
       value = state.chordModeActive and "ON" or "OFF",
@@ -7311,16 +7326,7 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "chordMod" then
-    state.quoteHeld = true
-    local spot = {
-      title = "CHORD MODIFIER",
-      value = state.CHORDS[state.chordIdx].name,
-      subtext = "Hold ' + play notes for chords",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
+
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
     local spot = {
@@ -7619,19 +7625,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  if code == 39 then
-    state.pressedKeys[code] = { isControl = true, action = "chordMod" }
-    state.quoteHeld = true
-    local spot = {
-      title = "CHORD MODIFIER",
-      value = state.CHORDS[state.chordIdx] and state.CHORDS[state.chordIdx].name or "Triad",
-      subtext = "Hold ' + play notes for chords",
-      targetId = "key-39",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return true
-  end
+
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
@@ -7712,12 +7706,7 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
-  if code == 39 then
-    state.pressedKeys[code] = nil
-    state.quoteHeld = false
-    hud.updateWebviewHud()
-    return true
-  end
+
 
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
@@ -7807,9 +7796,26 @@ local function handleKeyUp(code)
         color = state.sustainActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
-    elseif act == "chordMod" then
-      state.quoteHeld = false
-      hud.updateWebviewHud()
+    elseif act == "chordToggle" then
+      local holdDuration = state.chordKeyDownTime and (hs.timer.secondsSinceEpoch() - state.chordKeyDownTime) or 0
+      if holdDuration > 0.25 then
+        state.chordModeActive = false
+      else
+        if state.chordWasActiveOnPress then
+          state.chordModeActive = false
+        else
+          state.chordModeActive = true
+        end
+      end
+      
+      local spot = {
+        title = "CHORD MODE",
+        value = state.chordModeActive and "ON" or "OFF",
+        subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
+        targetId = "header",
+        color = state.chordModeActive and "#d4a359" or "#b5aba0"
+      }
+      hud.updateWebviewHud(spot)
     else
       hud.updateWebviewHud()
     end
