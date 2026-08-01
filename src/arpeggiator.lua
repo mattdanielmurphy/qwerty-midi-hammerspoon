@@ -89,7 +89,9 @@ local function arpTick()
       state.arpGateTimer = nil
     end
     if state.arpCurrentPitch then
-      midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
       state.arpCurrentPitch = nil
       updateHud()
     end
@@ -182,7 +184,8 @@ local function arpTick()
   local isTopRowArpNote = false
   for code, p in pairs(state.arpHeldNotes) do
     if p == nextPitch then
-      local noteKey = config.getNoteKey(code)
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      local noteKey = config.getNoteKey(rawCode)
       if noteKey and noteKey.isTop then
         isTopRowArpNote = true
         break
@@ -196,11 +199,11 @@ local function arpTick()
   if gateRatio <= 1.0 and state.arpCurrentPitch then
     local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
     local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-    if state.arpActiveGateTimers and state.arpActiveGateTimers[state.arpCurrentPitch] then
-      if type(state.arpActiveGateTimers[state.arpCurrentPitch]) == "table" and state.arpActiveGateTimers[state.arpCurrentPitch].stop then
-        state.arpActiveGateTimers[state.arpCurrentPitch]:stop()
+    if state.arpActiveGateTimers and state.arpActiveGateTimers[oldP] then
+      if type(state.arpActiveGateTimers[oldP]) == "table" and state.arpActiveGateTimers[oldP].stop then
+        state.arpActiveGateTimers[oldP]:stop()
       end
-      state.arpActiveGateTimers[state.arpCurrentPitch] = nil
+      state.arpActiveGateTimers[oldP] = nil
     end
     midi.sendMidiNote("noteOff", oldP, 0, oldCh)
     state.arpCurrentPitch = nil
@@ -259,7 +262,9 @@ local function arpAddNote(code, pitch)
       state.arpHeldNotes = {}
       state.arpLatchClearedForNewChord = true
       if state.arpCurrentPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+        local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+        midi.sendMidiNote("noteOff", p, 0, c)
         state.arpCurrentPitch = nil
       end
     end
@@ -316,9 +321,12 @@ local function applyGatePercentChange()
     if state.arpActiveGateTimers then
       if gateRatio <= 1.0 then
         for pitch, timer in pairs(state.arpActiveGateTimers) do
-          if pitch ~= state.arpCurrentPitch then
+          local curPitchNum = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+          if pitch ~= curPitchNum then
             if timer then timer:stop() end
-            midi.sendMidiNote("noteOff", pitch, 0)
+            local p = type(pitch) == "table" and pitch.pitch or pitch
+            local c = type(pitch) == "table" and pitch.channel or 0
+            midi.sendMidiNote("noteOff", p, 0, c)
             state.arpActiveGateTimers[pitch] = nil
           end
         end
@@ -371,7 +379,9 @@ local function toggleArpPower()
     if count == 0 then
       stopArpTimer()
       if state.arpCurrentPitch then
-        midi.sendMidiNote("noteOff", state.arpCurrentPitch, 0)
+        local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+        local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+        midi.sendMidiNote("noteOff", p, 0, c)
         state.arpCurrentPitch = nil
       end
     end

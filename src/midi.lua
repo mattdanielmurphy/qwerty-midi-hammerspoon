@@ -32,7 +32,11 @@ local function getMidiDevice()
 end
 
 local function sendMidiNote(cmd, noteNum, vel, channel)
-  if noteNum < 0 or noteNum > 127 then return end
+  if type(noteNum) == "table" then
+    channel = channel or noteNum.channel
+    noteNum = noteNum.pitch
+  end
+  if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
     dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = channel or 0 })
