@@ -71,10 +71,11 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     local sens = state.scrollSensitivity or 0.15
     local accel = state.scrollAcceleration or 1.0
 
-    -- Apply non-linear acceleration curve based on gesture magnitude
-    local absDelta = math.abs(deltaY)
-    local accelFactor = (absDelta > 1) and (absDelta ^ (accel - 1.0)) or 1.0
-    local scaledDelta = deltaY * sens * accelFactor
+    -- Clamp deltaY to prevent extreme spikes
+    deltaY = math.max(-100, math.min(100, deltaY))
+
+    -- Safe acceleration factor
+    local scaledDelta = deltaY * sens * accel
 
     if phase ~= 0 then
       local decay = state.scrollFrictionalDecay or 0.85
