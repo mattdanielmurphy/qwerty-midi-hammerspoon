@@ -2063,7 +2063,8 @@ local HTML_UI_CONTENT = [[
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
     width: 100%;
     height: 100%;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -2073,14 +2074,13 @@ local HTML_UI_CONTENT = [[
   }
 
   #notification-zone {
-    width: 100%;
-    align-self: stretch;
-    flex-shrink: 0;
+    position: absolute;
+    top: 6px;
+    left: 0; right: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 44px;
-    margin-bottom: 6px;
+    z-index: 99999;
     pointer-events: none;
   }
 
