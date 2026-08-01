@@ -55,7 +55,7 @@
     border: 1.5px solid #d4a359;
     border-radius: 8px;
     padding: 6px 20px;
-    box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(212, 163, 89, 0.35);
+    box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 0 12px rgba(212, 163, 89, 0.35);
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -3380,7 +3380,7 @@
 
     const color = spotlight.color || '#d4a359';
     card.style.borderColor = color;
-    card.style.boxShadow = '0 4px 20px rgba(0,0,0,0.85), 0 0 15px ' + color + '66';
+    card.style.boxShadow = '0 0 0 1px ' + color + '66, 0 0 12px ' + color + '55';
     subEl.style.color = color;
 
     card.classList.remove('hidden');
