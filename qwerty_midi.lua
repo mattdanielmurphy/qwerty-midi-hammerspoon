@@ -175,10 +175,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       typeClass = "fifth-key"
     end
 
-    local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and state.arpCurrentPitch and noteNum == state.arpCurrentPitch then
-      isPressed = true
-    end
+      local isPressed = (state.pressedKeys[code] ~= nil)
+      local currentArpPitch = activeArpPitch or (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch)
+      if state.arpEnabled and currentArpPitch and noteNum == currentArpPitch then
+        isPressed = true
+      end
 
     local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
 
