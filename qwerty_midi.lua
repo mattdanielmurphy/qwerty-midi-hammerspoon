@@ -6031,7 +6031,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Base Sensitivity</strong>
-          <span>(Range: 0.02 - 2.00)</span>
+          <span>Baseline 1:1 speed multiplier for standard finger movements (0.02 - 2.00)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="sensitivitySlider" min="0.02" max="2.00" step="0.01"
@@ -6044,7 +6044,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Speed / Acceleration</strong>
-          <span>(Range: 0.10 - 3.00)</span>
+          <span>Active velocity multiplier while your fingers move on the glass (0.10 - 3.00)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="accelerationSlider" min="0.10" max="3.00" step="0.10"
@@ -6057,7 +6057,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Inertia Initial Kick</strong>
-          <span>(Range: 0.00 - 2.00)</span>
+          <span>Initial impulse strength when fingers break contact (0.00 = hard stop)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="initSlider" min="0.00" max="2.00" step="0.01"
@@ -6070,7 +6070,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Friction / Decay Rate</strong>
-          <span>(Range: 0.10 - 0.99)</span>
+          <span>Deceleration rate after lift-off (0.10 = instant stop, 0.95 = long glide)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="decaySlider" min="0.10" max="0.99" step="0.01"
@@ -6083,7 +6083,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Velocity Curve Exponent</strong>
-          <span>(Range: 0.5 - 3.0)</span>
+          <span>Gesture curve shape (1.0 = linear, 2.0 = exponential ramp-up/down)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="curveSlider" min="0.5" max="3.0" step="0.1"
@@ -6094,6 +6094,7 @@ local function generateSettingsHTML()
       </div>
       <div style="margin-top: 15px;">
         <canvas id="physicsCanvas" width="460" height="140" style="background:rgba(20,16,10,0.6); border:1px solid rgba(212,163,89,0.3); border-radius:8px; cursor:crosshair;"></canvas>
+        <div style="font-size: 0.72rem; color: rgba(212,163,89,0.7); margin-top: 6px; display: flex; justify-content: space-between;"><span>── Solid: Response Curve</span><span>- - Dashed: Coasting Tail</span><span>Scroll box to test</span></div>
       </div>
     </div>
 
