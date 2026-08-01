@@ -1853,18 +1853,18 @@ local HTML_UI_CONTENT = [[
             halfTop.appendChild(labelTop);
             pad.appendChild(halfTop);
 
-            const halfBot = document.createElement('div');
-            halfBot.className = 'key-half key-half-bottom';
-            halfBot.dataset.half = 'normal';
+            const halfBottom = document.createElement('div');
+            halfBottom.className = 'key-half key-half-bottom';
+            halfBottom.dataset.half = 'normal';
             const noteBot = document.createElement('span');
             noteBot.className = 'key-note';
             noteBot.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
             const labelBot = document.createElement('span');
             labelBot.className = 'half-label';
             labelBot.textContent = '⇥';
-            halfBot.appendChild(noteBot);
-            halfBot.appendChild(labelBot);
-            pad.appendChild(halfBot);
+            halfBottom.appendChild(noteBot);
+            halfBottom.appendChild(labelBot);
+            pad.appendChild(halfBottom);
 
           pad.addEventListener('mousedown', (e) => {
             if (isEditMode) {
@@ -2005,7 +2005,12 @@ local HTML_UI_CONTENT = [[
         });
       }
     });
+  } catch (err) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: '[ERROR] initGrid exception: ' + (err.stack || err) });
+    }
   }
+}
 
   // Layout Editor & Action Library Controller Logic
   let isEditMode = false;
@@ -3397,9 +3402,6 @@ local HTML_UI_CONTENT = [[
         renderCount = 0;
       }
 
-
-      currentWorkingLayout = (configData && configData.customLayout) ? configData.customLayout : {};
-
       const container = document.getElementById('hud-container');
       if (container) {
         if (shiftModeActive || data.shiftHeld) {
@@ -3426,14 +3428,6 @@ local HTML_UI_CONTENT = [[
           }
         }
       }
-      
-      const renderTime = performance.now() - t0;
-      if (renderTime > 15 || renderCount === 0) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'renderHud completed in ' + renderTime.toFixed(2) + 'ms' });
-      }
-    } catch (err) {
-      midiControllerUC.postMessage({ type: 'log', message: 'CRITICAL renderHud ERROR: ' + (err.stack || err) });
-    }
 
       if (data.spotlight) {
         showSpotlight(data.spotlight);
@@ -3445,7 +3439,8 @@ local HTML_UI_CONTENT = [[
       }
 
       if (data.modeName) {
-        document.getElementById('mode-name').textContent = data.modeName;
+        const modeEl = document.getElementById('mode-name');
+        if (modeEl) modeEl.textContent = data.modeName;
       }
 
       if (data.arpEnabled !== undefined) {
@@ -3519,7 +3514,8 @@ local HTML_UI_CONTENT = [[
       }
 
       if (data.statusText !== undefined) {
-        document.getElementById('status-text').textContent = data.statusText;
+        const st = document.getElementById('status-text');
+        if (st) st.textContent = data.statusText;
       }
 
       if (data.topOctaveStr !== undefined) {
@@ -3544,7 +3540,8 @@ local HTML_UI_CONTENT = [[
       }
 
       if (data.modeFrac !== undefined && !isModeDragging) {
-        document.getElementById('mode-thumb').style.left = (data.modeFrac * 100) + '%';
+        const thumb = document.getElementById('mode-thumb');
+        if (thumb) thumb.style.left = (data.modeFrac * 100) + '%';
       }
 
       if (data.modWheel !== undefined) {
@@ -3554,20 +3551,19 @@ local HTML_UI_CONTENT = [[
         const fillEl = document.getElementById('mod-wheel-fill');
         const labelEl = document.getElementById('mod-wheel-label');
         const widgetEl = document.getElementById('mod-wheel-widget');
-        if (data.modWheel > 0) {
-          container.classList.add('mod-active');
-          widgetEl.classList.add('active');
-        } else {
-          container.classList.remove('mod-active');
-          widgetEl.classList.remove('active');
+        if (container && widgetEl) {
+          if (data.modWheel > 0) {
+            container.classList.add('mod-active');
+            widgetEl.classList.add('active');
+          } else {
+            container.classList.remove('mod-active');
+            widgetEl.classList.remove('active');
+          }
         }
         if (fillEl) {
           fillEl.style.width = (intensity * 100) + '%';
-          if (data.modWheel >= 80) {
-            fillEl.classList.add('hot');
-          } else {
-            fillEl.classList.remove('hot');
-          }
+          if (data.modWheel >= 80) fillEl.classList.add('hot');
+          else fillEl.classList.remove('hot');
         }
         if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
       }
@@ -3579,7 +3575,7 @@ local HTML_UI_CONTENT = [[
             const noteEl = el.querySelector(':scope > .key-note');
             if (noteEl) {
               if (shiftModeActive && (currentWorkingLayout || {})[code]) {
-                const binding = (currentWorkingLayout || {})[code];
+                const binding = currentWorkingLayout[code];
                 noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
               } else if (data.shiftHeld && k.shiftNote !== undefined) {
                 noteEl.textContent = k.shiftNote;
@@ -3593,7 +3589,7 @@ local HTML_UI_CONTENT = [[
             const halfBottom = el.querySelector('.key-half-bottom .key-note');
             if (halfTop) {
               if ((currentWorkingLayout || {})[code]) {
-                const binding = (currentWorkingLayout || {})[code];
+                const binding = currentWorkingLayout[code];
                 halfTop.textContent = binding.shiftName || binding.shiftAction || k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               } else {
                 halfTop.textContent = k.shiftNote || k.shiftAction || builtIn.shiftLabel || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
@@ -3601,7 +3597,7 @@ local HTML_UI_CONTENT = [[
             }
             if (halfBottom) {
               if ((currentWorkingLayout || {})[code]) {
-                const binding = (currentWorkingLayout || {})[code];
+                const binding = currentWorkingLayout[code];
                 halfBottom.textContent = binding.name || binding.action || k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               } else {
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
@@ -3638,8 +3634,15 @@ local HTML_UI_CONTENT = [[
           }
         }
       }
+
+      const renderTime = performance.now() - t0;
+      if ((renderTime > 15 || renderCount === 0) && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'renderHud completed in ' + renderTime.toFixed(2) + 'ms' });
+      }
     } catch (err) {
-      console.error('HUD render error:', err);
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'CRITICAL renderHud ERROR: ' + (err.stack || err) });
+      }
     }
   }
 
