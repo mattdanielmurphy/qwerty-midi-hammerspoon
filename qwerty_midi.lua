@@ -7647,7 +7647,7 @@ local function handleKeyDown(code)
   if k and k.action and k.action ~= "" and k.action ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = k.action }
     executeControlAction(k.action, code)
-    if k.action ~= "sustain" then
+    if k.action ~= "sustain" and k.action ~= "chordMod" then
       stopControlRepeat(code)
       local entry = {}
       controlRepeatTimers[code] = entry
