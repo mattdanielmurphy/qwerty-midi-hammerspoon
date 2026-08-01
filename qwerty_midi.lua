@@ -1515,11 +1515,49 @@ end
 
 local function updateLatchedArpNotes()
   if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
+
+  -- Detect if any chord-mode compound keys exist (e.g. "45_60", "45_64", "45_67").
+  -- Simple single-note entries are plain integers or strings without "_".
+  local hasCompoundKeys = false
   for code, _ in pairs(state.arpHeldNotes) do
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    local noteKey = rawCode and config.getNoteKey(rawCode)
-    if noteKey then
-      state.arpHeldNotes[code] = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
+    if type(code) == "string" and code:find("_", 1, true) then
+      hasCompoundKeys = true
+      break
+    end
+  end
+
+  if hasCompoundKeys then
+    -- Chord mode: rebuild all compound entries with fresh chord pitches for the new transposition.
+    -- Must be two-pass to avoid modifying the table while iterating.
+    local uniqueBaseCodes = {}
+    local keysToRemove = {}
+    for code, _ in pairs(state.arpHeldNotes) do
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      if rawCode then
+        uniqueBaseCodes[rawCode] = true
+        table.insert(keysToRemove, code)
+      end
+    end
+    for _, code in ipairs(keysToRemove) do
+      state.arpHeldNotes[code] = nil
+    end
+    for rawCode, _ in pairs(uniqueBaseCodes) do
+      local noteKey = config.getNoteKey(rawCode)
+      if noteKey then
+        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
+        for _, p in ipairs(newPitches) do
+          state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
+        end
+      end
+    end
+  else
+    -- Simple single-note mode: just update each pitch value in place.
+    for code, _ in pairs(state.arpHeldNotes) do
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      local noteKey = rawCode and config.getNoteKey(rawCode)
+      if noteKey then
+        state.arpHeldNotes[code] = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
+      end
     end
   end
 end
