@@ -321,6 +321,28 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
+          <strong>Max Inertia Duration</strong>
+          <span>Hard cap on momentum duration (50ms = sharp stop, 500ms = long coast)</span>
+        </div>
+        <input type="number" id="maxInertiaMs" value="%d" min="50" max="600" step="10"
+          onchange="send('setMaxInertia', parseInt(this.value))">
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Low Velocity Cutoff</strong>
+          <span>Cuts off the slow unpredictable tail at the end of momentum</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="inertiaCutoffSlider" min="0.1" max="2.0" step="0.1"
+            value="%s"
+            oninput="onCutoff(this.value)">
+          <div class="slider-val" id="inertiaCutoffVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
           <strong>Velocity Curve Exponent</strong>
           <span>Gesture curve shape (1.0 = linear, 2.0 = exponential ramp-up/down)</span>
         </div>
@@ -333,7 +355,7 @@ local function generateSettingsHTML()
       </div>
       <div style="margin-top: 15px;">
         <canvas id="physicsCanvas" width="460" height="140" style="background:rgba(20,16,10,0.6); border:1px solid rgba(212,163,89,0.3); border-radius:8px; cursor:crosshair;"></canvas>
-        <div style="font-size: 0.72rem; color: rgba(212,163,89,0.7); margin-top: 6px; display: flex; justify-content: space-between;"><span>── Solid: Response Curve</span><span>- - Dashed: Coasting Tail</span><span>Scroll box to test</span></div>
+        <div style="font-size: 0.72rem; color: rgba(212,163,89,0.7); margin-top: 6px; display: flex; justify-content: space-between;"><span>── Solid: Response Curve</span><span>- - Dashed: Coasting Tail (with Hard Cutoff)</span><span>Scroll box to test</span></div>
       </div>
     </div>
 
@@ -426,6 +448,11 @@ local function generateSettingsHTML()
     send('setInit', parseFloat(v));
     drawPhysicsCanvas();
   }
+  function onCutoff(v) {
+    document.getElementById('inertiaCutoffVal').textContent = parseFloat(v).toFixed(1);
+    send('setCutoff', parseFloat(v));
+    drawPhysicsCanvas();
+  }
   function onCurve(v) {
     document.getElementById('curveVal').textContent = parseFloat(v).toFixed(1);
     send('setCurve', parseFloat(v));
@@ -464,8 +491,13 @@ local function generateSettingsHTML()
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(212,163,89,0.6)';
     ctx.setLineDash([5, 5]);
+    const maxInertia = parseFloat(document.getElementById('maxInertiaMs').value);
     for(let x=0; x<w; x++) {
       let time = x / w;
+      if (time * 1000 > maxInertia) {
+        ctx.lineTo(x, h * 0.8);
+        continue;
+      }
       let y = (h * 0.8) - (initGain * Math.pow(decay, time * 10) * h * 0.5);
       if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
@@ -530,6 +562,16 @@ local function generateSettingsHTML()
       var valEl = document.getElementById('decayVal');
       if (valEl) valEl.textContent = parseFloat(s.scrollInertiaDecay).toFixed(2);
     }
+    if (s.scrollMaxInertiaMs !== undefined) {
+      var el = document.getElementById('maxInertiaMs');
+      if (el) el.value = s.scrollMaxInertiaMs;
+    }
+    if (s.scrollInertiaCutoff !== undefined) {
+      var el = document.getElementById('inertiaCutoffSlider');
+      if (el) el.value = s.scrollInertiaCutoff;
+      var valEl = document.getElementById('inertiaCutoffVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaCutoff).toFixed(1);
+    }
     if (s.scrollCurveExponent !== undefined) {
       var el = document.getElementById('curveSlider');
       if (el) el.value = s.scrollCurveExponent;
@@ -548,6 +590,8 @@ local function generateSettingsHTML()
     accFmt, accFmt,
     initFmt, initFmt,
     decayFmt, decayFmt,
+    math.floor(state.scrollMaxInertiaMs or 250),
+    string.format("%.1f", state.scrollInertiaCutoff or 0.5), string.format("%.1f", state.scrollInertiaCutoff or 0.5),
     curveFmt, curveFmt,
     -- bpm step selects
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
@@ -608,6 +652,14 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 1.0
       state.scrollCurveExponent = math.max(0.5, math.min(3.0, val))
       hs.settings.set("qwertyMidi_scrollCurveExponent", val)
+    elseif body.type == "setMaxInertia" then
+      local val = tonumber(body.value) or 250
+      state.scrollMaxInertiaMs = math.max(50, math.min(600, val))
+      hs.settings.set("qwertyMidi_scrollMaxInertiaMs", val)
+    elseif body.type == "setCutoff" then
+      local val = tonumber(body.value) or 0.5
+      state.scrollInertiaCutoff = math.max(0.1, math.min(2.0, val))
+      hs.settings.set("qwertyMidi_scrollInertiaCutoff", val)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -648,7 +700,9 @@ local function syncStateToWebview()
     scrollAcceleration = state.scrollAcceleration or 1.0,
     scrollInertiaInitial = state.scrollInertiaInitial or 1.0,
     scrollInertiaDecay = state.scrollInertiaDecay or 0.85,
-    scrollCurveExponent = state.scrollCurveExponent or 1.0
+    scrollCurveExponent = state.scrollCurveExponent or 1.0,
+    scrollMaxInertiaMs = state.scrollMaxInertiaMs or 250,
+    scrollInertiaCutoff = state.scrollInertiaCutoff or 0.5
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")

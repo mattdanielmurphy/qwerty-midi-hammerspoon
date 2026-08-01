@@ -68,11 +68,17 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     -- Scroll handling
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
+    if phase == 0 then
+      _G.activeWatchers.lastActiveTouchTime = hs.timer.absoluteTime()
+    end
+
     local sens = state.scrollSensitivity or 0.15
     local accel = state.scrollAcceleration or 1.0
     local initGain = state.scrollInertiaInitial or 1.0
     local decay = state.scrollInertiaDecay or 0.85
     local curveExp = state.scrollCurveExponent or 1.0
+    local maxInertiaMs = state.scrollMaxInertiaMs or 250
+    local inertiaCutoff = state.scrollInertiaCutoff or 0.5
 
     deltaY = math.max(-100, math.min(100, deltaY))
 
@@ -83,6 +89,10 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     local scaledDelta = curvedDelta * sens * accel
 
     if phase ~= 0 then
+      local timeSinceTouch = (hs.timer.absoluteTime() - (_G.activeWatchers.lastActiveTouchTime or 0)) / 1e6
+      if timeSinceTouch > maxInertiaMs then return true end
+      if math.abs(scaledDelta) < inertiaCutoff then return true end
+
       if initGain == 0 then return true end
       scaledDelta = scaledDelta * initGain * decay
     end
