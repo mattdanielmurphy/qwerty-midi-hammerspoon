@@ -1176,15 +1176,8 @@ local function setHudModule(m)
   hudModule = m
 end
 
-local lastArpHudUpdateTime = 0
-
 local function updateHud(spotlightInfo, activeArpPitch)
   if hudModule and hudModule.updateWebviewHud then
-    local now = hs.timer.absoluteTime() / 1e9
-    if not spotlightInfo and (now - lastArpHudUpdateTime) < 0.04 then
-      return
-    end
-    lastArpHudUpdateTime = now
     hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
   end
 end
@@ -1230,7 +1223,7 @@ local function arpTick()
     local noteKey = rawCode and config.getNoteKey(rawCode)
     local isTop = noteKey and noteKey.isTop or false
     local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    if rowArpEnabled then
+    if rowArpEnabled and pitch then
       table.insert(pitchList, pitch)
     end
   end
@@ -1381,7 +1374,6 @@ local function arpTick()
     midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
     if state.arpCurrentPitch and (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitchToRelease then
       state.arpCurrentPitch = nil
-      updateHud()
     end
     if state.arpActiveGateTimers then state.arpActiveGateTimers[pitchToRelease] = nil end
   end)
