@@ -1001,7 +1001,10 @@ local function handleKeyDown(code)
     local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     local arpActive = state.arpEnabled and arpEnabledForRow
     local sustainActive = state.sustainActive
-    local isArpNote = state.shiftHeld and (not arpActive) or arpActive
+    local isArpNote = arpActive
+    if state.shiftHeld then
+      isArpNote = not arpActive
+    end
     local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
     

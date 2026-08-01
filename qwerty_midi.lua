@@ -2672,8 +2672,11 @@ local HTML_UI_CONTENT = [[
   .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(212, 163, 89, 0.15); }
 
   .key-pad.control-pad {
-    background: rgba(30, 26, 23, 0.95);
-    border-color: rgba(55, 48, 42, 1.0);
+    background: rgba(200, 190, 180, 0.08);
+    border-color: rgba(100, 95, 90, 0.6);
+  }
+  .key-pad.control-pad:active, .key-pad.control-pad.pressed {
+    background: rgba(200, 190, 180, 0.2);
   }
 
   .key-pad.control-pad .key-note {
@@ -2796,6 +2799,20 @@ local HTML_UI_CONTENT = [[
   }
 
   /* Edit Mode & Action Library Drawer Styling */
+  #hud-container.shift-active-labels .arp-btn.arp-active {
+    background: rgba(200, 100, 100, 0.3);
+    border-color: rgba(200, 100, 100, 0.6);
+    box-shadow: 0 0 8px rgba(200, 100, 100, 0.4);
+    color: #fcc;
+  }
+  #hud-container.shift-active-labels .arp-row-toggle.active {
+    color: #f88;
+    text-shadow: 0 0 4px rgba(200, 100, 100, 0.4);
+  }
+  #hud-container.shift-active-labels .key-pad.arp-held .latch-dot,
+  #hud-container.shift-active-labels .key-pad.arp-playing .latch-dot {
+    opacity: 0.1 !important;
+  }
   .edit-btn {
     background: rgba(212, 163, 89, 0.2);
     border: 1.5px solid #d4a359;
@@ -5518,9 +5535,14 @@ local HTML_UI_CONTENT = [[
         const arpPowerBtn = document.getElementById('arp-power-btn');
         if (arpPowerBtn) {
           const latch = data.arpLatchActive;
+          const isShift = data.shiftHeld || shiftModeActive;
           if (!data.arpEnabled) {
             arpPowerBtn.textContent = 'ARP: OFF';
             arpPowerBtn.classList.remove('arp-active', 'arp-latch');
+          } else if (isShift) {
+            arpPowerBtn.textContent = 'ARP: BYPASS';
+            arpPowerBtn.classList.add('arp-active');
+            arpPowerBtn.classList.remove('arp-latch');
           } else if (latch) {
             arpPowerBtn.textContent = 'ARP: LATCH';
             arpPowerBtn.classList.add('arp-active', 'arp-latch');
@@ -8230,7 +8252,10 @@ local function handleKeyDown(code)
     local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     local arpActive = state.arpEnabled and arpEnabledForRow
     local sustainActive = state.sustainActive
-    local isArpNote = state.shiftHeld and (not arpActive) or arpActive
+    local isArpNote = arpActive
+    if state.shiftHeld then
+      isArpNote = not arpActive
+    end
     local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
     
