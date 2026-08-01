@@ -943,6 +943,20 @@ local function handleKeyDown(code)
     return true
   end
 
+  if code == 39 then
+    state.pressedKeys[code] = { isControl = true, action = "chordMod" }
+    state.quoteHeld = true
+    local spot = {
+      title = "CHORD MODIFIER",
+      value = state.CHORDS[state.chordIdx] and state.CHORDS[state.chordIdx].name or "Triad",
+      subtext = "Hold ' + play notes for chords",
+      targetId = "key-39",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return true
+  end
+
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
     if k and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
@@ -1022,6 +1036,13 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
+  if code == 39 then
+    state.pressedKeys[code] = nil
+    state.quoteHeld = false
+    hud.updateWebviewHud()
+    return true
+  end
+
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
