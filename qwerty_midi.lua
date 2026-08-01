@@ -3439,7 +3439,7 @@ local HTML_UI_CONTENT = [[
       { code: 40, keyLabel: "K", isControl: true, noteLabel: "Trnsp +" },
       { code: 37, keyLabel: "L", isControl: true, noteLabel: "Root +" },
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Mode +" },
-      { code: 39, keyLabel: "\'" }
+      { code: 39, keyLabel: "\'", isControl: true, noteLabel: "Chord" }
     ],
     lower: [
       { code: 56, keyLabel: "Shift", isDummy: true, width: 120 },
@@ -6195,7 +6195,8 @@ local defaultHomeRowControls = {
   [38] = { key = "J",   name = "Trnsp -", action = "trnspDown",   shiftAction = "volDown",    shiftName = "Vol -" },
   [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
   [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
-  [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" }
+  [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
+  [39] = { key = "'",   name = "Chord",   action = "chordMod",    shiftAction = "chordUp",      shiftName = "Chord +" }
 }
 
 local ACTION_CATALOG = {
@@ -6228,6 +6229,7 @@ local ACTION_CATALOG = {
       { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
       { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
       { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
+      { id = "chordMod", name = "Chord Mod", typeClass = "ctrl-mode", description = "Hold for chord trigger mode" },
       { id = "chordUp", name = "Chord +", typeClass = "ctrl-mode", description = "Cycle chord pattern forward" },
       { id = "chordDown", name = "Chord -", typeClass = "ctrl-mode", description = "Cycle chord pattern backward" },
       { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
@@ -7307,6 +7309,16 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+  elseif act == "chordMod" then
+    state.quoteHeld = true
+    local spot = {
+      title = "CHORD MODIFIER",
+      value = state.CHORDS[state.chordIdx].name,
+      subtext = "Hold ' + play notes for chords",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
     local spot = {
@@ -7655,19 +7667,6 @@ local function handleKeyDown(code)
     return true
   end
 
-  if code == 39 then
-    state.quoteHeld = true
-    local spot = { 
-      title = "CHORD MODIFIER", 
-      value = state.CHORDS[state.chordIdx].name, 
-      subtext = "Hold ' + play notes for chords", 
-      targetId = "header", 
-      color = "#d4a359" 
-    }
-    hud.updateWebviewHud(spot)
-    return true
-  end
-
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
@@ -7697,11 +7696,6 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
-  if code == 39 then
-    state.quoteHeld = false
-    hud.updateWebviewHud()
-    return true
-  end
   if code == 50 then -- Backtick
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
@@ -7790,6 +7784,9 @@ local function handleKeyUp(code)
         color = state.sustainActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
+    elseif act == "chordMod" then
+      state.quoteHeld = false
+      hud.updateWebviewHud()
     else
       hud.updateWebviewHud()
     end

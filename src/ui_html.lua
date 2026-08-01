@@ -1618,7 +1618,7 @@ local HTML_UI_CONTENT = [[
       { code: 40, keyLabel: "K", isControl: true, noteLabel: "Trnsp +" },
       { code: 37, keyLabel: "L", isControl: true, noteLabel: "Root +" },
       { code: 41, keyLabel: ";", isControl: true, noteLabel: "Mode +" },
-      { code: 39, keyLabel: "\'" }
+      { code: 39, keyLabel: "\'", isControl: true, noteLabel: "Chord" }
     ],
     lower: [
       { code: 56, keyLabel: "Shift", isDummy: true, width: 120 },
