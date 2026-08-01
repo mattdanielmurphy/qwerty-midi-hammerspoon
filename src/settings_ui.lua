@@ -11,8 +11,10 @@ local function generateSettingsHTML()
   local gate           = state.arpGatePercent or 80
   local zoom           = state.zoomLevel or 1.0
   local sensitivity = state.scrollSensitivity or 0.15
-  local acceleration  = state.scrollAcceleration or 1.0
-  local decay         = state.scrollFrictionalDecay or 0.85
+  local acceleration = state.scrollAcceleration or 1.0
+  local initGain = state.scrollInertiaInitial or 1.0
+  local decay = state.scrollInertiaDecay or 0.85
+  local curveExp = state.scrollCurveExponent or 1.0
 
   -- Build BPM step selected states
   local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
@@ -27,7 +29,9 @@ local function generateSettingsHTML()
   -- Format floats nicely for slider defaults
   local sensFmt    = string.format("%.2f", sensitivity)
   local accFmt     = string.format("%.2f", acceleration)
+  local initFmt    = string.format("%.2f", initGain)
   local decayFmt   = string.format("%.2f", decay)
+  local curveFmt   = string.format("%.1f", curveExp)
 
   return string.format([[
 <!DOCTYPE html>
@@ -265,8 +269,8 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Mod Wheel Base Sensitivity</strong>
-          <span>Base scaling multiplier</span>
+          <strong>Base Sensitivity</strong>
+          <span>(Range: 0.02 - 2.00)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="sensitivitySlider" min="0.02" max="2.00" step="0.01"
@@ -278,8 +282,8 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Velocity Acceleration</strong>
-          <span>Dynamic velocity exponent (0.1-3.0)</span>
+          <strong>Speed / Acceleration</strong>
+          <span>(Range: 0.10 - 3.00)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="accelerationSlider" min="0.10" max="3.00" step="0.10"
@@ -291,14 +295,40 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Post-Release Coasting</strong>
-          <span>Inertia Friction (0.00-0.98)</span>
+          <strong>Inertia Initial Kick</strong>
+          <span>(Range: 0.00 - 2.00)</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="decaySlider" min="0.00" max="0.98" step="0.01"
+          <input type="range" id="initSlider" min="0.00" max="2.00" step="0.01"
+            value="%s"
+            oninput="onInit(this.value)">
+          <div class="slider-val" id="initVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Friction / Decay Rate</strong>
+          <span>(Range: 0.10 - 0.99)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="decaySlider" min="0.10" max="0.99" step="0.01"
             value="%s"
             oninput="onDecay(this.value)">
           <div class="slider-val" id="decayVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Velocity Curve Exponent</strong>
+          <span>(Range: 0.5 - 3.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="curveSlider" min="0.5" max="3.0" step="0.1"
+            value="%s"
+            oninput="onCurve(this.value)">
+          <div class="slider-val" id="curveVal">%s</div>
         </div>
       </div>
     </div>
@@ -384,6 +414,14 @@ local function generateSettingsHTML()
     document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
     send('setDecay', parseFloat(v));
   }
+  function onInit(v) {
+    document.getElementById('initVal').textContent = parseFloat(v).toFixed(2);
+    send('setInit', parseFloat(v));
+  }
+  function onCurve(v) {
+    document.getElementById('curveVal').textContent = parseFloat(v).toFixed(1);
+    send('setCurve', parseFloat(v));
+  }
   function syncState(s) {
     if (!s) return;
     if (s.bpmStepSize !== undefined) {
@@ -414,11 +452,23 @@ local function generateSettingsHTML()
       var valEl = document.getElementById('accelerationVal');
       if (valEl) valEl.textContent = parseFloat(s.scrollAcceleration).toFixed(2);
     }
-    if (s.scrollFrictionalDecay !== undefined) {
+    if (s.scrollInertiaInitial !== undefined) {
+      var el = document.getElementById('initSlider');
+      if (el) el.value = s.scrollInertiaInitial;
+      var valEl = document.getElementById('initVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaInitial).toFixed(2);
+    }
+    if (s.scrollInertiaDecay !== undefined) {
       var el = document.getElementById('decaySlider');
-      if (el) el.value = s.scrollFrictionalDecay;
+      if (el) el.value = s.scrollInertiaDecay;
       var valEl = document.getElementById('decayVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollFrictionalDecay).toFixed(2);
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaDecay).toFixed(2);
+    }
+    if (s.scrollCurveExponent !== undefined) {
+      var el = document.getElementById('curveSlider');
+      if (el) el.value = s.scrollCurveExponent;
+      var valEl = document.getElementById('curveVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollCurveExponent).toFixed(1);
     }
   }
 </script>
@@ -429,8 +479,9 @@ local function generateSettingsHTML()
     sensFmt, sensFmt,
     -- acceleration slider
     accFmt, accFmt,
-    -- momentum slider
+    initFmt, initFmt,
     decayFmt, decayFmt,
+    curveFmt, curveFmt,
     -- bpm step selects
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
     -- logic sync checked
@@ -478,10 +529,18 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 1.0
       state.scrollAcceleration = val
       hs.settings.set("qwertyMidi_scrollAcceleration", val)
+    elseif body.type == "setInit" then
+      local val = tonumber(body.value) or 1.0
+      state.scrollInertiaInitial = val
+      hs.settings.set("qwertyMidi_scrollInertiaInitial", val)
     elseif body.type == "setDecay" then
       local val = tonumber(body.value) or 0.85
-      state.scrollFrictionalDecay = math.max(0, math.min(0.98, val))
-      hs.settings.set("qwertyMidi_scrollFrictionalDecay", val)
+      state.scrollInertiaDecay = math.max(0.1, math.min(0.99, val))
+      hs.settings.set("qwertyMidi_scrollInertiaDecay", val)
+    elseif body.type == "setCurve" then
+      local val = tonumber(body.value) or 1.0
+      state.scrollCurveExponent = math.max(0.5, math.min(3.0, val))
+      hs.settings.set("qwertyMidi_scrollCurveExponent", val)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -520,7 +579,9 @@ local function syncStateToWebview()
     zoomLevel = state.zoomLevel or 1.0,
     scrollSensitivity = state.scrollSensitivity or 0.15,
     scrollAcceleration = state.scrollAcceleration or 1.0,
-    scrollFrictionalDecay = state.scrollFrictionalDecay or 0.85
+    scrollInertiaInitial = state.scrollInertiaInitial or 1.0,
+    scrollInertiaDecay = state.scrollInertiaDecay or 0.85,
+    scrollCurveExponent = state.scrollCurveExponent or 1.0
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")

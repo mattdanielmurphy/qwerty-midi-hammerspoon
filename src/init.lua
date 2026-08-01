@@ -70,19 +70,21 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
     local sens = state.scrollSensitivity or 0.15
     local accel = state.scrollAcceleration or 1.0
+    local initGain = state.scrollInertiaInitial or 1.0
+    local decay = state.scrollInertiaDecay or 0.85
+    local curveExp = state.scrollCurveExponent or 1.0
 
-    -- Clamp deltaY to prevent extreme spikes
     deltaY = math.max(-100, math.min(100, deltaY))
 
-    -- Safe acceleration factor
-    local scaledDelta = deltaY * sens * accel
+    -- Curve shape mapping: apply curve exponent on magnitude
+    local absDelta = math.abs(deltaY)
+    local curvedDelta = (absDelta ^ curveExp) * (deltaY >= 0 and 1 or -1)
+
+    local scaledDelta = curvedDelta * sens * accel
 
     if phase ~= 0 then
-      local decay = state.scrollFrictionalDecay or 0.85
-      if decay == 0 then
-        return true
-      end
-      scaledDelta = scaledDelta * decay
+      if initGain == 0 then return true end
+      scaledDelta = scaledDelta * initGain * decay
     end
 
     deltaY = scaledDelta

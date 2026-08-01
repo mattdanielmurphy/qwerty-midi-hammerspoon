@@ -90,7 +90,9 @@ local state = {
   -- Scroll / Trackpad
   scrollSensitivity     = getSetting("scrollSensitivity", 0.15),
   scrollAcceleration    = getSetting("scrollAcceleration", 1.0),
-  scrollFrictionalDecay = getSetting("scrollFrictionalDecay", 0.85),
+  scrollInertiaInitial  = getSetting("scrollInertiaInitial", 1.0),
+  scrollInertiaDecay    = getSetting("scrollInertiaDecay", 0.85),
+  scrollCurveExponent   = getSetting("scrollCurveExponent", 1.0),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
@@ -133,7 +135,9 @@ local function saveSettings()
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
   state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
   state.scrollAcceleration = tonumber(state.scrollAcceleration) or 1.0
-  state.scrollFrictionalDecay = tonumber(state.scrollFrictionalDecay) or 0.85
+  state.scrollInertiaInitial = tonumber(state.scrollInertiaInitial) or 1.0
+  state.scrollInertiaDecay = tonumber(state.scrollInertiaDecay) or 0.85
+  state.scrollCurveExponent = tonumber(state.scrollCurveExponent) or 1.0
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
@@ -158,7 +162,9 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
   hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
-  hs.settings.set("qwertyMidi_scrollFrictionalDecay", state.scrollFrictionalDecay)
+  hs.settings.set("qwertyMidi_scrollInertiaInitial", state.scrollInertiaInitial)
+  hs.settings.set("qwertyMidi_scrollInertiaDecay", state.scrollInertiaDecay)
+  hs.settings.set("qwertyMidi_scrollCurveExponent", state.scrollCurveExponent)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
