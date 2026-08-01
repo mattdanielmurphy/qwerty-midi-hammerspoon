@@ -34,3 +34,9 @@
 
 - **Instant Pre-Warmed Settings Window**: The Settings window (`Cmd+,` when MIDI mode is active) is pre-warmed as a hidden persistent webview on startup and toggled using instant non-destructive `:show()` / `:hide()` calls with state synchronization, eliminating WebKit window instantiation delays. When MIDI mode is toggled off (`Cmd+Alt+M`), `Cmd+,` is passed through natively to open other macOS app preferences.
 - **Instant BPM Type-Tempo Mode & Drag Persistence**: Clicking the BPM display immediately opens 'Type tempo' input mode on mouse release. Dragging the BPM up/down dynamically adjusts tempo and commits the target BPM to both the Arpeggiator and active Logic Pro session on mouse release.
+
+## Future Roadmap & Planned Architecture
+
+- **Independent Arpeggiators per Row**: Top row and bottom row having completely independent arpeggiators (independent direction, rate, gate, pattern step state, while remaining synced to global BPM).
+- **Dual Independent Instruments / MIDI Channels**: Top row and bottom row functioning as two independent virtual instruments by routing to separate configurable CoreMIDI channels (e.g. MIDI Channel 1 for Top Row, MIDI Channel 2 for Bottom Row) to target different soft synths in DAW/Logic Pro.
+- **On-Controller Synth / Preset Picker**: Ability to select synths / patch presets directly from the controller UI (via MIDI Program Change messages, Bank Select CC 0/32, or AppleScript/MIDI control surface integration for Logic Pro).
