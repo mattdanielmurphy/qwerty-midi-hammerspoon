@@ -88,7 +88,8 @@ local state = {
   logicSyncTimer = nil,
 
   -- Scroll / Trackpad
-  scrollAcceleration    = getSetting("scrollAcceleration", 0.15),
+  scrollSensitivity     = getSetting("scrollSensitivity", 0.15),
+  scrollAcceleration    = getSetting("scrollAcceleration", 1.0),
   scrollFrictionalDecay = getSetting("scrollFrictionalDecay", 0.85),
 
   DIGIT_KEYCODES = {
@@ -130,7 +131,8 @@ local function saveSettings()
   state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
   state.arpBpm = tonumber(state.arpBpm) or 120.0
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
-  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 0.15
+  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
+  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 1.0
   state.scrollFrictionalDecay = tonumber(state.scrollFrictionalDecay) or 0.85
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
@@ -154,6 +156,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
+  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
   hs.settings.set("qwertyMidi_scrollFrictionalDecay", state.scrollFrictionalDecay)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)

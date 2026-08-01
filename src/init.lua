@@ -68,17 +68,23 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     -- Scroll handling
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local accel = state.scrollAcceleration or 0.15
+    local sens = state.scrollSensitivity or 0.15
+    local accel = state.scrollAcceleration or 1.0
+
+    -- Apply non-linear acceleration curve based on gesture magnitude
+    local absDelta = math.abs(deltaY)
+    local accelFactor = (absDelta > 1) and (absDelta ^ (accel - 1.0)) or 1.0
+    local scaledDelta = deltaY * sens * accelFactor
 
     if phase ~= 0 then
       local decay = state.scrollFrictionalDecay or 0.85
       if decay == 0 then
-        return true -- block post-release momentum events completely
+        return true
       end
-      deltaY = deltaY * accel * decay
-    else
-      deltaY = deltaY * accel
+      scaledDelta = scaledDelta * decay
     end
+
+    deltaY = scaledDelta
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
     if _G.activeWatchers.isHoveringScrollable then

@@ -899,17 +899,23 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     -- Scroll handling
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local accel = state.scrollAcceleration or 0.15
+    local sens = state.scrollSensitivity or 0.15
+    local accel = state.scrollAcceleration or 1.0
+
+    -- Apply non-linear acceleration curve based on gesture magnitude
+    local absDelta = math.abs(deltaY)
+    local accelFactor = (absDelta > 1) and (absDelta ^ (accel - 1.0)) or 1.0
+    local scaledDelta = deltaY * sens * accelFactor
 
     if phase ~= 0 then
       local decay = state.scrollFrictionalDecay or 0.85
       if decay == 0 then
-        return true -- block post-release momentum events completely
+        return true
       end
-      deltaY = deltaY * accel * decay
-    else
-      deltaY = deltaY * accel
+      scaledDelta = scaledDelta * decay
     end
+
+    deltaY = scaledDelta
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
     if _G.activeWatchers.isHoveringScrollable then
@@ -5762,7 +5768,8 @@ local function generateSettingsHTML()
   local logicSync      = state.logicSyncEnabled
   local gate           = state.arpGatePercent or 80
   local zoom           = state.zoomLevel or 1.0
-  local acceleration  = state.scrollAcceleration or 0.15
+  local sensitivity = state.scrollSensitivity or 0.15
+  local acceleration  = state.scrollAcceleration or 1.0
   local decay         = state.scrollFrictionalDecay or 0.85
 
   -- Build BPM step selected states
@@ -5776,6 +5783,7 @@ local function generateSettingsHTML()
   end
 
   -- Format floats nicely for slider defaults
+  local sensFmt    = string.format("%.2f", sensitivity)
   local accFmt     = string.format("%.2f", acceleration)
   local decayFmt   = string.format("%.2f", decay)
 
@@ -6015,11 +6023,24 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Scroll Acceleration</strong>
-          <span>Speed/curve of active scrolling</span>
+          <strong>Mod Wheel Base Sensitivity</strong>
+          <span>Base scaling multiplier</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="accelerationSlider" min="0.01" max="0.50" step="0.01"
+          <input type="range" id="sensitivitySlider" min="0.02" max="0.50" step="0.01"
+            value="%s"
+            oninput="onSensitivity(this.value)">
+          <div class="slider-val" id="sensitivityVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Velocity Acceleration</strong>
+          <span>Dynamic velocity exponent (0.1-3.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="accelerationSlider" min="0.10" max="3.00" step="0.10"
             value="%s"
             oninput="onAcceleration(this.value)">
           <div class="slider-val" id="accelerationVal">%s</div>
@@ -6029,7 +6050,7 @@ local function generateSettingsHTML()
       <div class="row">
         <div class="row-label">
           <strong>Post-Release Coasting</strong>
-          <span>Friction (0 = stop, 0.98 = long glide)</span>
+          <span>Inertia Friction (0.00-0.98)</span>
         </div>
         <div class="slider-row">
           <input type="range" id="decaySlider" min="0.00" max="0.98" step="0.01"
@@ -6109,6 +6130,10 @@ local function generateSettingsHTML()
       window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
     }
   }
+  function onSensitivity(v) {
+    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
+    send('setSensitivity', parseFloat(v));
+  }
   function onAcceleration(v) {
     document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
     send('setAcceleration', parseFloat(v));
@@ -6135,6 +6160,12 @@ local function generateSettingsHTML()
       var el = document.getElementById('zoomLevel');
       if (el) el.value = String(s.zoomLevel);
     }
+    if (s.scrollSensitivity !== undefined) {
+      var el = document.getElementById('sensitivitySlider');
+      if (el) el.value = s.scrollSensitivity;
+      var valEl = document.getElementById('sensitivityVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    }
     if (s.scrollAcceleration !== undefined) {
       var el = document.getElementById('accelerationSlider');
       if (el) el.value = s.scrollAcceleration;
@@ -6154,8 +6185,10 @@ local function generateSettingsHTML()
 ]],
     -- sensitivity slider
     sensFmt, sensFmt,
+    -- acceleration slider
+    accFmt, accFmt,
     -- momentum slider
-    momentFmt, momentFmt,
+    decayFmt, decayFmt,
     -- bpm step selects
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
     -- logic sync checked
@@ -6195,8 +6228,12 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 1.0
       state.zoomLevel = val
       hs.settings.set("qwertyMidi_zoomLevel", val)
-    elseif body.type == "setAcceleration" then
+    elseif body.type == "setSensitivity" then
       local val = tonumber(body.value) or 0.15
+      state.scrollSensitivity = val
+      hs.settings.set("qwertyMidi_scrollSensitivity", val)
+    elseif body.type == "setAcceleration" then
+      local val = tonumber(body.value) or 1.0
       state.scrollAcceleration = val
       hs.settings.set("qwertyMidi_scrollAcceleration", val)
     elseif body.type == "setDecay" then
@@ -6239,7 +6276,8 @@ local function syncStateToWebview()
     logicSyncEnabled = state.logicSyncEnabled,
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
-    scrollAcceleration = state.scrollAcceleration or 0.15,
+    scrollSensitivity = state.scrollSensitivity or 0.15,
+    scrollAcceleration = state.scrollAcceleration or 1.0,
     scrollFrictionalDecay = state.scrollFrictionalDecay or 0.85
   }
   local jsonStr = hs.json.encode(s)
@@ -6367,7 +6405,8 @@ local state = {
   logicSyncTimer = nil,
 
   -- Scroll / Trackpad
-  scrollAcceleration    = getSetting("scrollAcceleration", 0.15),
+  scrollSensitivity     = getSetting("scrollSensitivity", 0.15),
+  scrollAcceleration    = getSetting("scrollAcceleration", 1.0),
   scrollFrictionalDecay = getSetting("scrollFrictionalDecay", 0.85),
 
   DIGIT_KEYCODES = {
@@ -6409,7 +6448,8 @@ local function saveSettings()
   state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
   state.arpBpm = tonumber(state.arpBpm) or 120.0
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
-  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 0.15
+  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
+  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 1.0
   state.scrollFrictionalDecay = tonumber(state.scrollFrictionalDecay) or 0.85
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
@@ -6433,6 +6473,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
+  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
   hs.settings.set("qwertyMidi_scrollFrictionalDecay", state.scrollFrictionalDecay)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
