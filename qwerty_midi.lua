@@ -1102,7 +1102,8 @@ end
 local function arpTick()
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
-    local noteKey = config.getNoteKey(code)
+    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+    local noteKey = rawCode and config.getNoteKey(rawCode)
     local isTop = noteKey and noteKey.isTop or false
     local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     if rowArpEnabled then
@@ -1365,7 +1366,8 @@ end
 local function updateLatchedArpNotes()
   if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
   for code, _ in pairs(state.arpHeldNotes) do
-    local noteKey = config.getNoteKey(code)
+    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+    local noteKey = rawCode and config.getNoteKey(rawCode)
     if noteKey then
       state.arpHeldNotes[code] = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
     end
