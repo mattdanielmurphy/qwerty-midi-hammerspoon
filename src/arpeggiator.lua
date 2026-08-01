@@ -200,8 +200,8 @@ local function arpTick()
     local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
     local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
     if state.arpActiveGateTimers and state.arpActiveGateTimers[oldP] then
-      if type(state.arpActiveGateTimers[oldP]) == "table" and state.arpActiveGateTimers[oldP].stop then
-        state.arpActiveGateTimers[oldP]:stop()
+      if state.arpActiveGateTimers[oldP].timer and type(state.arpActiveGateTimers[oldP].timer.stop) == "function" then
+        state.arpActiveGateTimers[oldP].timer:stop()
       end
       state.arpActiveGateTimers[oldP] = nil
     end
@@ -228,12 +228,12 @@ local function arpTick()
 
   state.arpActiveGateTimers = state.arpActiveGateTimers or {}
   if state.arpActiveGateTimers[pitchToRelease] then
-    if type(state.arpActiveGateTimers[pitchToRelease]) == "table" and state.arpActiveGateTimers[pitchToRelease].stop then
-      state.arpActiveGateTimers[pitchToRelease]:stop()
+    if state.arpActiveGateTimers[pitchToRelease].timer and type(state.arpActiveGateTimers[pitchToRelease].timer.stop) == "function" then
+      state.arpActiveGateTimers[pitchToRelease].timer:stop()
     end
     state.arpActiveGateTimers[pitchToRelease] = nil
   end
-  state.arpActiveGateTimers[pitchToRelease] = timer
+  state.arpActiveGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
   state.arpGateTimer = timer
 end
 

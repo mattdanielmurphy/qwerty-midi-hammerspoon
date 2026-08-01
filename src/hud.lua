@@ -126,21 +126,22 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   for code, cData in pairs(numberRowControls) do
-    local isMainArp = (code == 50)
-    local isTopArp = (code == 18)
-    local isBotArp = (code == 19)
+    local isMainArp = (cData.action == "arpToggle")
+    local isTopArp = (cData.action == "arpTopToggle")
+    local isBotArp = (cData.action == "arpBottomToggle")
     local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
+    local isActiveToggle = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
     keyUpdates[tostring(code)] = {
       note = cData.name,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = pairedClass,
+      typeClass = isActiveToggle and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = isArpActive
+      sustainActive = isActiveToggle
     }
   end
 

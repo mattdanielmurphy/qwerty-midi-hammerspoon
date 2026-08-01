@@ -1020,6 +1020,7 @@ local function handleKeyUp(code)
 
 
   if code == 50 then -- Backtick
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
     return true

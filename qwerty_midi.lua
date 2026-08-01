@@ -143,21 +143,22 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   }
 
   for code, cData in pairs(numberRowControls) do
-    local isMainArp = (code == 50)
-    local isTopArp = (code == 18)
-    local isBotArp = (code == 19)
+    local isMainArp = (cData.action == "arpToggle")
+    local isTopArp = (cData.action == "arpTopToggle")
+    local isBotArp = (cData.action == "arpBottomToggle")
     local isArpActive = not state.shiftHeld and ((isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled))
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
+    local isActiveToggle = (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled)
     keyUpdates[tostring(code)] = {
       note = cData.name,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = pairedClass,
+      typeClass = isActiveToggle and "latch-active" or pairedClass,
       pressed = (state.pressedKeys[code] ~= nil),
-      sustainActive = isArpActive
+      sustainActive = isActiveToggle
     }
   end
 
@@ -1247,8 +1248,8 @@ local function arpTick()
     local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
     local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
     if state.arpActiveGateTimers and state.arpActiveGateTimers[oldP] then
-      if type(state.arpActiveGateTimers[oldP]) == "table" and state.arpActiveGateTimers[oldP].stop then
-        state.arpActiveGateTimers[oldP]:stop()
+      if state.arpActiveGateTimers[oldP].timer and type(state.arpActiveGateTimers[oldP].timer.stop) == "function" then
+        state.arpActiveGateTimers[oldP].timer:stop()
       end
       state.arpActiveGateTimers[oldP] = nil
     end
@@ -1275,12 +1276,12 @@ local function arpTick()
 
   state.arpActiveGateTimers = state.arpActiveGateTimers or {}
   if state.arpActiveGateTimers[pitchToRelease] then
-    if type(state.arpActiveGateTimers[pitchToRelease]) == "table" and state.arpActiveGateTimers[pitchToRelease].stop then
-      state.arpActiveGateTimers[pitchToRelease]:stop()
+    if state.arpActiveGateTimers[pitchToRelease].timer and type(state.arpActiveGateTimers[pitchToRelease].timer.stop) == "function" then
+      state.arpActiveGateTimers[pitchToRelease].timer:stop()
     end
     state.arpActiveGateTimers[pitchToRelease] = nil
   end
-  state.arpActiveGateTimers[pitchToRelease] = timer
+  state.arpActiveGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
   state.arpGateTimer = timer
 end
 
@@ -6657,6 +6658,7 @@ local function getActiveControlKeysMap()
   for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(numberRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   _cachedActiveControlKeysMap = map
   return map
 end
@@ -7720,6 +7722,7 @@ local function handleKeyUp(code)
 
 
   if code == 50 then -- Backtick
+    stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateWebviewHud()
     return true
