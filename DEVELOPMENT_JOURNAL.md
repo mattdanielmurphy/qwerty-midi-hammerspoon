@@ -1,6 +1,7 @@
 # Development Journal
 
 ## 2026-07-31
+- **WebKit Anti-Suspension Audio Sentinel & Log Diagnostics:** Identified macOS WebKit `ProcessThrottler` background process suspension as the root cause of dead UI. Added Web Audio anti-suspension sentinel, `renderHud` execution profiling, and `_G.dumpMidiLogs()` console/clipboard diagnostics helper. Link: [2026-07-31_23-46_webkit-anti-suspension-logging-diagnostics.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-31_23-46_webkit-anti-suspension-logging-diagnostics.md)
 - **UI Stability, Ping Helper & Double-Tap Hard Reset:** Added `try...catch` error isolation in `renderHud`, bidirectional ping/pong liveness checks (`_G.pingController()`), active 5s watchdog auto-recovery, and double-press `Cmd+Alt+R` for full Hammerspoon hard reload (`hs.reload()`). Link: [2026-07-31_23-44_ui-stability-ping-helper-hard-reset.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-31_23-44_ui-stability-ping-helper-hard-reset.md)
 
 

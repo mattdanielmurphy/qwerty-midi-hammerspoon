@@ -1796,74 +1796,74 @@
   // ===== END KEY SELECTION VARS =====
 
   function initGrid(layout) {
-    const l = layout || LAYOUT_DATA;
-    ['number', 'upper', 'home', 'lower'].forEach(rowName => {
-      const rowEl = document.getElementById('row-' + rowName);
-      if (!rowEl) return;
-      rowEl.textContent = '';
-      if (l[rowName]) {
-        l[rowName].forEach(k => {
-          const pad = document.createElement('div');
-          pad.id = 'key-' + k.code;
-          pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
-          if (k.width) {
-            pad.style.width = k.width + 'px';
-          }
+    try {
+      const l = (layout && (layout.number || layout.upper || layout.home || layout.lower)) ? layout : LAYOUT_DATA;
+      ['number', 'upper', 'home', 'lower'].forEach(rowName => {
+        const rowEl = document.getElementById('row-' + rowName);
+        if (!rowEl) return;
+        if (l[rowName] && Array.isArray(l[rowName]) && l[rowName].length > 0) {
+          rowEl.textContent = '';
+          l[rowName].forEach(k => {
+            const pad = document.createElement('div');
+            pad.id = 'key-' + k.code;
+            pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
+            if (k.width) {
+              pad.style.width = k.width + 'px';
+            }
 
-          if (isEditMode && !k.isDummy) {
-            pad.setAttribute('draggable', 'true');
-          } else {
-            pad.setAttribute('draggable', 'false');
-          }
+            if (isEditMode && !k.isDummy) {
+              pad.setAttribute('draggable', 'true');
+            } else {
+              pad.setAttribute('draggable', 'false');
+            }
 
-          const codeSpan = document.createElement('span');
-          codeSpan.className = 'key-code';
-          codeSpan.textContent = k.keyLabel;
+            const codeSpan = document.createElement('span');
+            codeSpan.className = 'key-code';
+            codeSpan.textContent = k.keyLabel;
 
-          const iconSpan = document.createElement('div');
-          iconSpan.className = 'key-row-icon stacked-rows-icon';
-          iconSpan.innerHTML = '<div class="rect top"></div><div class="rect bottom"></div>';
+            const iconSpan = document.createElement('div');
+            iconSpan.className = 'key-row-icon stacked-rows-icon';
+            iconSpan.innerHTML = '<div class="rect top"></div><div class="rect bottom"></div>';
 
-          const noteSpan = document.createElement('span');
-          noteSpan.className = 'key-note';
-          noteSpan.textContent = k.noteLabel || '';
+            const noteSpan = document.createElement('span');
+            noteSpan.className = 'key-note';
+            noteSpan.textContent = k.noteLabel || '';
 
-          const dotSpan = document.createElement('span');
-          dotSpan.className = 'latch-dot';
+            const dotSpan = document.createElement('span');
+            dotSpan.className = 'latch-dot';
 
-          pad.appendChild(iconSpan);
-          pad.appendChild(codeSpan);
-          pad.appendChild(noteSpan);
-          pad.appendChild(dotSpan);
+            pad.appendChild(iconSpan);
+            pad.appendChild(codeSpan);
+            pad.appendChild(noteSpan);
+            pad.appendChild(dotSpan);
 
-          // ===== VERTICAL SPLIT HALVES for Edit Mode =====
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
-          const halfTop = document.createElement('div');
-          halfTop.className = 'key-half key-half-top';
-          halfTop.dataset.half = 'shift';
-          const noteTop = document.createElement('span');
-          noteTop.className = 'key-note';
-          noteTop.textContent = k.shiftLabel || builtIn.shiftLabel || k.noteLabel || k.keyLabel || '';
-          const labelTop = document.createElement('span');
-          labelTop.className = 'half-label';
-          labelTop.textContent = '⇧';
-          halfTop.appendChild(noteTop);
-          halfTop.appendChild(labelTop);
+            // ===== VERTICAL SPLIT HALVES for Edit Mode =====
+            const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
+            const halfTop = document.createElement('div');
+            halfTop.className = 'key-half key-half-top';
+            halfTop.dataset.half = 'shift';
+            const noteTop = document.createElement('span');
+            noteTop.className = 'key-note';
+            noteTop.textContent = k.shiftLabel || builtIn.shiftLabel || k.noteLabel || k.keyLabel || '';
+            const labelTop = document.createElement('span');
+            labelTop.className = 'half-label';
+            labelTop.textContent = '⇧';
+            halfTop.appendChild(noteTop);
+            halfTop.appendChild(labelTop);
+            pad.appendChild(halfTop);
 
-          const halfBottom = document.createElement('div');
-          halfBottom.className = 'key-half key-half-bottom';
-          halfBottom.dataset.half = 'normal';
-          const noteBottom = document.createElement('span');
-          noteBottom.className = 'key-note';
-          noteBottom.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
-          const labelBottom = document.createElement('span');
-          labelBottom.className = 'half-label';
-          labelBottom.textContent = 'ACT';
-          halfBottom.appendChild(noteBottom);
-          halfBottom.appendChild(labelBottom);
-
-          pad.appendChild(halfTop);
-          pad.appendChild(halfBottom);
+            const halfBot = document.createElement('div');
+            halfBot.className = 'key-half key-half-bottom';
+            halfBot.dataset.half = 'normal';
+            const noteBot = document.createElement('span');
+            noteBot.className = 'key-note';
+            noteBot.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
+            const labelBot = document.createElement('span');
+            labelBot.className = 'half-label';
+            labelBot.textContent = '⇥';
+            halfBot.appendChild(noteBot);
+            halfBot.appendChild(labelBot);
+            pad.appendChild(halfBot);
 
           pad.addEventListener('mousedown', (e) => {
             if (isEditMode) {
@@ -3381,6 +3381,12 @@
   }
 
   function renderHud(data) {
+    if (document.querySelectorAll('.key-pad').length === 0) {
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: '[AUTO-REPAIR] renderHud detected 0 key-pads in DOM! Rebuilding grid from LAYOUT_DATA' });
+      }
+      initGrid(LAYOUT_DATA);
+    }
     const t0 = performance.now();
     try {
       if (!data) return;

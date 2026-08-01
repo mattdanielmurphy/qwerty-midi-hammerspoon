@@ -23,12 +23,12 @@ local lastLatencyMs = 0
 local pendingPingTime = 0
 
 local function hudLog(msg)
+  local line = os.date("%H:%M:%S") .. " [HUD]: " .. tostring(msg) .. "\n"
   print("QWERTY MIDI HUD: " .. msg)
-  local f = io.open("/tmp/midi_startup.log", "a")
-  if f then
-    f:write(os.date("%H:%M:%S") .. " [HUD]: " .. tostring(msg) .. "\n")
-    f:close()
-  end
+  local f1 = io.open("/tmp/midi_startup.log", "a")
+  if f1 then f1:write(line); f1:close() end
+  local f2 = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
+  if f2 then f2:write(line); f2:close() end
 end
 
 _G.activeWatchers = _G.activeWatchers or {}
@@ -598,8 +598,11 @@ local function createMidiWebview()
       state.textInputActive = (body.focused == true)
     elseif body.type == "log" then
       if body.message then
-        local f = io.open("/tmp/wv_js.log", "a")
-        if f then f:write(tostring(body.message) .. "\n"); f:close() end
+        local line = os.date("%H:%M:%S") .. " [JS]: " .. tostring(body.message) .. "\n"
+        local f1 = io.open("/tmp/wv_js.log", "a")
+        if f1 then f1:write(line); f1:close() end
+        local f2 = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
+        if f2 then f2:write(line); f2:close() end
       end
     elseif body.type == "hoverScrollable" then
       _G.activeWatchers.isHoveringScrollable = body.state

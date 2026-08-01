@@ -261,7 +261,7 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       local elapsed = os.time() - lastSeen
       if elapsed >= 5 then
         local msg = "QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn"
-        local f = io.open("/tmp/midi_startup.log", "a")
+        local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
         if f then f:write(os.date("%H:%M:%S") .. " [WATCHDOG]: " .. msg .. "\n"); f:close() end
         
         pcall(function()
