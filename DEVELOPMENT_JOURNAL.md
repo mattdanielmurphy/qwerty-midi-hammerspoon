@@ -39,3 +39,5 @@
 
 - **2026-08-01**: Fixed arp latch chord key highlighting — latch detection in `hud.lua` now prefix-matches compound arpHeldNotes keys (`"code_pitch"`), so all chord notes show blue when latched.
 - **2026-08-01**: Added `updateLatchedArpChordNotes()` to `arpeggiator.lua` — changing chord type via `chordUp`/`chordDown` while arp is latched now rebuilds held notes with the new chord's pitch offsets, so the arp immediately plays the new chord shape.
+
+- **2026-08-01**: Updated `updateLatchedArpNotes()` in `arpeggiator.lua` so that transposing octave/scale/key while in Chord Mode rebuilds all active chord pitches (`getChordPitches`), preserving full chord patterns instead of collapsing them into a single root note.
