@@ -967,6 +967,7 @@ local function handleKeyDown(code)
   local k = config.getNumberControlKey(code) or config.getControlKey(code)
   if k and k.action and k.action ~= "" and k.action ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = k.action }
+    hud.updateSingleKeyState(code, true, false)
     executeControlAction(k.action, code)
     if k.action ~= "sustain" and k.action ~= "chordMod" then
       stopControlRepeat(code)
@@ -1022,6 +1023,7 @@ local function handleKeyUp(code)
   if code == 50 then -- Backtick
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
+    hud.updateSingleKeyState(code, false, false)
     hud.updateWebviewHud()
     return true
   end
@@ -1048,6 +1050,7 @@ local function handleKeyUp(code)
         end
       end
       state.pressedKeys[code] = nil
+      hud.updateSingleKeyState(code, false, false)
     end
     hud.updateWebviewHud()
     return true
@@ -1056,15 +1059,17 @@ local function handleKeyUp(code)
   local numCtrlKey = config.getNumberControlKey(code)
   if numCtrlKey then
     stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    hud.updateWebviewHud()
-    return true
+      state.pressedKeys[code] = nil
+      hud.updateSingleKeyState(code, false, false)
+      hud.updateWebviewHud()
+      return true
   end
 
   local ctrlKey = config.getControlKey(code)
   if ctrlKey then
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
+    hud.updateSingleKeyState(code, false, false)
     local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
     if act == "sustain" then
       local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0

@@ -59,6 +59,12 @@ local function safeEvaluateJS(js)
   return ok
 end
 
+local function updateSingleKeyState(code, pressed, latched)
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s);",
+    tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
+end
+
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
@@ -279,6 +285,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 end
 
 
+local lastFullRenderTime = 0
+local renderScheduled = false
+
 local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
   if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
@@ -289,10 +298,20 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
     return
   end
 
-  if not hudUpdateScheduled then
-    hudUpdateScheduled = true
-    hs.timer.doAfter(0.016, function()
-      hudUpdateScheduled = false
+  if renderScheduled then return end
+
+  local now = hs.timer.absoluteTime()
+  local elapsedMs = (now - lastFullRenderTime) / 1000000
+  if elapsedMs >= 33 then
+    lastFullRenderTime = now
+    performWebviewHudUpdate(pendingSpotlightInfo, pendingActiveArpPitch)
+    pendingSpotlightInfo = nil
+  else
+    renderScheduled = true
+    local delaySec = math.max(0.005, (33 - elapsedMs) / 1000)
+    hs.timer.doAfter(delaySec, function()
+      renderScheduled = false
+      lastFullRenderTime = hs.timer.absoluteTime()
       local s = pendingSpotlightInfo
       local a = pendingActiveArpPitch
       pendingSpotlightInfo = nil
@@ -745,6 +764,7 @@ end
 
 return {
   setControlsModule = setControlsModule,
+  updateSingleKeyState = updateSingleKeyState,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,

@@ -3673,6 +3673,16 @@
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'pong', timestamp: Date.now() });
     }
   };
+window.updateKeyState = function(code, pressed, latched) {
+  const el = document.getElementById('key-' + code);
+  if (el) {
+    if (pressed) el.classList.add('pressed');
+    else el.classList.remove('pressed');
+    if (latched) el.classList.add('latched-key');
+    else el.classList.remove('latched-key');
+  }
+};
+
 </script>
 </body>
 </html>
