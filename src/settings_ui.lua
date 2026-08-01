@@ -10,8 +10,8 @@ local function generateSettingsHTML()
   local logicSync      = state.logicSyncEnabled
   local gate           = state.arpGatePercent or 80
   local zoom           = state.zoomLevel or 1.0
-  local sensitivity    = state.scrollSensitivity or 0.15
-  local momentumScale  = state.scrollMomentumScale or 0.3
+  local acceleration  = state.scrollAcceleration or 0.15
+  local decay         = state.scrollFrictionalDecay or 0.85
 
   -- Build BPM step selected states
   local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
@@ -24,8 +24,8 @@ local function generateSettingsHTML()
   end
 
   -- Format floats nicely for slider defaults
-  local sensFmt    = string.format("%.2f", sensitivity)
-  local momentFmt  = string.format("%.2f", momentumScale)
+  local accFmt     = string.format("%.2f", acceleration)
+  local decayFmt   = string.format("%.2f", decay)
 
   return string.format([[
 <!DOCTYPE html>
@@ -263,41 +263,28 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Mod Wheel Sensitivity</strong>
-          <span>Speed of mod wheel change per scroll tick</span>
+          <strong>Scroll Acceleration</strong>
+          <span>Speed/curve of active scrolling</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="sensitivitySlider" min="0.02" max="0.5" step="0.01"
+          <input type="range" id="accelerationSlider" min="0.01" max="0.50" step="0.01"
             value="%s"
-            oninput="onSensitivity(this.value)">
-          <div class="slider-val" id="sensitivityVal">%s</div>
+            oninput="onAcceleration(this.value)">
+          <div class="slider-val" id="accelerationVal">%s</div>
         </div>
       </div>
 
       <div class="row">
         <div class="row-label">
-          <strong>Momentum Scale</strong>
-          <span>Inertia strength after finger lifts (0 = none)</span>
+          <strong>Post-Release Coasting</strong>
+          <span>Friction (0 = stop, 0.98 = long glide)</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="momentumSlider" min="0" max="1" step="0.05"
+          <input type="range" id="decaySlider" min="0.00" max="0.98" step="0.01"
             value="%s"
-            oninput="onMomentum(this.value)">
-          <div class="slider-val" id="momentumVal">%s</div>
+            oninput="onDecay(this.value)">
+          <div class="slider-val" id="decayVal">%s</div>
         </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Inertia Preset</strong>
-          <span>Scroll momentum behavior</span>
-        </div>
-        <select id="inertiaPreset" onchange="send('setInertiaPreset', this.value)">
-          <option value="direct_raw">Direct (Raw Touch)</option>
-          <option value="linear_damped">Linear Damped</option>
-          <option value="exponential_decay">Exponential Decay</option>
-          <option value="friction_coasting">Friction Coasting</option>
-        </select>
       </div>
     </div>
 
@@ -370,13 +357,13 @@ local function generateSettingsHTML()
       window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
     }
   }
-  function onSensitivity(v) {
-    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
-    send('setSensitivity', parseFloat(v));
+  function onAcceleration(v) {
+    document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
+    send('setAcceleration', parseFloat(v));
   }
-  function onMomentum(v) {
-    document.getElementById('momentumVal').textContent = parseFloat(v).toFixed(2);
-    send('setMomentum', parseFloat(v));
+  function onDecay(v) {
+    document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
+    send('setDecay', parseFloat(v));
   }
   function syncState(s) {
     if (!s) return;
@@ -396,21 +383,17 @@ local function generateSettingsHTML()
       var el = document.getElementById('zoomLevel');
       if (el) el.value = String(s.zoomLevel);
     }
-    if (s.scrollSensitivity !== undefined) {
-      var el = document.getElementById('sensitivitySlider');
-      if (el) el.value = s.scrollSensitivity;
-      var valEl = document.getElementById('sensitivityVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    if (s.scrollAcceleration !== undefined) {
+      var el = document.getElementById('accelerationSlider');
+      if (el) el.value = s.scrollAcceleration;
+      var valEl = document.getElementById('accelerationVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollAcceleration).toFixed(2);
     }
-    if (s.scrollMomentumScale !== undefined) {
-      var el = document.getElementById('momentumSlider');
-      if (el) el.value = s.scrollMomentumScale;
-      var valEl = document.getElementById('momentumVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
-    }
-    if (s.scrollInertiaPreset !== undefined) {
-      var el = document.getElementById('inertiaPreset');
-      if (el) el.value = s.scrollInertiaPreset;
+    if (s.scrollFrictionalDecay !== undefined) {
+      var el = document.getElementById('decaySlider');
+      if (el) el.value = s.scrollFrictionalDecay;
+      var valEl = document.getElementById('decayVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollFrictionalDecay).toFixed(2);
     }
   }
 </script>
@@ -460,17 +443,14 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 1.0
       state.zoomLevel = val
       hs.settings.set("qwertyMidi_zoomLevel", val)
-    elseif body.type == "setSensitivity" then
+    elseif body.type == "setAcceleration" then
       local val = tonumber(body.value) or 0.15
-      state.scrollSensitivity = val
-      hs.settings.set("qwertyMidi_scrollSensitivity", val)
-    elseif body.type == "setMomentum" then
-      local val = tonumber(body.value) or 0.3
-      state.scrollMomentumScale = val
-      hs.settings.set("qwertyMidi_scrollMomentumScale", val)
-    elseif body.type == "setInertiaPreset" then
-      state.scrollInertiaPreset = body.value
-      hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
+      state.scrollAcceleration = val
+      hs.settings.set("qwertyMidi_scrollAcceleration", val)
+    elseif body.type == "setDecay" then
+      local val = tonumber(body.value) or 0.85
+      state.scrollFrictionalDecay = math.max(0, math.min(0.98, val))
+      hs.settings.set("qwertyMidi_scrollFrictionalDecay", val)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -507,9 +487,8 @@ local function syncStateToWebview()
     logicSyncEnabled = state.logicSyncEnabled,
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
-    scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollMomentumScale = state.scrollMomentumScale or 0.3,
-    scrollInertiaPreset = state.scrollInertiaPreset or "linear_damped"
+    scrollAcceleration = state.scrollAcceleration or 0.15,
+    scrollFrictionalDecay = state.scrollFrictionalDecay or 0.85
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")

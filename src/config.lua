@@ -88,9 +88,8 @@ local state = {
   logicSyncTimer = nil,
 
   -- Scroll / Trackpad
-  scrollSensitivity    = getSetting("scrollSensitivity", 0.15),
-  scrollMomentumScale  = getSetting("scrollMomentumScale", 0.3),
-  scrollInertiaPreset  = getSetting("scrollInertiaPreset", "linear_damped"),
+  scrollAcceleration    = getSetting("scrollAcceleration", 0.15),
+  scrollFrictionalDecay = getSetting("scrollFrictionalDecay", 0.85),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
@@ -131,9 +130,8 @@ local function saveSettings()
   state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
   state.arpBpm = tonumber(state.arpBpm) or 120.0
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
-  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
-  state.scrollMomentumScale = tonumber(state.scrollMomentumScale) or 0.3
-  if type(state.scrollInertiaPreset) ~= "string" then state.scrollInertiaPreset = "linear_damped" end
+  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 0.15
+  state.scrollFrictionalDecay = tonumber(state.scrollFrictionalDecay) or 0.85
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
@@ -156,9 +154,8 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
-  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
-  hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
-  hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
+  hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
+  hs.settings.set("qwertyMidi_scrollFrictionalDecay", state.scrollFrictionalDecay)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)

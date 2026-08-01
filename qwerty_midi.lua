@@ -897,20 +897,17 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
     end
 
-    -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
+    -- Scroll handling
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local preset = state.scrollInertiaPreset or "linear_damped"
+    _G.activeWatchers.scrollVelocity = _G.activeWatchers.scrollVelocity or 0
 
-    local inertiaScale = 1.0
-    if preset == "direct_raw" then
-      if phase ~= 0 then return true end -- drop momentum events completely
-      inertiaScale = state.scrollMomentumScale
-    elseif preset == "exponential_decay" then
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.15)
-    elseif preset == "friction_coasting" then
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.45)
-    else -- linear_damped (default)
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.3)
+    if phase == 0 then
+      _G.activeWatchers.scrollVelocity = deltaY * (state.scrollAcceleration or 0.15)
+    else
+      if state.scrollFrictionalDecay == 0 then return true end
+      _G.activeWatchers.scrollVelocity = _G.activeWatchers.scrollVelocity * state.scrollFrictionalDecay
+      if math.abs(_G.activeWatchers.scrollVelocity) < 0.01 then return true end
+      deltaY = _G.activeWatchers.scrollVelocity
     end
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
@@ -918,12 +915,12 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       return false
     end
 
-        if deltaY ~= 0 then
+    if deltaY ~= 0 then
       if state.shiftHeld then
         local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
         _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
-        local sensitivity = 0.25 * inertiaScale
-        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
+        -- Adjusting volume with new scroll mechanics
+        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - deltaY))
         local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
 
         local deltaVol = newVol - math.floor(avgVol + 0.5)
@@ -942,8 +939,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       else
         local currentMod = state.ccStates[1] or 0
         _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-        local sensitivity = state.scrollSensitivity * inertiaScale
-        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
+        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - deltaY))
         local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
 
         if newMod ~= state.ccStates[1] then
@@ -5765,8 +5761,8 @@ local function generateSettingsHTML()
   local logicSync      = state.logicSyncEnabled
   local gate           = state.arpGatePercent or 80
   local zoom           = state.zoomLevel or 1.0
-  local sensitivity    = state.scrollSensitivity or 0.15
-  local momentumScale  = state.scrollMomentumScale or 0.3
+  local acceleration  = state.scrollAcceleration or 0.15
+  local decay         = state.scrollFrictionalDecay or 0.85
 
   -- Build BPM step selected states
   local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
@@ -5779,8 +5775,8 @@ local function generateSettingsHTML()
   end
 
   -- Format floats nicely for slider defaults
-  local sensFmt    = string.format("%.2f", sensitivity)
-  local momentFmt  = string.format("%.2f", momentumScale)
+  local accFmt     = string.format("%.2f", acceleration)
+  local decayFmt   = string.format("%.2f", decay)
 
   return string.format([[
 <!DOCTYPE html>
@@ -6018,41 +6014,28 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
-          <strong>Mod Wheel Sensitivity</strong>
-          <span>Speed of mod wheel change per scroll tick</span>
+          <strong>Scroll Acceleration</strong>
+          <span>Speed/curve of active scrolling</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="sensitivitySlider" min="0.02" max="0.5" step="0.01"
+          <input type="range" id="accelerationSlider" min="0.01" max="0.50" step="0.01"
             value="%s"
-            oninput="onSensitivity(this.value)">
-          <div class="slider-val" id="sensitivityVal">%s</div>
+            oninput="onAcceleration(this.value)">
+          <div class="slider-val" id="accelerationVal">%s</div>
         </div>
       </div>
 
       <div class="row">
         <div class="row-label">
-          <strong>Momentum Scale</strong>
-          <span>Inertia strength after finger lifts (0 = none)</span>
+          <strong>Post-Release Coasting</strong>
+          <span>Friction (0 = stop, 0.98 = long glide)</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="momentumSlider" min="0" max="1" step="0.05"
+          <input type="range" id="decaySlider" min="0.00" max="0.98" step="0.01"
             value="%s"
-            oninput="onMomentum(this.value)">
-          <div class="slider-val" id="momentumVal">%s</div>
+            oninput="onDecay(this.value)">
+          <div class="slider-val" id="decayVal">%s</div>
         </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Inertia Preset</strong>
-          <span>Scroll momentum behavior</span>
-        </div>
-        <select id="inertiaPreset" onchange="send('setInertiaPreset', this.value)">
-          <option value="direct_raw">Direct (Raw Touch)</option>
-          <option value="linear_damped">Linear Damped</option>
-          <option value="exponential_decay">Exponential Decay</option>
-          <option value="friction_coasting">Friction Coasting</option>
-        </select>
       </div>
     </div>
 
@@ -6125,13 +6108,13 @@ local function generateSettingsHTML()
       window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
     }
   }
-  function onSensitivity(v) {
-    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
-    send('setSensitivity', parseFloat(v));
+  function onAcceleration(v) {
+    document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
+    send('setAcceleration', parseFloat(v));
   }
-  function onMomentum(v) {
-    document.getElementById('momentumVal').textContent = parseFloat(v).toFixed(2);
-    send('setMomentum', parseFloat(v));
+  function onDecay(v) {
+    document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
+    send('setDecay', parseFloat(v));
   }
   function syncState(s) {
     if (!s) return;
@@ -6151,21 +6134,17 @@ local function generateSettingsHTML()
       var el = document.getElementById('zoomLevel');
       if (el) el.value = String(s.zoomLevel);
     }
-    if (s.scrollSensitivity !== undefined) {
-      var el = document.getElementById('sensitivitySlider');
-      if (el) el.value = s.scrollSensitivity;
-      var valEl = document.getElementById('sensitivityVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    if (s.scrollAcceleration !== undefined) {
+      var el = document.getElementById('accelerationSlider');
+      if (el) el.value = s.scrollAcceleration;
+      var valEl = document.getElementById('accelerationVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollAcceleration).toFixed(2);
     }
-    if (s.scrollMomentumScale !== undefined) {
-      var el = document.getElementById('momentumSlider');
-      if (el) el.value = s.scrollMomentumScale;
-      var valEl = document.getElementById('momentumVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
-    }
-    if (s.scrollInertiaPreset !== undefined) {
-      var el = document.getElementById('inertiaPreset');
-      if (el) el.value = s.scrollInertiaPreset;
+    if (s.scrollFrictionalDecay !== undefined) {
+      var el = document.getElementById('decaySlider');
+      if (el) el.value = s.scrollFrictionalDecay;
+      var valEl = document.getElementById('decayVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollFrictionalDecay).toFixed(2);
     }
   }
 </script>
@@ -6215,17 +6194,14 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 1.0
       state.zoomLevel = val
       hs.settings.set("qwertyMidi_zoomLevel", val)
-    elseif body.type == "setSensitivity" then
+    elseif body.type == "setAcceleration" then
       local val = tonumber(body.value) or 0.15
-      state.scrollSensitivity = val
-      hs.settings.set("qwertyMidi_scrollSensitivity", val)
-    elseif body.type == "setMomentum" then
-      local val = tonumber(body.value) or 0.3
-      state.scrollMomentumScale = val
-      hs.settings.set("qwertyMidi_scrollMomentumScale", val)
-    elseif body.type == "setInertiaPreset" then
-      state.scrollInertiaPreset = body.value
-      hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
+      state.scrollAcceleration = val
+      hs.settings.set("qwertyMidi_scrollAcceleration", val)
+    elseif body.type == "setDecay" then
+      local val = tonumber(body.value) or 0.85
+      state.scrollFrictionalDecay = math.max(0, math.min(0.98, val))
+      hs.settings.set("qwertyMidi_scrollFrictionalDecay", val)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -6262,9 +6238,8 @@ local function syncStateToWebview()
     logicSyncEnabled = state.logicSyncEnabled,
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
-    scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollMomentumScale = state.scrollMomentumScale or 0.3,
-    scrollInertiaPreset = state.scrollInertiaPreset or "linear_damped"
+    scrollAcceleration = state.scrollAcceleration or 0.15,
+    scrollFrictionalDecay = state.scrollFrictionalDecay or 0.85
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
@@ -6391,9 +6366,8 @@ local state = {
   logicSyncTimer = nil,
 
   -- Scroll / Trackpad
-  scrollSensitivity    = getSetting("scrollSensitivity", 0.15),
-  scrollMomentumScale  = getSetting("scrollMomentumScale", 0.3),
-  scrollInertiaPreset  = getSetting("scrollInertiaPreset", "linear_damped"),
+  scrollAcceleration    = getSetting("scrollAcceleration", 0.15),
+  scrollFrictionalDecay = getSetting("scrollFrictionalDecay", 0.85),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
@@ -6434,9 +6408,8 @@ local function saveSettings()
   state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
   state.arpBpm = tonumber(state.arpBpm) or 120.0
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
-  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
-  state.scrollMomentumScale = tonumber(state.scrollMomentumScale) or 0.3
-  if type(state.scrollInertiaPreset) ~= "string" then state.scrollInertiaPreset = "linear_damped" end
+  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 0.15
+  state.scrollFrictionalDecay = tonumber(state.scrollFrictionalDecay) or 0.85
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
@@ -6459,9 +6432,8 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
-  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
-  hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
-  hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
+  hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
+  hs.settings.set("qwertyMidi_scrollFrictionalDecay", state.scrollFrictionalDecay)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)

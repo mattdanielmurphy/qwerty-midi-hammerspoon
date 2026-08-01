@@ -66,20 +66,17 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventPointDeltaAxis1) or 0
     end
 
-    -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
+    -- Scroll handling
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local preset = state.scrollInertiaPreset or "linear_damped"
+    _G.activeWatchers.scrollVelocity = _G.activeWatchers.scrollVelocity or 0
 
-    local inertiaScale = 1.0
-    if preset == "direct_raw" then
-      if phase ~= 0 then return true end -- drop momentum events completely
-      inertiaScale = state.scrollMomentumScale
-    elseif preset == "exponential_decay" then
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.15)
-    elseif preset == "friction_coasting" then
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.45)
-    else -- linear_damped (default)
-      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.3)
+    if phase == 0 then
+      _G.activeWatchers.scrollVelocity = deltaY * (state.scrollAcceleration or 0.15)
+    else
+      if state.scrollFrictionalDecay == 0 then return true end
+      _G.activeWatchers.scrollVelocity = _G.activeWatchers.scrollVelocity * state.scrollFrictionalDecay
+      if math.abs(_G.activeWatchers.scrollVelocity) < 0.01 then return true end
+      deltaY = _G.activeWatchers.scrollVelocity
     end
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
@@ -87,12 +84,12 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       return false
     end
 
-        if deltaY ~= 0 then
+    if deltaY ~= 0 then
       if state.shiftHeld then
         local avgVol = (state.topRowVolume + state.bottomRowVolume) / 2
         _G.activeWatchers.volAccumulator = _G.activeWatchers.volAccumulator or avgVol
-        local sensitivity = 0.25 * inertiaScale
-        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - (deltaY * sensitivity)))
+        -- Adjusting volume with new scroll mechanics
+        _G.activeWatchers.volAccumulator = math.max(0, math.min(127, _G.activeWatchers.volAccumulator - deltaY))
         local newVol = math.floor(_G.activeWatchers.volAccumulator + 0.5)
 
         local deltaVol = newVol - math.floor(avgVol + 0.5)
@@ -111,8 +108,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       else
         local currentMod = state.ccStates[1] or 0
         _G.activeWatchers.modAccumulator = _G.activeWatchers.modAccumulator or currentMod
-        local sensitivity = state.scrollSensitivity * inertiaScale
-        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - (deltaY * sensitivity)))
+        _G.activeWatchers.modAccumulator = math.max(0, math.min(127, _G.activeWatchers.modAccumulator - deltaY))
         local newMod = math.floor(_G.activeWatchers.modAccumulator + 0.5)
 
         if newMod ~= state.ccStates[1] then
