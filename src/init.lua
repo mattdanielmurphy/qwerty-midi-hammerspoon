@@ -260,7 +260,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
     if _G.activeWatchers.midiWebview and lastSeen > 0 then
       local elapsed = os.time() - lastSeen
       if elapsed >= 5 then
-        print("QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn")
+        local msg = "QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn"
+        local f = io.open("/tmp/midi_startup.log", "a")
+        if f then f:write(os.date("%H:%M:%S") .. " [WATCHDOG]: " .. msg .. "\n"); f:close() end
+        
         pcall(function()
           local h = hud.reloadMidiWebview()
           if h then h:show() end
@@ -331,6 +334,7 @@ if wasOpen then
 end
 
 _G.pingController = function() return hud.pingController() end
+_G.dumpMidiLogs = function() return hud.dumpMidiLogs() end
 _G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
 
 profileLog("Init complete!")

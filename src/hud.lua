@@ -22,7 +22,17 @@ local lastPongTime = 0
 local lastLatencyMs = 0
 local pendingPingTime = 0
 
+local function hudLog(msg)
+  print("QWERTY MIDI HUD: " .. msg)
+  local f = io.open("/tmp/midi_startup.log", "a")
+  if f then
+    f:write(os.date("%H:%M:%S") .. " [HUD]: " .. tostring(msg) .. "\n")
+    f:close()
+  end
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
+
 
 local controlsModule = nil
 
@@ -44,10 +54,11 @@ local function safeEvaluateJS(js)
     _G.activeWatchers.midiWebview:evaluateJavaScript(js)
   end)
   if not ok then
-    print("QWERTY MIDI: evaluateJavaScript error: " .. tostring(err))
+    hudLog("evaluateJavaScript error: " .. tostring(err))
   end
   return ok
 end
+
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
@@ -250,7 +261,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   else
     evalFailCount = evalFailCount + 1
     if evalFailCount >= 3 then
-      print("QWERTY MIDI: webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
+      hudLog("webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
       evalFailCount = 0
       hs.timer.doAfter(0.1, function()
         if state.midiActive then
@@ -259,13 +270,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             h:show()
           end)
           if not rok then
-            print("QWERTY MIDI: webview recreate failed: " .. tostring(rerr))
+            hudLog("webview recreate failed: " .. tostring(rerr))
           end
         end
       end)
     end
   end
 end
+
 
 local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
@@ -290,6 +302,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
 end
 
 local function createMidiWebview()
+  hudLog("createMidiWebview")
   webviewGeneration = webviewGeneration + 1
   lastHeartbeat = os.time()
   evalFailCount = 0
@@ -317,6 +330,7 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "domReady" then
+      hudLog("domReady")
       _G.activeWatchers.domIsReady = true
       lastHeartbeat = os.time()
       evalFailCount = 0
@@ -614,12 +628,13 @@ local function createMidiWebview()
 
   wv:windowCallback(function(action, webview)
     if action == "closing" then
+      hudLog("webview teardown (generation " .. myGen .. ")")
       -- Ignore stale callbacks from old webview generations
       if myGen ~= webviewGeneration then return end
       _G.activeWatchers.midiWebview = nil
       -- If midiActive is still true, the webview crashed unexpectedly — auto-respawn
       if state.midiActive then
-        print("QWERTY MIDI: webview closed unexpectedly — respawning in 0.5s")
+        hudLog("webview closed unexpectedly — respawning in 0.5s")
         hs.timer.doAfter(0.5, function()
           if state.midiActive and myGen == webviewGeneration then
             local ok, err = pcall(function()
@@ -627,7 +642,7 @@ local function createMidiWebview()
               h:show()
             end)
             if not ok then
-              print("QWERTY MIDI: webview respawn failed: " .. tostring(err))
+              hudLog("webview respawn failed: " .. tostring(err))
             end
           end
         end)
@@ -658,9 +673,45 @@ end
 
 local function pingWebview()
   if not _G.activeWatchers.midiWebview then return false end
+  hudLog("ping")
   pendingPingTime = hs.timer.absoluteTime()
   safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
   return true
+end
+
+local function pongWebview()
+    hudLog("pong")
+end
+
+local function dumpMidiLogs()
+  local output = {}
+  table.insert(output, "=== QWERTY MIDI DIAGNOSTICS & LOGS ===")
+  table.insert(output, "Time: " .. os.date("%Y-%m-%d %H:%M:%S"))
+  table.insert(output, "Webview Gen: " .. tostring(webviewGeneration))
+  table.insert(output, "Last Heartbeat: " .. tostring(os.time() - lastHeartbeat) .. "s ago")
+  table.insert(output, "Last Pong: " .. tostring(os.time() - lastPongTime) .. "s ago (Latency: " .. lastLatencyMs .. "ms)")
+  table.insert(output, "Eval Failures: " .. tostring(evalFailCount))
+  table.insert(output, "\n--- /tmp/midi_startup.log (last 20 lines) ---")
+  local f = io.open("/tmp/midi_startup.log", "r")
+  if f then
+    local lines = {}
+    for line in f:lines() do table.insert(lines, line) end
+    f:close()
+    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
+  end
+  table.insert(output, "\n--- /tmp/wv_js.log (last 20 lines) ---")
+  local fjs = io.open("/tmp/wv_js.log", "r")
+  if fjs then
+    local lines = {}
+    for line in fjs:lines() do table.insert(lines, line) end
+    fjs:close()
+    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
+  end
+  local res = table.concat(output, "\n")
+  print(res)
+  hs.pasteboard.setContents(res)
+  hs.alert.show("Diagnostics Log Copied to Clipboard", 2)
+  return res
 end
 
 local function pingController()
@@ -698,5 +749,6 @@ return {
   pingWebview = pingWebview,
   pingController = pingController,
   getLastPongTime = function() return lastPongTime end,
-  getLastLatencyMs = function() return lastLatencyMs end
+  getLastLatencyMs = function() return lastLatencyMs end,
+  dumpMidiLogs = dumpMidiLogs
 }

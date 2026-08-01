@@ -39,7 +39,17 @@ local lastPongTime = 0
 local lastLatencyMs = 0
 local pendingPingTime = 0
 
+local function hudLog(msg)
+  print("QWERTY MIDI HUD: " .. msg)
+  local f = io.open("/tmp/midi_startup.log", "a")
+  if f then
+    f:write(os.date("%H:%M:%S") .. " [HUD]: " .. tostring(msg) .. "\n")
+    f:close()
+  end
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
+
 
 local controlsModule = nil
 
@@ -61,10 +71,11 @@ local function safeEvaluateJS(js)
     _G.activeWatchers.midiWebview:evaluateJavaScript(js)
   end)
   if not ok then
-    print("QWERTY MIDI: evaluateJavaScript error: " .. tostring(err))
+    hudLog("evaluateJavaScript error: " .. tostring(err))
   end
   return ok
 end
+
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
@@ -267,7 +278,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   else
     evalFailCount = evalFailCount + 1
     if evalFailCount >= 3 then
-      print("QWERTY MIDI: webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
+      hudLog("webview appears dead (" .. evalFailCount .. " consecutive evaluateJS failures) — recreating")
       evalFailCount = 0
       hs.timer.doAfter(0.1, function()
         if state.midiActive then
@@ -276,13 +287,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             h:show()
           end)
           if not rok then
-            print("QWERTY MIDI: webview recreate failed: " .. tostring(rerr))
+            hudLog("webview recreate failed: " .. tostring(rerr))
           end
         end
       end)
     end
   end
 end
+
 
 local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
@@ -307,6 +319,7 @@ local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
 end
 
 local function createMidiWebview()
+  hudLog("createMidiWebview")
   webviewGeneration = webviewGeneration + 1
   lastHeartbeat = os.time()
   evalFailCount = 0
@@ -334,6 +347,7 @@ local function createMidiWebview()
     if not msg or not msg.body then return end
     local body = msg.body
     if body.type == "domReady" then
+      hudLog("domReady")
       _G.activeWatchers.domIsReady = true
       lastHeartbeat = os.time()
       evalFailCount = 0
@@ -631,12 +645,13 @@ local function createMidiWebview()
 
   wv:windowCallback(function(action, webview)
     if action == "closing" then
+      hudLog("webview teardown (generation " .. myGen .. ")")
       -- Ignore stale callbacks from old webview generations
       if myGen ~= webviewGeneration then return end
       _G.activeWatchers.midiWebview = nil
       -- If midiActive is still true, the webview crashed unexpectedly — auto-respawn
       if state.midiActive then
-        print("QWERTY MIDI: webview closed unexpectedly — respawning in 0.5s")
+        hudLog("webview closed unexpectedly — respawning in 0.5s")
         hs.timer.doAfter(0.5, function()
           if state.midiActive and myGen == webviewGeneration then
             local ok, err = pcall(function()
@@ -644,7 +659,7 @@ local function createMidiWebview()
               h:show()
             end)
             if not ok then
-              print("QWERTY MIDI: webview respawn failed: " .. tostring(err))
+              hudLog("webview respawn failed: " .. tostring(err))
             end
           end
         end)
@@ -675,9 +690,45 @@ end
 
 local function pingWebview()
   if not _G.activeWatchers.midiWebview then return false end
+  hudLog("ping")
   pendingPingTime = hs.timer.absoluteTime()
   safeEvaluateJS("if (window.pingHudController) window.pingHudController();")
   return true
+end
+
+local function pongWebview()
+    hudLog("pong")
+end
+
+local function dumpMidiLogs()
+  local output = {}
+  table.insert(output, "=== QWERTY MIDI DIAGNOSTICS & LOGS ===")
+  table.insert(output, "Time: " .. os.date("%Y-%m-%d %H:%M:%S"))
+  table.insert(output, "Webview Gen: " .. tostring(webviewGeneration))
+  table.insert(output, "Last Heartbeat: " .. tostring(os.time() - lastHeartbeat) .. "s ago")
+  table.insert(output, "Last Pong: " .. tostring(os.time() - lastPongTime) .. "s ago (Latency: " .. lastLatencyMs .. "ms)")
+  table.insert(output, "Eval Failures: " .. tostring(evalFailCount))
+  table.insert(output, "\n--- /tmp/midi_startup.log (last 20 lines) ---")
+  local f = io.open("/tmp/midi_startup.log", "r")
+  if f then
+    local lines = {}
+    for line in f:lines() do table.insert(lines, line) end
+    f:close()
+    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
+  end
+  table.insert(output, "\n--- /tmp/wv_js.log (last 20 lines) ---")
+  local fjs = io.open("/tmp/wv_js.log", "r")
+  if fjs then
+    local lines = {}
+    for line in fjs:lines() do table.insert(lines, line) end
+    fjs:close()
+    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
+  end
+  local res = table.concat(output, "\n")
+  print(res)
+  hs.pasteboard.setContents(res)
+  hs.alert.show("Diagnostics Log Copied to Clipboard", 2)
+  return res
 end
 
 local function pingController()
@@ -715,7 +766,8 @@ return {
   pingWebview = pingWebview,
   pingController = pingController,
   getLastPongTime = function() return lastPongTime end,
-  getLastLatencyMs = function() return lastLatencyMs end
+  getLastLatencyMs = function() return lastLatencyMs end,
+  dumpMidiLogs = dumpMidiLogs
 }
 
 end
@@ -983,7 +1035,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
     if _G.activeWatchers.midiWebview and lastSeen > 0 then
       local elapsed = os.time() - lastSeen
       if elapsed >= 5 then
-        print("QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn")
+        local msg = "QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn"
+        local f = io.open("/tmp/midi_startup.log", "a")
+        if f then f:write(os.date("%H:%M:%S") .. " [WATCHDOG]: " .. msg .. "\n"); f:close() end
+        
         pcall(function()
           local h = hud.reloadMidiWebview()
           if h then h:show() end
@@ -1054,6 +1109,7 @@ if wasOpen then
 end
 
 _G.pingController = function() return hud.pingController() end
+_G.dumpMidiLogs = function() return hud.dumpMidiLogs() end
 _G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
 
 profileLog("Init complete!")
@@ -3441,6 +3497,27 @@ local HTML_UI_CONTENT = [[
   </div>
 
 <script>
+  // Anti-Suspension Web Audio Sentinel: Keeps WebKit ProcessThrottler active as Foreground Media
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      const actx = new AudioCtx();
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      gain.gain.value = 0.00001; // Silent
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.start();
+      if (actx.state === 'suspended') {
+        document.addEventListener('click', () => actx.resume(), { once: true });
+        document.addEventListener('keydown', () => actx.resume(), { once: true });
+      }
+    }
+  } catch (e) {
+    console.warn('AudioContext anti-suspension init:', e);
+  }
+
+  let renderCount = 0;
   function getBuiltInKey(code) {
     if (typeof LAYOUT_DATA === 'undefined') return null;
     for (const row in LAYOUT_DATA) {
@@ -5229,8 +5306,15 @@ local HTML_UI_CONTENT = [[
   }
 
   function renderHud(data) {
+    const t0 = performance.now();
     try {
       if (!data) return;
+
+      renderCount++;
+      if (renderCount >= 100) {
+        renderCount = 0;
+      }
+
 
       currentWorkingLayout = (configData && configData.customLayout) ? configData.customLayout : {};
 
@@ -5260,6 +5344,14 @@ local HTML_UI_CONTENT = [[
           }
         }
       }
+      
+      const renderTime = performance.now() - t0;
+      if (renderTime > 15 || renderCount === 0) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'renderHud completed in ' + renderTime.toFixed(2) + 'ms' });
+      }
+    } catch (err) {
+      midiControllerUC.postMessage({ type: 'log', message: 'CRITICAL renderHud ERROR: ' + (err.stack || err) });
+    }
 
       if (data.spotlight) {
         showSpotlight(data.spotlight);
@@ -5478,7 +5570,15 @@ local HTML_UI_CONTENT = [[
   }
 
   // Heartbeat: let Lua detect if the web content process silently dies
+  let hbCount = 0;
   setInterval(() => {
+    hbCount++;
+    if (hbCount >= 10) {
+       hbCount = 0;
+       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'heartbeat tick' });
+       }
+    }
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'heartbeat' });
     }

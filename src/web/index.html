@@ -1572,6 +1572,27 @@
   </div>
 
 <script>
+  // Anti-Suspension Web Audio Sentinel: Keeps WebKit ProcessThrottler active as Foreground Media
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      const actx = new AudioCtx();
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      gain.gain.value = 0.00001; // Silent
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.start();
+      if (actx.state === 'suspended') {
+        document.addEventListener('click', () => actx.resume(), { once: true });
+        document.addEventListener('keydown', () => actx.resume(), { once: true });
+      }
+    }
+  } catch (e) {
+    console.warn('AudioContext anti-suspension init:', e);
+  }
+
+  let renderCount = 0;
   function getBuiltInKey(code) {
     if (typeof LAYOUT_DATA === 'undefined') return null;
     for (const row in LAYOUT_DATA) {
@@ -3360,8 +3381,15 @@
   }
 
   function renderHud(data) {
+    const t0 = performance.now();
     try {
       if (!data) return;
+
+      renderCount++;
+      if (renderCount >= 100) {
+        renderCount = 0;
+      }
+
 
       currentWorkingLayout = (configData && configData.customLayout) ? configData.customLayout : {};
 
@@ -3391,6 +3419,14 @@
           }
         }
       }
+      
+      const renderTime = performance.now() - t0;
+      if (renderTime > 15 || renderCount === 0) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'renderHud completed in ' + renderTime.toFixed(2) + 'ms' });
+      }
+    } catch (err) {
+      midiControllerUC.postMessage({ type: 'log', message: 'CRITICAL renderHud ERROR: ' + (err.stack || err) });
+    }
 
       if (data.spotlight) {
         showSpotlight(data.spotlight);
@@ -3609,7 +3645,15 @@
   }
 
   // Heartbeat: let Lua detect if the web content process silently dies
+  let hbCount = 0;
   setInterval(() => {
+    hbCount++;
+    if (hbCount >= 10) {
+       hbCount = 0;
+       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'log', message: 'heartbeat tick' });
+       }
+    }
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'heartbeat' });
     }
