@@ -6092,6 +6092,9 @@ local function generateSettingsHTML()
           <div class="slider-val" id="curveVal">%s</div>
         </div>
       </div>
+      <div style="margin-top: 15px;">
+        <canvas id="physicsCanvas" width="460" height="140" style="background:rgba(20,16,10,0.6); border:1px solid rgba(212,163,89,0.3); border-radius:8px; cursor:crosshair;"></canvas>
+      </div>
     </div>
 
     <!-- Tempo & Sync -->
@@ -6166,23 +6169,85 @@ local function generateSettingsHTML()
   function onSensitivity(v) {
     document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
     send('setSensitivity', parseFloat(v));
+    drawPhysicsCanvas();
   }
   function onAcceleration(v) {
     document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
     send('setAcceleration', parseFloat(v));
+    drawPhysicsCanvas();
   }
   function onDecay(v) {
     document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
     send('setDecay', parseFloat(v));
+    drawPhysicsCanvas();
   }
   function onInit(v) {
     document.getElementById('initVal').textContent = parseFloat(v).toFixed(2);
     send('setInit', parseFloat(v));
+    drawPhysicsCanvas();
   }
   function onCurve(v) {
     document.getElementById('curveVal').textContent = parseFloat(v).toFixed(1);
     send('setCurve', parseFloat(v));
+    drawPhysicsCanvas();
   }
+
+  const canvas = document.getElementById('physicsCanvas');
+  const ctx = canvas.getContext('2d');
+  let lastX = 0, lastY = 0;
+
+  function drawPhysicsCanvas() {
+    const w = canvas.width, h = canvas.height;
+    const sensitivity = parseFloat(document.getElementById('sensitivitySlider').value);
+    const acceleration = parseFloat(document.getElementById('accelerationSlider').value);
+    const initGain = parseFloat(document.getElementById('initSlider').value);
+    const decay = parseFloat(document.getElementById('decaySlider').value);
+    const curveExp = parseFloat(document.getElementById('curveSlider').value);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(212,163,89,0.3)';
+    ctx.lineWidth = 1;
+    for(let i=0; i<w; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
+    for(let i=0; i<h; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(w,i); ctx.stroke(); }
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#d4a359';
+    ctx.lineWidth = 2;
+    for(let x=0; x<w; x++) {
+      let vel = (x / w);
+      let output = Math.pow(vel, curveExp) * sensitivity * acceleration;
+      let y = h - (output * h * 2);
+      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(212,163,89,0.6)';
+    ctx.setLineDash([5, 5]);
+    for(let x=0; x<w; x++) {
+      let time = x / w;
+      let y = (h * 0.8) - (initGain * Math.pow(decay, time * 10) * h * 0.5);
+      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    ctx.fillStyle = '#d4a359';
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI*2);
+    ctx.fill();
+    setTimeout(drawPhysicsCanvas, 200);
+  });
+
+  drawPhysicsCanvas();
+
   function syncState(s) {
     if (!s) return;
     if (s.bpmStepSize !== undefined) {
@@ -6231,6 +6296,7 @@ local function generateSettingsHTML()
       var valEl = document.getElementById('curveVal');
       if (valEl) valEl.textContent = parseFloat(s.scrollCurveExponent).toFixed(1);
     }
+    drawPhysicsCanvas();
   }
 </script>
 </body>
