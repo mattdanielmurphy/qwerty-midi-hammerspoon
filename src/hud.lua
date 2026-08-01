@@ -165,6 +165,18 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     }
   end
 
+  -- Pre-compute set of all pitches in the arp pool (values of arpHeldNotes)
+  -- and the currently active arp pitch, for per-key dot indicators.
+  local arpHeldPitches = {}
+  local currentArpPitch = activeArpPitch or (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch)
+  if state.arpEnabled then
+    for _, pitch in pairs(state.arpHeldNotes) do
+      if type(pitch) == "number" then
+        arpHeldPitches[pitch] = true
+      end
+    end
+  end
+
   for code, kData in pairs(config.getActiveNoteKeysMap()) do
     local noteNum = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
     local intervalIdx = transposer.getIntervalInfo(noteNum)
@@ -179,11 +191,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       typeClass = "fifth-key"
     end
 
-      local isPressed = (state.pressedKeys[code] ~= nil)
-      local currentArpPitch = activeArpPitch or (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch)
-      if state.arpEnabled and currentArpPitch and noteNum == currentArpPitch then
-        isPressed = true
-      end
+    local isPressed = (state.pressedKeys[code] ~= nil)
+    if state.arpEnabled and currentArpPitch and noteNum == currentArpPitch then
+      isPressed = true
+    end
 
     -- Latch check: arpHeldNotes may use compound keys like "45_60" (code_pitch) in chord mode.
     -- We need to check if any entry in arpHeldNotes starts with our base keycode.
@@ -207,6 +218,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
+      arpHeld = state.arpEnabled and (arpHeldPitches[noteNum] == true),
+      arpPlaying = state.arpEnabled and (currentArpPitch ~= nil) and (noteNum == currentArpPitch),
       outOfBounds = (noteNum < 0 or noteNum > 127)
     }
   end

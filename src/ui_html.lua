@@ -695,10 +695,9 @@ local HTML_UI_CONTENT = [[
     position: relative;
   }
 
+  /* Latched key: just a subtle border hint — background removed so root/3rd/5th colors remain visible */
   .key-pad.latched-key {
-    background: rgba(56, 130, 220, 0.22) !important;
-    border-color: rgba(94, 162, 235, 0.85) !important;
-    box-shadow: 0 0 8px rgba(94, 162, 235, 0.35), inset 0 0 6px rgba(94, 162, 235, 0.15);
+    border-color: rgba(94, 162, 235, 0.35) !important;
   }
 
   .key-pad.latched-key:active, .key-pad.latched-key.pressed {
@@ -707,6 +706,7 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 12px rgba(240, 190, 90, 0.6), inset 0 0 8px rgba(240, 190, 90, 0.3);
   }
 
+  /* Arp indicator dot — always in DOM for smooth opacity transitions */
   .key-pad .latch-dot {
     position: absolute;
     top: 3px;
@@ -715,13 +715,31 @@ local HTML_UI_CONTENT = [[
     height: 6px;
     border-radius: 50%;
     background-color: #5ea2eb;
-    box-shadow: 0 0 4px #5ea2eb;
-    display: none;
+    box-shadow: none;
+    opacity: 0;
+    /* Slow fade-out so the dot lingers as the note decays */
+    transition: opacity 0.32s ease-out, box-shadow 0.32s ease-out, background-color 0.32s ease-out;
     pointer-events: none;
   }
 
+  /* Pressed the key that triggered this latch chord — very faint dot */
   .key-pad.latched-key .latch-dot {
-    display: block;
+    opacity: 0.18;
+  }
+
+  /* Key's MIDI pitch is in the arp pool (all chord notes, not just pressed key) */
+  .key-pad.arp-held .latch-dot {
+    opacity: 0.38;
+    box-shadow: 0 0 4px rgba(94, 162, 235, 0.65);
+  }
+
+  /* Key is the note currently being arpeggiated — bright, snappy on */
+  .key-pad.arp-playing .latch-dot {
+    opacity: 1.0;
+    background-color: #aad6ff;
+    box-shadow: 0 0 8px #5ea2eb, 0 0 18px rgba(94, 162, 235, 0.5);
+    /* Fast attack so the dot snaps on with each arp step */
+    transition: opacity 0.04s ease-in, box-shadow 0.04s ease-in, background-color 0.04s ease-in;
   }
 
   /* Edit Mode & Action Library Drawer Styling */
@@ -3607,6 +3625,9 @@ local HTML_UI_CONTENT = [[
             if (k.latched) el.classList.add('latched-key');
             if (k.pressed) el.classList.add('pressed');
             if (k.sustainActive) el.classList.add('sustain-active');
+            // Arp dot indicators: arp-held = pitch is in pool, arp-playing = actively sounding
+            if (k.arpHeld) el.classList.add('arp-held');
+            if (k.arpPlaying) el.classList.add('arp-playing');
 
             const isShift = data.shiftHeld || shiftModeActive;
             const effAction = isShift ? (k.shiftAction || k.action) : k.action;

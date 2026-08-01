@@ -36,3 +36,6 @@
 - **Fix Arp Gate Timer Desync:** Synchronized arpeggiator note gate timers on re-triggers and gate adjustments (`applyGatePercentChange`). Resolved staggered per-note gate updates. [Agent Log](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-25_05-28_fix-arp-gate-timer-desync.md)
 - **Key Editor Split Layout:** Expanded window height and split keys vertically during edit mode, removing the need for a separate shift toggle.
 - **Index Change:** Verified index.html change, reloaded, and committed. See [log](file:///Users/matt/.gemini/antigravity/brain/11894bb8-dc42-4791-b006-4fe9bee58ae7/2026-07-28_14-09-index-change.md).
+
+- **2026-08-01**: Fixed arp latch chord key highlighting — latch detection in `hud.lua` now prefix-matches compound arpHeldNotes keys (`"code_pitch"`), so all chord notes show blue when latched.
+- **2026-08-01**: Added `updateLatchedArpChordNotes()` to `arpeggiator.lua` — changing chord type via `chordUp`/`chordDown` while arp is latched now rebuilds held notes with the new chord's pitch offsets, so the arp immediately plays the new chord shape.
