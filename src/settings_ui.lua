@@ -269,7 +269,7 @@ local function generateSettingsHTML()
           <span>Base scaling multiplier</span>
         </div>
         <div class="slider-row">
-          <input type="range" id="sensitivitySlider" min="0.02" max="0.50" step="0.01"
+          <input type="range" id="sensitivitySlider" min="0.02" max="2.00" step="0.01"
             value="%s"
             oninput="onSensitivity(this.value)">
           <div class="slider-val" id="sensitivityVal">%s</div>
