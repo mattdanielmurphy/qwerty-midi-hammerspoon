@@ -899,7 +899,19 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
+    local preset = state.scrollInertiaPreset or "linear_damped"
+
+    local inertiaScale = 1.0
+    if preset == "direct_raw" then
+      if phase ~= 0 then return true end -- drop momentum events completely
+      inertiaScale = state.scrollMomentumScale
+    elseif preset == "exponential_decay" then
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.15)
+    elseif preset == "friction_coasting" then
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.45)
+    else -- linear_damped (default)
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.3)
+    end
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
     if _G.activeWatchers.isHoveringScrollable then
@@ -6029,6 +6041,19 @@ local function generateSettingsHTML()
           <div class="slider-val" id="momentumVal">%s</div>
         </div>
       </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Inertia Preset</strong>
+          <span>Scroll momentum behavior</span>
+        </div>
+        <select id="inertiaPreset" onchange="send('setInertiaPreset', this.value)">
+          <option value="direct_raw">Direct (Raw Touch)</option>
+          <option value="linear_damped">Linear Damped</option>
+          <option value="exponential_decay">Exponential Decay</option>
+          <option value="friction_coasting">Friction Coasting</option>
+        </select>
+      </div>
     </div>
 
     <!-- Tempo & Sync -->
@@ -6138,6 +6163,10 @@ local function generateSettingsHTML()
       var valEl = document.getElementById('momentumVal');
       if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
     }
+    if (s.scrollInertiaPreset !== undefined) {
+      var el = document.getElementById('inertiaPreset');
+      if (el) el.value = s.scrollInertiaPreset;
+    }
   }
 </script>
 </body>
@@ -6194,6 +6223,9 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 0.3
       state.scrollMomentumScale = val
       hs.settings.set("qwertyMidi_scrollMomentumScale", val)
+    elseif body.type == "setInertiaPreset" then
+      state.scrollInertiaPreset = body.value
+      hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -6231,7 +6263,8 @@ local function syncStateToWebview()
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
     scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollMomentumScale = state.scrollMomentumScale or 0.3
+    scrollMomentumScale = state.scrollMomentumScale or 0.3,
+    scrollInertiaPreset = state.scrollInertiaPreset or "linear_damped"
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
@@ -6360,6 +6393,7 @@ local state = {
   -- Scroll / Trackpad
   scrollSensitivity    = getSetting("scrollSensitivity", 0.15),
   scrollMomentumScale  = getSetting("scrollMomentumScale", 0.3),
+  scrollInertiaPreset  = getSetting("scrollInertiaPreset", "linear_damped"),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
@@ -6402,6 +6436,7 @@ local function saveSettings()
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
   state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
   state.scrollMomentumScale = tonumber(state.scrollMomentumScale) or 0.3
+  if type(state.scrollInertiaPreset) ~= "string" then state.scrollInertiaPreset = "linear_damped" end
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
@@ -6426,6 +6461,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
   hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
+  hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)

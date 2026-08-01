@@ -68,7 +68,19 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     -- Dampen (not block) momentum/inertia events so deceleration feels natural but short
     local phase = event:getProperty(hs.eventtap.event.properties.scrollWheelEventScrollPhase) or 0
-    local inertiaScale = (phase == 0) and state.scrollMomentumScale or 1.0
+    local preset = state.scrollInertiaPreset or "linear_damped"
+
+    local inertiaScale = 1.0
+    if preset == "direct_raw" then
+      if phase ~= 0 then return true end -- drop momentum events completely
+      inertiaScale = state.scrollMomentumScale
+    elseif preset == "exponential_decay" then
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.15)
+    elseif preset == "friction_coasting" then
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.45)
+    else -- linear_damped (default)
+      inertiaScale = (phase == 0) and state.scrollMomentumScale or (state.scrollMomentumScale * 0.3)
+    end
 
     -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
     if _G.activeWatchers.isHoveringScrollable then

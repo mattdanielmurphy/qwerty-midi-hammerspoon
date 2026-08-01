@@ -90,6 +90,7 @@ local state = {
   -- Scroll / Trackpad
   scrollSensitivity    = getSetting("scrollSensitivity", 0.15),
   scrollMomentumScale  = getSetting("scrollMomentumScale", 0.3),
+  scrollInertiaPreset  = getSetting("scrollInertiaPreset", "linear_damped"),
 
   DIGIT_KEYCODES = {
     [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
@@ -132,6 +133,7 @@ local function saveSettings()
   state.bpmStepSize = tonumber(state.bpmStepSize) or 10
   state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
   state.scrollMomentumScale = tonumber(state.scrollMomentumScale) or 0.3
+  if type(state.scrollInertiaPreset) ~= "string" then state.scrollInertiaPreset = "linear_damped" end
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
@@ -156,6 +158,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
   hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
   hs.settings.set("qwertyMidi_scrollMomentumScale", state.scrollMomentumScale)
+  hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
   hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)

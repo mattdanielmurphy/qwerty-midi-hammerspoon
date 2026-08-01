@@ -286,6 +286,19 @@ local function generateSettingsHTML()
           <div class="slider-val" id="momentumVal">%s</div>
         </div>
       </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Inertia Preset</strong>
+          <span>Scroll momentum behavior</span>
+        </div>
+        <select id="inertiaPreset" onchange="send('setInertiaPreset', this.value)">
+          <option value="direct_raw">Direct (Raw Touch)</option>
+          <option value="linear_damped">Linear Damped</option>
+          <option value="exponential_decay">Exponential Decay</option>
+          <option value="friction_coasting">Friction Coasting</option>
+        </select>
+      </div>
     </div>
 
     <!-- Tempo & Sync -->
@@ -395,6 +408,10 @@ local function generateSettingsHTML()
       var valEl = document.getElementById('momentumVal');
       if (valEl) valEl.textContent = parseFloat(s.scrollMomentumScale).toFixed(2);
     }
+    if (s.scrollInertiaPreset !== undefined) {
+      var el = document.getElementById('inertiaPreset');
+      if (el) el.value = s.scrollInertiaPreset;
+    }
   }
 </script>
 </body>
@@ -451,6 +468,9 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 0.3
       state.scrollMomentumScale = val
       hs.settings.set("qwertyMidi_scrollMomentumScale", val)
+    elseif body.type == "setInertiaPreset" then
+      state.scrollInertiaPreset = body.value
+      hs.settings.set("qwertyMidi_scrollInertiaPreset", state.scrollInertiaPreset)
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
@@ -488,7 +508,8 @@ local function syncStateToWebview()
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
     scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollMomentumScale = state.scrollMomentumScale or 0.3
+    scrollMomentumScale = state.scrollMomentumScale or 0.3,
+    scrollInertiaPreset = state.scrollInertiaPreset or "linear_damped"
   }
   local jsonStr = hs.json.encode(s)
   _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
