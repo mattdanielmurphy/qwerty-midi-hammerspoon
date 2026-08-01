@@ -263,7 +263,7 @@ local function executeControlAction(act, code)
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
-        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
         subtext = "Top keys shifted",
         targetId = "octave-indicator-top",
         color = "#d4a359"
@@ -286,7 +286,7 @@ local function executeControlAction(act, code)
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
-        value = (state.topRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.topRowOctaveOffset / 12) .. " Oct",
+        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
         subtext = "Top keys shifted",
         targetId = "octave-indicator-top",
         color = "#d4a359"

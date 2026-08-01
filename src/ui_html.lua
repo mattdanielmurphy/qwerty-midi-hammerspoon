@@ -4,7 +4,7 @@ local HTML_UI_CONTENT = [[
 <head>
 <meta charset="utf-8">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
   input, textarea, [contenteditable] { user-select: auto; -webkit-user-select: auto; }
   html, body {
     background: transparent;
@@ -27,8 +27,8 @@ local HTML_UI_CONTENT = [[
     display: flex;
     align-items: center;
     justify-content: center;
-    flex: 1;
-    min-height: 0;
+    height: 44px;
+    margin-bottom: 6px;
     pointer-events: none;
   }
 
@@ -55,7 +55,7 @@ local HTML_UI_CONTENT = [[
     background: rgba(30, 26, 20, 0.96);
     border: 1.5px solid #d4a359;
     border-radius: 8px;
-    padding: 8px 26px;
+    padding: 6px 20px;
     box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 12px rgba(212, 163, 89, 0.35);
     display: flex;
     flex-direction: row;
@@ -66,6 +66,7 @@ local HTML_UI_CONTENT = [[
     pointer-events: none;
     opacity: 1;
     white-space: nowrap;
+    margin: 0 auto;
   }
 
   .spotlight-card.hidden {
@@ -101,8 +102,8 @@ local HTML_UI_CONTENT = [[
   /* Dynamic Mod Wheel Glow — always driven by --mod-intensity (0.00–1.00) */
   #hud-container {
     box-shadow:
-      0 0 calc(var(--mod-intensity) * 56px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.9)),
-      inset 0 0 calc(var(--mod-intensity) * 30px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.35));
+      0 0 calc(var(--mod-intensity) * 18px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.6)),
+      inset 0 0 calc(var(--mod-intensity) * 24px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.35));
     border-color: rgba(212, 163, 89, calc(0.25 + var(--mod-intensity) * 0.6));
     transition: box-shadow 0.08s ease, border-color 0.08s ease, height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     border-radius: 14px;
@@ -1502,7 +1503,7 @@ local HTML_UI_CONTENT = [[
         <div class="row-controls">
           <button id="arp-top-toggle" class="arp-row-toggle">ARP</button>
           <div id="octave-indicator-top" class="compact-oct-badge draggable-octave" data-row="top" title="Drag up/down to shift top row octave">
-            <span id="top-oct-text">TOP +0</span>
+            <span id="top-oct-text">TOP +1</span>
           </div>
           <div id="vol-indicator-top" class="vol-bar-container" title="Top Row Volume">
             <div id="vol-fill-top" class="vol-bar-fill"></div>
@@ -1515,7 +1516,7 @@ local HTML_UI_CONTENT = [[
         <div class="row-controls">
           <button id="arp-bottom-toggle" class="arp-row-toggle active">ARP</button>
           <div id="octave-indicator-bottom" class="compact-oct-badge draggable-octave" data-row="bottom" title="Drag up/down to shift bottom row octave">
-            <span id="bottom-oct-text">BOT -3</span>
+            <span id="bottom-oct-text">BOT +0</span>
           </div>
           <div id="vol-indicator-bottom" class="vol-bar-container" title="Bottom Row Volume">
             <div id="vol-fill-bottom" class="vol-bar-fill"></div>

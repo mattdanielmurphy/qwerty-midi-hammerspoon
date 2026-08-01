@@ -17,7 +17,7 @@ local state = {
   currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
   currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
   octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
-  topRowOctaveOffset = getSetting("topRowOctaveOffset", 0), -- Independent Top Row Octave Offset
+  topRowOctaveOffset = getSetting("topRowOctaveOffset", 12), -- Independent Top Row Octave Offset
   bottomRowOctaveOffset = getSetting("bottomRowOctaveOffset", 0), -- Independent Bottom Row Octave Offset
   transposeShift = getSetting("transposeShift", 0),     -- Transpose offset in scale degrees (-12 to +12)
   sustainActive = false,      -- Sustain toggle state (CC64)

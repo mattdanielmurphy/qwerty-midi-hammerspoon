@@ -114,8 +114,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
-  local topOctaveStr = (topOctVal >= 0 and "+" or "") .. math.floor(topOctVal / 12)
-  local bottomOctaveStr = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12)
+  local botOctNum = math.floor((octVal + (tonumber(state.bottomRowOctaveOffset) or 0)) / 12)
+  local topOctNum = math.floor((octVal + (tonumber(state.topRowOctaveOffset) or 0) + 12) / 12)
+  local topOctaveStr = (topOctNum >= 0 and "+" or "") .. topOctNum
+  local bottomOctaveStr = (botOctNum >= 0 and "+" or "") .. botOctNum
 
   local keyUpdates = {}
 
