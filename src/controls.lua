@@ -629,6 +629,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local spot = {
       title = "CHORD TYPE",
       value = state.CHORDS[state.chordIdx].name,
@@ -640,6 +641,7 @@ local function executeControlAction(act, code)
 
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local spot = {
       title = "CHORD TYPE",
       value = state.CHORDS[state.chordIdx].name,
@@ -778,6 +780,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",
@@ -789,6 +792,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",

@@ -185,7 +185,19 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         isPressed = true
       end
 
-    local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
+    -- Latch check: arpHeldNotes may use compound keys like "45_60" (code_pitch) in chord mode.
+    -- We need to check if any entry in arpHeldNotes starts with our base keycode.
+    local isLatched = false
+    if state.arpEnabled and state.arpLatchActive then
+      local codeStr = tostring(code)
+      for heldCode, _ in pairs(state.arpHeldNotes) do
+        local heldBase = tostring(heldCode):match("^(%d+)")
+        if heldBase == codeStr then
+          isLatched = true
+          break
+        end
+      end
+    end
 
     keyUpdates[tostring(code)] = {
       note = noteName,

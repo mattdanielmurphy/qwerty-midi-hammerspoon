@@ -202,7 +202,19 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         isPressed = true
       end
 
-    local isLatched = state.arpEnabled and state.arpLatchActive and (state.arpHeldNotes[code] ~= nil)
+    -- Latch check: arpHeldNotes may use compound keys like "45_60" (code_pitch) in chord mode.
+    -- We need to check if any entry in arpHeldNotes starts with our base keycode.
+    local isLatched = false
+    if state.arpEnabled and state.arpLatchActive then
+      local codeStr = tostring(code)
+      for heldCode, _ in pairs(state.arpHeldNotes) do
+        local heldBase = tostring(heldCode):match("^(%d+)")
+        if heldBase == codeStr then
+          isLatched = true
+          break
+        end
+      end
+    end
 
     keyUpdates[tostring(code)] = {
       note = noteName,
@@ -1499,6 +1511,39 @@ local function updateLatchedArpNotes()
   end
 end
 
+-- Rebuild arp held notes for all latched keys using the current chord (after chord type change).
+-- This replaces compound key entries (e.g. "45_60", "45_64") with new pitches from the new chord.
+local function updateLatchedArpChordNotes()
+  if not state.arpEnabled or not state.arpLatchActive or next(state.arpHeldNotes) == nil then return end
+
+  -- Collect unique base keycodes and all existing keys to remove (two-pass to avoid mutating during iteration)
+  local uniqueBaseCodes = {}
+  local keysToRemove = {}
+  for code, _ in pairs(state.arpHeldNotes) do
+    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+    if rawCode then
+      uniqueBaseCodes[rawCode] = true
+      table.insert(keysToRemove, code)
+    end
+  end
+
+  -- Remove all existing entries safely (outside the iteration)
+  for _, code in ipairs(keysToRemove) do
+    state.arpHeldNotes[code] = nil
+  end
+
+  -- Re-add entries using the new chord pitches
+  for rawCode, _ in pairs(uniqueBaseCodes) do
+    local noteKey = config.getNoteKey(rawCode)
+    if noteKey then
+      local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
+      for _, p in ipairs(newPitches) do
+        state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
+      end
+    end
+  end
+end
+
 local function getArpRowTargetSubtext()
   if state.arpTopEnabled and state.arpBottomEnabled then
     return "Top & Bottom Rows"
@@ -1834,6 +1879,7 @@ return {
   applyBpmChange = applyBpmChange,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
+  updateLatchedArpChordNotes = updateLatchedArpChordNotes,
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
   toggleArp = toggleArp,
@@ -7508,6 +7554,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local spot = {
       title = "CHORD TYPE",
       value = state.CHORDS[state.chordIdx].name,
@@ -7519,6 +7566,7 @@ local function executeControlAction(act, code)
 
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local spot = {
       title = "CHORD TYPE",
       value = state.CHORDS[state.chordIdx].name,
@@ -7657,6 +7705,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",
@@ -7668,6 +7717,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    arpeggiator.updateLatchedArpChordNotes()
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",

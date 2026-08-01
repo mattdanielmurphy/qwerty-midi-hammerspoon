@@ -346,6 +346,39 @@ local function updateLatchedArpNotes()
   end
 end
 
+-- Rebuild arp held notes for all latched keys using the current chord (after chord type change).
+-- This replaces compound key entries (e.g. "45_60", "45_64") with new pitches from the new chord.
+local function updateLatchedArpChordNotes()
+  if not state.arpEnabled or not state.arpLatchActive or next(state.arpHeldNotes) == nil then return end
+
+  -- Collect unique base keycodes and all existing keys to remove (two-pass to avoid mutating during iteration)
+  local uniqueBaseCodes = {}
+  local keysToRemove = {}
+  for code, _ in pairs(state.arpHeldNotes) do
+    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+    if rawCode then
+      uniqueBaseCodes[rawCode] = true
+      table.insert(keysToRemove, code)
+    end
+  end
+
+  -- Remove all existing entries safely (outside the iteration)
+  for _, code in ipairs(keysToRemove) do
+    state.arpHeldNotes[code] = nil
+  end
+
+  -- Re-add entries using the new chord pitches
+  for rawCode, _ in pairs(uniqueBaseCodes) do
+    local noteKey = config.getNoteKey(rawCode)
+    if noteKey then
+      local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
+      for _, p in ipairs(newPitches) do
+        state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
+      end
+    end
+  end
+end
+
 local function getArpRowTargetSubtext()
   if state.arpTopEnabled and state.arpBottomEnabled then
     return "Top & Bottom Rows"
@@ -681,6 +714,7 @@ return {
   applyBpmChange = applyBpmChange,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
+  updateLatchedArpChordNotes = updateLatchedArpChordNotes,
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
   toggleArp = toggleArp,
