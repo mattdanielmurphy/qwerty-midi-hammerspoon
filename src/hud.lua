@@ -202,12 +202,18 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   for code, cData in pairs(config.getActiveControlKeysMap()) do
     local isSustain = (cData.action == "sustain" or cData.shiftAction == "sustain")
     local isChordToggle = (cData.action == "chordToggle" or cData.shiftAction == "chordToggle")
+    local isMainArp = (cData.action == "arpToggle" or cData.shiftAction == "arpToggle")
+    local isTopArp = (cData.action == "arpTopToggle" or cData.shiftAction == "arpTopToggle")
+    local isBotArp = (cData.action == "arpBottomToggle" or cData.shiftAction == "arpBottomToggle")
     local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     
     local isActiveToggle = false
     if isSustain and state.sustainActive then isActiveToggle = true end
     if isChordToggle and state.chordModeActive then isActiveToggle = true end
+    if (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled) then
+      isActiveToggle = true
+    end
 
     keyUpdates[tostring(code)] = {
       note = cData.name,
