@@ -263,14 +263,23 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
-    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
+    currentMode = state.currentMode or "Home",
+    modeSelectHeld = state.modeSelectHeld == true,
+    keys = keyUpdates,
     shiftHeld = state.shiftHeld,
-    rootIdx = state.currentRoot,
-    modeName = modeName,
+    uiActionKeyHue = state.uiActionKeyHue,
+    uiActionKeySat = state.uiActionKeySat,
+    uiActionKeyLight = state.uiActionKeyLight,
+    uiActionKeyOpacity = state.uiActionKeyOpacity,
+    uiActionKeyBorderOpacity = state.uiActionKeyBorderOpacity,
     arpEnabled = state.arpEnabled,
+    modeName = modeName,
     arpLatchActive = state.arpLatchActive,
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
+    arpQuantizeMode = state.arpQuantizeMode or "None",
+    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
+    rootIdx = state.currentRoot,
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
@@ -434,6 +443,17 @@ local function createMidiWebview()
         value = ARP_DIRECTIONS[state.arpDirectionIdx],
         subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
         targetId = "arp-dir-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setArpQuantize" and body.value ~= nil then
+      state.arpQuantizeMode = body.value
+      hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
+      local spot = {
+        title = "QUANTIZE",
+        value = string.upper(body.value),
+        subtext = "Note Change Quantization",
+        targetId = "arp-quantize-select",
         color = "#d4a359"
       }
       updateWebviewHud(spot)

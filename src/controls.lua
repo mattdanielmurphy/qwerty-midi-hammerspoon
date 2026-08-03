@@ -65,7 +65,9 @@ local function captureStateSnapshot(label)
     arpBpm = state.arpBpm,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
-    modWheel = state.ccStates[1] or 0
+    modWheel = state.ccStates[1] or 0,
+    sustainActive = state.sustainActive,
+    chordModeActive = state.chordModeActive
   }
 end
 
@@ -95,6 +97,9 @@ local function applyStateSnapshot(snap)
   state.arpTopEnabled = snap.arpTopEnabled
   state.arpBottomEnabled = snap.arpBottomEnabled
   state.ccStates[1] = snap.modWheel
+  
+  if snap.sustainActive ~= nil then state.sustainActive = snap.sustainActive end
+  if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
 
   arpeggiator.updateLatchedArpNotes()
   arpeggiator.applyBpmChange()
@@ -232,6 +237,36 @@ local function executeControlAction(act, code)
     return
   elseif act == "redoState" then
     redoControllerState(code)
+    return
+  elseif string.match(act, "^setArpRate_(%d+)$") then
+    local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
+    state.arpRateIdx = rate
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpDir_(%d+)$") then
+    local dir = tonumber(string.match(act, "^setArpDir_(%d+)$"))
+    state.arpDirectionIdx = dir
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpQuantize_(.+)$") then
+    local quant = string.match(act, "^setArpQuantize_(.+)$")
+    state.arpQuantizeMode = quant
+    hs.settings.set("qwertyMidi_arpQuantizeMode", quant)
+    hud.updateWebviewHud()
+    return
+  elseif act == "arpLatchToggle" then
+    state.arpLatchActive = not state.arpLatchActive
+    if not state.arpLatchActive then
+      local newHeld = {}
+      for codeKey, pitch in pairs(state.arpHeldNotes) do
+        if state.arpKeysCurrentlyHeld[codeKey] then
+          newHeld[codeKey] = pitch
+        end
+      end
+      state.arpHeldNotes = newHeld
+    end
+    hud.updateWebviewHud()
     return
   end
 
@@ -598,9 +633,15 @@ local function executeControlAction(act, code)
     for code, keyInfo in pairs(state.pressedKeys) do
       if type(keyInfo) == "table" then
         keyInfo.isSustainedNote = true
-        if not keyInfo.isArpNote and keyInfo.pitch then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[keyInfo.pitch] = true
+        if not keyInfo.isArpNote then
+          local pitches = keyInfo.pitches or { keyInfo.pitch }
+          local ch = keyInfo.channel or 0
+          for _, p in ipairs(pitches) do
+            if p then
+              state.sustainedPitches = state.sustainedPitches or {}
+              state.sustainedPitches[p] = { channel = ch }
+            end
+          end
         end
       end
     end
@@ -935,19 +976,64 @@ local function executeControlAction(act, code)
   config.saveSettings()
 end
 
+local function shouldRepeat(act)
+  if not act then return false end
+  local repeatingActions = {
+    bpmUp = true, bpmDown = true,
+    relUp = true, relDown = true, releaseUp = true, releaseDown = true,
+    arpGateUp = true, arpGateDown = true,
+    volUp = true, volDown = true, volume = true,
+    topVolUp = true, topVolDown = true,
+    botVolUp = true, botVolDown = true,
+    modWheelUp = true, modWheelDown = true, modWheel = true
+  }
+  return repeatingActions[act] == true
+end
+
 local function handleKeyDown(code)
-  if state.pressedKeys[code] then
+  if code == 50 then -- Backtick
+    state.modeSelectHeld = true
+    state.modeWasSelectedDuringHold = false
+    hud.updateWebviewHud()
     return true
   end
 
+  if state.modeSelectHeld then
+    -- Mode Selector is Active!
+    if code == 0 then -- 'a' key
+      state.currentMode = "ArpAdvanced"
+      state.modeWasSelectedDuringHold = true
+      -- Release any currently pressed piano keys to prevent stuck notes
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+      hud.updateWebviewHud()
+      return true
+    end
+    -- If it's another key, ignore/block it while mode selector is held
+    return true 
+  end
 
+  if state.pressedKeys[code] then
+    return true
+  end
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
     if k and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
       state.pressedKeys[code] = { isControl = true, action = k.shiftAction }
+      
+      state.controlKeyDownTime = state.controlKeyDownTime or {}
+      state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
+      state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
+      state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
+
       executeControlAction(k.shiftAction, code)
-      if k.shiftAction ~= "sustain" then
+      if shouldRepeat(k.shiftAction) then
         stopControlRepeat(code)
         local entry = {}
         controlRepeatTimers[code] = entry
@@ -963,6 +1049,8 @@ local function handleKeyDown(code)
             end)
           end
         end)
+      else
+        stopControlRepeat(code)
       end
       return true
     end
@@ -972,8 +1060,14 @@ local function handleKeyDown(code)
   if k and k.action and k.action ~= "" and k.action ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = k.action }
     hud.updateSingleKeyState(code, true, false)
+    
+    state.controlKeyDownTime = state.controlKeyDownTime or {}
+    state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
+    state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
+    state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
+
     executeControlAction(k.action, code)
-    if k.action ~= "sustain" and k.action ~= "chordMod" then
+    if shouldRepeat(k.action) then
       stopControlRepeat(code)
       local entry = {}
       controlRepeatTimers[code] = entry
@@ -989,6 +1083,8 @@ local function handleKeyDown(code)
           end)
         end
       end)
+    else
+      stopControlRepeat(code)
     end
     return true
   end
@@ -1025,12 +1121,19 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
-
-
-  if code == 50 then -- Backtick
+  if code == 50 then -- Backtick released
     stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
+    state.modeSelectHeld = false
+    if not state.modeWasSelectedDuringHold then
+      state.currentMode = "Home"
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+    end
     hud.updateWebviewHud()
     return true
   end
@@ -1072,44 +1175,66 @@ local function handleKeyUp(code)
       return true
   end
 
+  local function cleanupSustainPitches()
+    if state.sustainedPitches then
+      for pitch, item in pairs(state.sustainedPitches) do
+        local channel = type(item) == "table" and item.channel or 0
+        local isCurrentlyHeld = false
+        for _, kInfo in pairs(state.pressedKeys) do
+          if type(kInfo) == "table" then
+            local pList = kInfo.pitches or { kInfo.pitch }
+            for _, p in ipairs(pList) do
+              if p == pitch then
+                isCurrentlyHeld = true
+                break
+              end
+            end
+            if isCurrentlyHeld then break end
+          end
+        end
+        if not isCurrentlyHeld then
+          midi.sendMidiNote("noteOff", pitch, 0, channel)
+        end
+      end
+      state.sustainedPitches = {}
+    end
+  end
+
   local ctrlKey = config.getControlKey(code)
   if ctrlKey then
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
     local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+    
+    local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
+      if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
+        local wasSustain = state.sustainActive
+        applyStateSnapshot(state.controlKeyDownSnapshots[code])
+        if wasSustain and not state.sustainActive then
+          midi.sendMidiCC(64, 0)
+          cleanupSustainPitches()
+        elseif not wasSustain and state.sustainActive then
+          midi.sendMidiCC(64, 127)
+        end
+        hud.updateWebviewHud()
+        return true
+      end
+    end
+
     if act == "sustain" then
-      local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0
-      if holdDuration > 0.25 then
+      if state.sustainWasActiveOnPress then
         state.sustainActive = false
         midi.sendMidiCC(64, 0)
       else
-        if state.sustainWasActiveOnPress then
-          state.sustainActive = false
-          midi.sendMidiCC(64, 0)
-        else
-          state.sustainActive = true
-          midi.sendMidiCC(64, 127)
-        end
+        state.sustainActive = true
+        midi.sendMidiCC(64, 127)
       end
 
       if not state.sustainActive then
         midi.sendMidiCC(64, 0)
-        if state.sustainedPitches then
-          for pitch in pairs(state.sustainedPitches) do
-            local isCurrentlyHeld = false
-            for _, keyInfo in pairs(state.pressedKeys) do
-              if type(keyInfo) == "table" and keyInfo.pitch == pitch then
-                isCurrentlyHeld = true
-                break
-              end
-            end
-            if not isCurrentlyHeld then
-              midi.sendMidiNote("noteOff", pitch, 0)
-            end
-          end
-          state.sustainedPitches = {}
-        end
+        cleanupSustainPitches()
       end
 
       local spot = {
@@ -1121,15 +1246,10 @@ local function handleKeyUp(code)
       }
       hud.updateWebviewHud(spot)
     elseif act == "chordToggle" then
-      local holdDuration = state.chordKeyDownTime and (hs.timer.secondsSinceEpoch() - state.chordKeyDownTime) or 0
-      if holdDuration > 0.25 then
+      if state.chordWasActiveOnPress then
         state.chordModeActive = false
       else
-        if state.chordWasActiveOnPress then
-          state.chordModeActive = false
-        else
-          state.chordModeActive = true
-        end
+        state.chordModeActive = true
       end
       
       local spot = {

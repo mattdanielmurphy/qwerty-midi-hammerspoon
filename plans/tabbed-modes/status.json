@@ -1,0 +1,31 @@
+{
+  "plan_name": "tabbed-modes",
+  "status": "IN_PROGRESS",
+  "current_step": 1,
+  "steps": [
+    {
+      "id": 1,
+      "file": "01-state-and-mode-logic.md",
+      "title": "State and Mode Logic",
+      "status": "TODO"
+    },
+    {
+      "id": 2,
+      "file": "02-layout-switching.md",
+      "title": "Layout Switching Architecture",
+      "status": "TODO"
+    },
+    {
+      "id": 3,
+      "file": "03-arp-mode-layout.md",
+      "title": "Arpeggiator Advanced Layout",
+      "status": "TODO"
+    },
+    {
+      "id": 4,
+      "file": "04-frontend-hud-updates.md",
+      "title": "Frontend HUD Updates",
+      "status": "TODO"
+    }
+  ]
+}

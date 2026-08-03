@@ -14,6 +14,9 @@ end
 
 local state = {
   midiActive = false,
+  currentMode = "Home",
+  modeSelectHeld = false,
+  modeWasSelectedDuringHold = false,
   currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
   currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
   octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
@@ -27,6 +30,13 @@ local state = {
   shiftHeld = false,          -- Shift key active state
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
+
+  -- UI Styling
+  uiActionKeyHue = getSetting("uiActionKeyHue", 30),
+  uiActionKeySat = getSetting("uiActionKeySat", 20),
+  uiActionKeyLight = getSetting("uiActionKeyLight", 75),
+  uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
+  uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
 
   -- Chord Trigger State
   chordIdx = getSetting("chordIdx", 1),
@@ -67,6 +77,7 @@ local state = {
     { label = "1/64T", factor = 0.0625 / 1.5 }
   },
   arpGatePercent = getSetting("arpGatePercent", 80.0),
+  arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
@@ -158,6 +169,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
+  hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
   hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
   hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
@@ -197,7 +209,6 @@ local WHITE_KEY_INDEX = {
 }
 
 local defaultNumberRowControls = {
-  [50] = { key = "`", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
   [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
   [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
   [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
@@ -634,19 +645,52 @@ end
 
 applyCustomLayout(getActivePresetData())
 
+local arpAdvancedControlKeysMap = {
+  -- Arp Rate
+  [18] = { key = "1", name = "Rate 1/4",   action = "setArpRate_5" },
+  [19] = { key = "2", name = "Rate 1/8",   action = "setArpRate_6" },
+  [20] = { key = "3", name = "Rate 1/16",  action = "setArpRate_7" },
+  [21] = { key = "4", name = "Rate 1/32",  action = "setArpRate_8" },
+
+  -- Arp Direction
+  [12] = { key = "q", name = "Dir UP",     action = "setArpDir_1" },
+  [13] = { key = "w", name = "Dir DOWN",   action = "setArpDir_2" },
+  [14] = { key = "e", name = "Dir UP/DN",  action = "setArpDir_3" },
+  [15] = { key = "r", name = "Dir DN/UP",  action = "setArpDir_4" },
+  [17] = { key = "t", name = "Dir RAND",   action = "setArpDir_7" },
+
+  -- Arp Quantize
+  [6] = { key = "z", name = "Sync OFF",    action = "setArpQuantize_None" },
+  [7] = { key = "x", name = "Sync BEAT",   action = "setArpQuantize_Beat" },
+  [8] = { key = "c", name = "Sync BAR",    action = "setArpQuantize_Bar" },
+
+  -- Arp Latch
+  [49] = { key = "Space", name = "Arp Latch", action = "arpLatchToggle" },
+}
+local arpAdvancedNoteKeysMap = {}
+
 local function getNoteKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap[code]
+  end
   local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
   if k and k.baseNote ~= nil then return k end
   return nil
 end
 
 local function getControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
 local function getNumberControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
   local k = numberRowControls[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
@@ -657,6 +701,9 @@ local _cachedActiveNoteKeysMap = nil
 local _cachedActiveControlKeysMap = nil
 
 local function getActiveNoteKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap
+  end
   if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
@@ -668,6 +715,9 @@ local function getActiveNoteKeysMap()
 end
 
 local function getActiveControlKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap
+  end
   if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end

@@ -389,6 +389,76 @@ local function generateSettingsHTML()
       </div>
     </div>
 
+    <!-- UI Styling -->
+    <div class="section">
+      <div class="section-title">UI Styling</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Hue</strong>
+          <span>Base color tone (0-360)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="360" step="1" value="%d"
+            oninput="document.getElementById('hueVal').textContent=this.value"
+            onchange="send('setUiActionKeyHue', parseInt(this.value))">
+          <div class="slider-val" id="hueVal">%d</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Saturation</strong>
+          <span>Color intensity (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('satVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeySat', parseInt(this.value))">
+          <div class="slider-val" id="satVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Lightness</strong>
+          <span>Brightness (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('lightVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeyLight', parseInt(this.value))">
+          <div class="slider-val" id="lightVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Opacity</strong>
+          <span>Background transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('opVal').textContent=this.value"
+            onchange="send('setUiActionKeyOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="opVal">%.2f</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Border Opacity</strong>
+          <span>Border transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('bOpVal').textContent=this.value"
+            onchange="send('setUiActionKeyBorderOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="bOpVal">%.2f</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Arpeggiator -->
     <div class="section">
       <div class="section-title">Arpeggiator</div>
@@ -597,6 +667,12 @@ local function generateSettingsHTML()
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
     -- logic sync checked
     logicSync and "checked" or "",
+    -- ui
+    state.uiActionKeyHue or 30, state.uiActionKeyHue or 30,
+    state.uiActionKeySat or 20, state.uiActionKeySat or 20,
+    state.uiActionKeyLight or 75, state.uiActionKeyLight or 75,
+    state.uiActionKeyOpacity or 0.08, state.uiActionKeyOpacity or 0.08,
+    state.uiActionKeyBorderOpacity or 0.6, state.uiActionKeyBorderOpacity or 0.6,
     -- gate
     math.floor(gate),
     -- zoom selects
@@ -616,19 +692,47 @@ local function createSettingsWebview()
   uc:setCallback(function(message)
     local body = message.body
     if not body or not body.type then return end
+    local act = body.type
+    local val = body.value
 
-    if body.type == "setBpmStep" then
+    if act == "setBpmStep" then
       local val = tonumber(body.value) or 10
       state.bpmStepSize = val
       hs.settings.set("qwertyMidi_bpmStepSize", val)
-    elseif body.type == "setLogicSync" then
+    elseif act == "setGatePercent" then
+      state.arpGatePercent = val
+      hs.settings.set("qwertyMidi_arpGatePercent", val)
+      if state.arpEnabled then
+        require("arpeggiator").applyGatePercentChange()
+      end
+    elseif act == "setUiActionKeyHue" then
+      state.uiActionKeyHue = val
+      hs.settings.set("qwertyMidi_uiActionKeyHue", val)
+      require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeySat" then
+      state.uiActionKeySat = val
+      hs.settings.set("qwertyMidi_uiActionKeySat", val)
+      require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyLight" then
+      state.uiActionKeyLight = val
+      hs.settings.set("qwertyMidi_uiActionKeyLight", val)
+      require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyOpacity" then
+      state.uiActionKeyOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyOpacity", val)
+      require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyBorderOpacity" then
+      state.uiActionKeyBorderOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyBorderOpacity", val)
+      require("hud").updateWebviewHud()
+    elseif act == "setLogicSync" then
       local val = (body.value == true or body.value == "true" or body.value == 1)
       state.logicSyncEnabled = val
       hs.settings.set("qwertyMidi_logicSyncEnabled", val)
-    elseif body.type == "setGate" then
+    elseif act == "setGate" then
       local val = tonumber(body.value) or 80.0
       state.arpGatePercent = math.max(5.0, math.min(150.0, val))
-    elseif body.type == "setZoom" then
+    elseif act == "setZoom" then
       local val = tonumber(body.value) or 1.0
       state.zoomLevel = val
       hs.settings.set("qwertyMidi_zoomLevel", val)

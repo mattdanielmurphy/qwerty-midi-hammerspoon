@@ -30,6 +30,7 @@ local function updateHud(spotlightInfo, activeArpPitch)
 end
 
 local function stopArpTimer()
+  state.arpBeatPosition = 0
   if state.arpActiveGateTimers then
     for pitchInfo, timer in pairs(state.arpActiveGateTimers) do
       if timer then timer:stop() end
@@ -64,6 +65,33 @@ local function getArpIntervalSeconds()
 end
 
 local function arpTick()
+  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
+  local prevBeat = math.floor(state.arpBeatPosition or 0)
+  local prevBar = math.floor((state.arpBeatPosition or 0) / 4)
+  state.arpBeatPosition = (state.arpBeatPosition or 0) + rateFactor
+  
+  local currentBeat = math.floor(state.arpBeatPosition)
+  local currentBar = math.floor(state.arpBeatPosition / 4)
+  
+  local doSync = false
+  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then
+    doSync = true
+  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then
+    doSync = true
+  end
+
+  if doSync then
+    state.arpHeldNotes = {}
+    if state.arpTargetHeldNotes then
+      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    end
+    if countTableKeys(state.arpHeldNotes) == 0 then
+      stopArpTimer()
+      updateHud()
+      return
+    end
+  end
+
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
     local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
@@ -258,9 +286,9 @@ local function arpAddNote(code, pitch)
 
   if state.arpLatchActive then
     if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
-      state.arpHeldNotes = {}
+      state.arpTargetHeldNotes = {}
       state.arpLatchClearedForNewChord = true
-      if state.arpCurrentPitch then
+      if state.arpCurrentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
         local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
         local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
         midi.sendMidiNote("noteOff", p, 0, c)
@@ -270,10 +298,15 @@ local function arpAddNote(code, pitch)
   end
 
   state.arpKeysCurrentlyHeld[code] = true
-  state.arpHeldNotes[code] = pitch
+  state.arpTargetHeldNotes = state.arpTargetHeldNotes or {}
+  state.arpTargetHeldNotes[code] = pitch
 
-  if not state.arpTimer then
-    startArpTimer()
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    state.arpHeldNotes = {}
+    for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    if not state.arpTimer then
+      startArpTimer()
+    end
   end
 end
 
@@ -286,15 +319,22 @@ local function arpRemoveNote(code)
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode, we DO keep the notes in state.arpHeldNotes for the held chord.
+    -- In latch mode, we DO keep the notes for the held chord.
   else
-    state.arpHeldNotes[code] = nil
+    if state.arpTargetHeldNotes then
+      state.arpTargetHeldNotes[code] = nil
+    end
   end
 
-  local count = countTableKeys(state.arpHeldNotes)
-  if count == 0 then
-    stopArpTimer()
-    updateHud()
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    state.arpHeldNotes = {}
+    if state.arpTargetHeldNotes then
+      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    end
+    if countTableKeys(state.arpHeldNotes) == 0 then
+      stopArpTimer()
+      updateHud()
+    end
   end
 end
 

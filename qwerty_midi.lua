@@ -280,14 +280,23 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
-    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
+    currentMode = state.currentMode or "Home",
+    modeSelectHeld = state.modeSelectHeld == true,
+    keys = keyUpdates,
     shiftHeld = state.shiftHeld,
-    rootIdx = state.currentRoot,
-    modeName = modeName,
+    uiActionKeyHue = state.uiActionKeyHue,
+    uiActionKeySat = state.uiActionKeySat,
+    uiActionKeyLight = state.uiActionKeyLight,
+    uiActionKeyOpacity = state.uiActionKeyOpacity,
+    uiActionKeyBorderOpacity = state.uiActionKeyBorderOpacity,
     arpEnabled = state.arpEnabled,
+    modeName = modeName,
     arpLatchActive = state.arpLatchActive,
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
+    arpQuantizeMode = state.arpQuantizeMode or "None",
+    stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
+    rootIdx = state.currentRoot,
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
     bpmDisplay = bpmDisplayStr,
     bpmEditing = state.bpmInputMode,
@@ -451,6 +460,17 @@ local function createMidiWebview()
         value = ARP_DIRECTIONS[state.arpDirectionIdx],
         subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
         targetId = "arp-dir-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setArpQuantize" and body.value ~= nil then
+      state.arpQuantizeMode = body.value
+      hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
+      local spot = {
+        title = "QUANTIZE",
+        value = string.upper(body.value),
+        subtext = "Note Change Quantization",
+        targetId = "arp-quantize-select",
         color = "#d4a359"
       }
       updateWebviewHud(spot)
@@ -1210,6 +1230,7 @@ local function updateHud(spotlightInfo, activeArpPitch)
 end
 
 local function stopArpTimer()
+  state.arpBeatPosition = 0
   if state.arpActiveGateTimers then
     for pitchInfo, timer in pairs(state.arpActiveGateTimers) do
       if timer then timer:stop() end
@@ -1244,6 +1265,33 @@ local function getArpIntervalSeconds()
 end
 
 local function arpTick()
+  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
+  local prevBeat = math.floor(state.arpBeatPosition or 0)
+  local prevBar = math.floor((state.arpBeatPosition or 0) / 4)
+  state.arpBeatPosition = (state.arpBeatPosition or 0) + rateFactor
+  
+  local currentBeat = math.floor(state.arpBeatPosition)
+  local currentBar = math.floor(state.arpBeatPosition / 4)
+  
+  local doSync = false
+  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then
+    doSync = true
+  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then
+    doSync = true
+  end
+
+  if doSync then
+    state.arpHeldNotes = {}
+    if state.arpTargetHeldNotes then
+      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    end
+    if countTableKeys(state.arpHeldNotes) == 0 then
+      stopArpTimer()
+      updateHud()
+      return
+    end
+  end
+
   local pitchList = {}
   for code, pitch in pairs(state.arpHeldNotes) do
     local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
@@ -1438,9 +1486,9 @@ local function arpAddNote(code, pitch)
 
   if state.arpLatchActive then
     if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
-      state.arpHeldNotes = {}
+      state.arpTargetHeldNotes = {}
       state.arpLatchClearedForNewChord = true
-      if state.arpCurrentPitch then
+      if state.arpCurrentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
         local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
         local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
         midi.sendMidiNote("noteOff", p, 0, c)
@@ -1450,10 +1498,15 @@ local function arpAddNote(code, pitch)
   end
 
   state.arpKeysCurrentlyHeld[code] = true
-  state.arpHeldNotes[code] = pitch
+  state.arpTargetHeldNotes = state.arpTargetHeldNotes or {}
+  state.arpTargetHeldNotes[code] = pitch
 
-  if not state.arpTimer then
-    startArpTimer()
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    state.arpHeldNotes = {}
+    for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    if not state.arpTimer then
+      startArpTimer()
+    end
   end
 end
 
@@ -1466,15 +1519,22 @@ local function arpRemoveNote(code)
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode, we DO keep the notes in state.arpHeldNotes for the held chord.
+    -- In latch mode, we DO keep the notes for the held chord.
   else
-    state.arpHeldNotes[code] = nil
+    if state.arpTargetHeldNotes then
+      state.arpTargetHeldNotes[code] = nil
+    end
   end
 
-  local count = countTableKeys(state.arpHeldNotes)
-  if count == 0 then
-    stopArpTimer()
-    updateHud()
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    state.arpHeldNotes = {}
+    if state.arpTargetHeldNotes then
+      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    end
+    if countTableKeys(state.arpHeldNotes) == 0 then
+      stopArpTimer()
+      updateHud()
+    end
   end
 end
 
@@ -2162,6 +2222,11 @@ local HTML_UI_CONTENT = [[
   #hud-container.edit-mode-active {
     height: 460px;
   }
+  body.mode-select-active #hud-container {
+    opacity: 0.7;
+    filter: blur(1px);
+    transition: all 0.2s;
+  }
 
   .mod-gradient-overlay {
     position: absolute;
@@ -2671,11 +2736,11 @@ local HTML_UI_CONTENT = [[
   .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(212, 163, 89, 0.15); }
 
   .key-pad.control-pad {
-    background: rgba(200, 190, 180, 0.08);
-    border-color: rgba(100, 95, 90, 0.6);
+    background: hsla(var(--action-bg-hsl), var(--action-bg-opacity));
+    border-color: hsla(var(--action-bg-hsl), var(--action-border-opacity));
   }
   .key-pad.control-pad:active, .key-pad.control-pad.pressed {
-    background: rgba(200, 190, 180, 0.2);
+    background: hsla(var(--action-bg-hsl), calc(var(--action-bg-opacity) + 0.15));
   }
 
   .key-pad.control-pad .key-note {
@@ -3545,11 +3610,11 @@ local HTML_UI_CONTENT = [[
         <option value="17">1/32T</option>
         <option value="18">1/64T</option>
       </select>
-      <div id="gate-editor" class="bpm-editor" title="Arp Note Length / Gate">
-        <button id="gate-down" class="bpm-arrow-btn">&#9662;</button>
-        <span id="gate-value" class="bpm-display">80%</span>
-        <button id="gate-up" class="bpm-arrow-btn">&#9652;</button>
-      </div>
+      <select id="arp-quantize-select" class="badge-small" title="Arp Note Change Quantization">
+        <option value="None">SYNC: OFF</option>
+        <option value="Beat">SYNC: BEAT</option>
+        <option value="Bar">SYNC: BAR</option>
+      </select>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
         <span id="bpm-value" class="bpm-display">120 BPM</span>
@@ -3562,6 +3627,7 @@ local HTML_UI_CONTENT = [[
         <div id="mod-wheel-label">MOD 0</div>
       </div>
       <div id="status-text" class="status-info"></div>
+      <div id="mode-indicator" style="color: #ffcc00; font-weight: bold; margin-left: 10px;"></div>
     </div>
 
     <div class="keyboard-grid" id="performance-view">
@@ -4411,7 +4477,7 @@ local HTML_UI_CONTENT = [[
           // Update vertical split halves
           const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || builtIn.noteLabel || builtIn.keyLabel || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
           if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
         }
@@ -4926,56 +4992,17 @@ local HTML_UI_CONTENT = [[
     let gateBtnInterval = null;
     let gateBtnDirection = 0;
 
-    const gateValue = document.getElementById('gate-value');
-    if (gateValue) {
-      gateValue.style.cursor = 'ns-resize';
-      gateValue.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        isGateDragging = true;
-        gateDragStartY = e.clientY;
-        gateDragAccum = 0;
-      });
-    }
-
-    function stopGateRepeat() {
-      if (gateBtnTimer) { clearTimeout(gateBtnTimer); gateBtnTimer = null; }
-      if (gateBtnInterval) { clearInterval(gateBtnInterval); gateBtnInterval = null; }
-      gateBtnDirection = 0;
-    }
-
-    function startGateRepeat(direction) {
-      stopGateRepeat();
-      gateBtnDirection = direction;
-      const sendStep = () => {
+    const arpQuantizeSelect = document.getElementById('arp-quantize-select');
+    if (arpQuantizeSelect) {
+      arpQuantizeSelect.addEventListener('change', (e) => {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
           window.webkit.messageHandlers.midiControllerUC.postMessage({
-            type: gateBtnDirection > 0 ? 'gateUp' : 'gateDown'
+            type: 'setArpQuantize',
+            value: e.target.value
           });
         }
-      };
-      sendStep();
-
-      gateBtnTimer = setTimeout(() => {
-        gateBtnInterval = setInterval(() => {
-          sendStep();
-        }, 80);
-      }, 350);
+      });
     }
-
-    ['gate-up', 'gate-down'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) {
-        const dir = id === 'gate-up' ? 1 : -1;
-        btn.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          startGateRepeat(dir);
-        });
-        btn.addEventListener('mouseup', stopGateRepeat);
-        btn.addEventListener('mouseleave', stopGateRepeat);
-      }
-    });
 
     // BPM Editor handlers
     let hasBpmDragged = false;
@@ -5196,6 +5223,8 @@ local HTML_UI_CONTENT = [[
     if (presetDuplicateBtn) {
       presetDuplicateBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        const activePreset = activePresetsList.find(p => p.id === currentActivePresetId);
+        if (activePreset && activePreset.isBuiltin) return;
         openPresetModal('duplicate');
       });
     }
@@ -5530,6 +5559,21 @@ local HTML_UI_CONTENT = [[
         if (modeEl) modeEl.textContent = data.modeName;
       }
 
+      if (data.modeSelectHeld !== undefined) {
+        if (data.modeSelectHeld) {
+          document.body.classList.add('mode-select-active');
+        } else {
+          document.body.classList.remove('mode-select-active');
+        }
+      }
+
+      if (data.currentMode !== undefined) {
+        const modeIndicator = document.getElementById('mode-indicator');
+        if (modeIndicator) {
+          modeIndicator.textContent = data.currentMode === "Home" ? "" : "MODE: " + data.currentMode;
+        }
+      }
+
       if (data.arpEnabled !== undefined) {
         const arpPowerBtn = document.getElementById('arp-power-btn');
         if (arpPowerBtn) {
@@ -5563,9 +5607,9 @@ local HTML_UI_CONTENT = [[
         if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
       }
 
-      if (data.arpGatePercent !== undefined) {
-        const gateVal = document.getElementById('gate-value');
-        if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
+      if (data.arpQuantizeMode !== undefined) {
+        const arpQuantSelect = document.getElementById('arp-quantize-select');
+        if (arpQuantSelect) arpQuantSelect.value = data.arpQuantizeMode;
       }
 
       if (data.bpmDisplay !== undefined) {
@@ -5658,6 +5702,12 @@ local HTML_UI_CONTENT = [[
           else fillEl.classList.remove('hot');
         }
         if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
+      }
+
+      if (data.uiActionKeyHue !== undefined) {
+        document.documentElement.style.setProperty('--action-bg-hsl', `${data.uiActionKeyHue}, ${data.uiActionKeySat}%, ${data.uiActionKeyLight}%`);
+        document.documentElement.style.setProperty('--action-bg-opacity', data.uiActionKeyOpacity);
+        document.documentElement.style.setProperty('--action-border-opacity', data.uiActionKeyBorderOpacity);
       }
 
       if (data.keys) {
@@ -6181,6 +6231,76 @@ local function generateSettingsHTML()
       </div>
     </div>
 
+    <!-- UI Styling -->
+    <div class="section">
+      <div class="section-title">UI Styling</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Hue</strong>
+          <span>Base color tone (0-360)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="360" step="1" value="%d"
+            oninput="document.getElementById('hueVal').textContent=this.value"
+            onchange="send('setUiActionKeyHue', parseInt(this.value))">
+          <div class="slider-val" id="hueVal">%d</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Saturation</strong>
+          <span>Color intensity (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('satVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeySat', parseInt(this.value))">
+          <div class="slider-val" id="satVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Lightness</strong>
+          <span>Brightness (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('lightVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeyLight', parseInt(this.value))">
+          <div class="slider-val" id="lightVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Opacity</strong>
+          <span>Background transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('opVal').textContent=this.value"
+            onchange="send('setUiActionKeyOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="opVal">%.2f</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Border Opacity</strong>
+          <span>Border transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('bOpVal').textContent=this.value"
+            onchange="send('setUiActionKeyBorderOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="bOpVal">%.2f</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Arpeggiator -->
     <div class="section">
       <div class="section-title">Arpeggiator</div>
@@ -6389,6 +6509,12 @@ local function generateSettingsHTML()
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
     -- logic sync checked
     logicSync and "checked" or "",
+    -- ui
+    state.uiActionKeyHue or 30, state.uiActionKeyHue or 30,
+    state.uiActionKeySat or 20, state.uiActionKeySat or 20,
+    state.uiActionKeyLight or 75, state.uiActionKeyLight or 75,
+    state.uiActionKeyOpacity or 0.08, state.uiActionKeyOpacity or 0.08,
+    state.uiActionKeyBorderOpacity or 0.6, state.uiActionKeyBorderOpacity or 0.6,
     -- gate
     math.floor(gate),
     -- zoom selects
@@ -6408,19 +6534,47 @@ local function createSettingsWebview()
   uc:setCallback(function(message)
     local body = message.body
     if not body or not body.type then return end
+    local act = body.type
+    local val = body.value
 
-    if body.type == "setBpmStep" then
+    if act == "setBpmStep" then
       local val = tonumber(body.value) or 10
       state.bpmStepSize = val
       hs.settings.set("qwertyMidi_bpmStepSize", val)
-    elseif body.type == "setLogicSync" then
+    elseif act == "setGatePercent" then
+      state.arpGatePercent = val
+      hs.settings.set("qwertyMidi_arpGatePercent", val)
+      if state.arpEnabled then
+        __require("arpeggiator").applyGatePercentChange()
+      end
+    elseif act == "setUiActionKeyHue" then
+      state.uiActionKeyHue = val
+      hs.settings.set("qwertyMidi_uiActionKeyHue", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeySat" then
+      state.uiActionKeySat = val
+      hs.settings.set("qwertyMidi_uiActionKeySat", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyLight" then
+      state.uiActionKeyLight = val
+      hs.settings.set("qwertyMidi_uiActionKeyLight", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyOpacity" then
+      state.uiActionKeyOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyOpacity", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyBorderOpacity" then
+      state.uiActionKeyBorderOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyBorderOpacity", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setLogicSync" then
       local val = (body.value == true or body.value == "true" or body.value == 1)
       state.logicSyncEnabled = val
       hs.settings.set("qwertyMidi_logicSyncEnabled", val)
-    elseif body.type == "setGate" then
+    elseif act == "setGate" then
       local val = tonumber(body.value) or 80.0
       state.arpGatePercent = math.max(5.0, math.min(150.0, val))
-    elseif body.type == "setZoom" then
+    elseif act == "setZoom" then
       local val = tonumber(body.value) or 1.0
       state.zoomLevel = val
       hs.settings.set("qwertyMidi_zoomLevel", val)
@@ -6547,6 +6701,9 @@ end
 
 local state = {
   midiActive = false,
+  currentMode = "Home",
+  modeSelectHeld = false,
+  modeWasSelectedDuringHold = false,
   currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
   currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
   octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
@@ -6560,6 +6717,13 @@ local state = {
   shiftHeld = false,          -- Shift key active state
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
+
+  -- UI Styling
+  uiActionKeyHue = getSetting("uiActionKeyHue", 30),
+  uiActionKeySat = getSetting("uiActionKeySat", 20),
+  uiActionKeyLight = getSetting("uiActionKeyLight", 75),
+  uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
+  uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
 
   -- Chord Trigger State
   chordIdx = getSetting("chordIdx", 1),
@@ -6600,6 +6764,7 @@ local state = {
     { label = "1/64T", factor = 0.0625 / 1.5 }
   },
   arpGatePercent = getSetting("arpGatePercent", 80.0),
+  arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
@@ -6691,6 +6856,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
+  hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
   hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
   hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
@@ -6730,7 +6896,6 @@ local WHITE_KEY_INDEX = {
 }
 
 local defaultNumberRowControls = {
-  [50] = { key = "`", name = "Arp",      action = "arpToggle",      shiftAction = "panic",        shiftName = "Panic!" },
   [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
   [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
   [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
@@ -7167,19 +7332,52 @@ end
 
 applyCustomLayout(getActivePresetData())
 
+local arpAdvancedControlKeysMap = {
+  -- Arp Rate
+  [18] = { key = "1", name = "Rate 1/4",   action = "setArpRate_5" },
+  [19] = { key = "2", name = "Rate 1/8",   action = "setArpRate_6" },
+  [20] = { key = "3", name = "Rate 1/16",  action = "setArpRate_7" },
+  [21] = { key = "4", name = "Rate 1/32",  action = "setArpRate_8" },
+
+  -- Arp Direction
+  [12] = { key = "q", name = "Dir UP",     action = "setArpDir_1" },
+  [13] = { key = "w", name = "Dir DOWN",   action = "setArpDir_2" },
+  [14] = { key = "e", name = "Dir UP/DN",  action = "setArpDir_3" },
+  [15] = { key = "r", name = "Dir DN/UP",  action = "setArpDir_4" },
+  [17] = { key = "t", name = "Dir RAND",   action = "setArpDir_7" },
+
+  -- Arp Quantize
+  [6] = { key = "z", name = "Sync OFF",    action = "setArpQuantize_None" },
+  [7] = { key = "x", name = "Sync BEAT",   action = "setArpQuantize_Beat" },
+  [8] = { key = "c", name = "Sync BAR",    action = "setArpQuantize_Bar" },
+
+  -- Arp Latch
+  [49] = { key = "Space", name = "Arp Latch", action = "arpLatchToggle" },
+}
+local arpAdvancedNoteKeysMap = {}
+
 local function getNoteKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap[code]
+  end
   local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
   if k and k.baseNote ~= nil then return k end
   return nil
 end
 
 local function getControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
 end
 
 local function getNumberControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
   local k = numberRowControls[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
   return nil
@@ -7190,6 +7388,9 @@ local _cachedActiveNoteKeysMap = nil
 local _cachedActiveControlKeysMap = nil
 
 local function getActiveNoteKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap
+  end
   if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
@@ -7201,6 +7402,9 @@ local function getActiveNoteKeysMap()
 end
 
 local function getActiveControlKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap
+  end
   if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
@@ -7315,7 +7519,9 @@ local function captureStateSnapshot(label)
     arpBpm = state.arpBpm,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
-    modWheel = state.ccStates[1] or 0
+    modWheel = state.ccStates[1] or 0,
+    sustainActive = state.sustainActive,
+    chordModeActive = state.chordModeActive
   }
 end
 
@@ -7345,6 +7551,9 @@ local function applyStateSnapshot(snap)
   state.arpTopEnabled = snap.arpTopEnabled
   state.arpBottomEnabled = snap.arpBottomEnabled
   state.ccStates[1] = snap.modWheel
+  
+  if snap.sustainActive ~= nil then state.sustainActive = snap.sustainActive end
+  if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
 
   arpeggiator.updateLatchedArpNotes()
   arpeggiator.applyBpmChange()
@@ -7482,6 +7691,36 @@ local function executeControlAction(act, code)
     return
   elseif act == "redoState" then
     redoControllerState(code)
+    return
+  elseif string.match(act, "^setArpRate_(%d+)$") then
+    local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
+    state.arpRateIdx = rate
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpDir_(%d+)$") then
+    local dir = tonumber(string.match(act, "^setArpDir_(%d+)$"))
+    state.arpDirectionIdx = dir
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpQuantize_(.+)$") then
+    local quant = string.match(act, "^setArpQuantize_(.+)$")
+    state.arpQuantizeMode = quant
+    hs.settings.set("qwertyMidi_arpQuantizeMode", quant)
+    hud.updateWebviewHud()
+    return
+  elseif act == "arpLatchToggle" then
+    state.arpLatchActive = not state.arpLatchActive
+    if not state.arpLatchActive then
+      local newHeld = {}
+      for codeKey, pitch in pairs(state.arpHeldNotes) do
+        if state.arpKeysCurrentlyHeld[codeKey] then
+          newHeld[codeKey] = pitch
+        end
+      end
+      state.arpHeldNotes = newHeld
+    end
+    hud.updateWebviewHud()
     return
   end
 
@@ -7848,9 +8087,15 @@ local function executeControlAction(act, code)
     for code, keyInfo in pairs(state.pressedKeys) do
       if type(keyInfo) == "table" then
         keyInfo.isSustainedNote = true
-        if not keyInfo.isArpNote and keyInfo.pitch then
-          state.sustainedPitches = state.sustainedPitches or {}
-          state.sustainedPitches[keyInfo.pitch] = true
+        if not keyInfo.isArpNote then
+          local pitches = keyInfo.pitches or { keyInfo.pitch }
+          local ch = keyInfo.channel or 0
+          for _, p in ipairs(pitches) do
+            if p then
+              state.sustainedPitches = state.sustainedPitches or {}
+              state.sustainedPitches[p] = { channel = ch }
+            end
+          end
         end
       end
     end
@@ -8185,19 +8430,64 @@ local function executeControlAction(act, code)
   config.saveSettings()
 end
 
+local function shouldRepeat(act)
+  if not act then return false end
+  local repeatingActions = {
+    bpmUp = true, bpmDown = true,
+    relUp = true, relDown = true, releaseUp = true, releaseDown = true,
+    arpGateUp = true, arpGateDown = true,
+    volUp = true, volDown = true, volume = true,
+    topVolUp = true, topVolDown = true,
+    botVolUp = true, botVolDown = true,
+    modWheelUp = true, modWheelDown = true, modWheel = true
+  }
+  return repeatingActions[act] == true
+end
+
 local function handleKeyDown(code)
-  if state.pressedKeys[code] then
+  if code == 50 then -- Backtick
+    state.modeSelectHeld = true
+    state.modeWasSelectedDuringHold = false
+    hud.updateWebviewHud()
     return true
   end
 
+  if state.modeSelectHeld then
+    -- Mode Selector is Active!
+    if code == 0 then -- 'a' key
+      state.currentMode = "ArpAdvanced"
+      state.modeWasSelectedDuringHold = true
+      -- Release any currently pressed piano keys to prevent stuck notes
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+      hud.updateWebviewHud()
+      return true
+    end
+    -- If it's another key, ignore/block it while mode selector is held
+    return true 
+  end
 
+  if state.pressedKeys[code] then
+    return true
+  end
 
   if state.shiftHeld then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
     if k and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
       state.pressedKeys[code] = { isControl = true, action = k.shiftAction }
+      
+      state.controlKeyDownTime = state.controlKeyDownTime or {}
+      state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
+      state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
+      state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
+
       executeControlAction(k.shiftAction, code)
-      if k.shiftAction ~= "sustain" then
+      if shouldRepeat(k.shiftAction) then
         stopControlRepeat(code)
         local entry = {}
         controlRepeatTimers[code] = entry
@@ -8213,6 +8503,8 @@ local function handleKeyDown(code)
             end)
           end
         end)
+      else
+        stopControlRepeat(code)
       end
       return true
     end
@@ -8222,8 +8514,14 @@ local function handleKeyDown(code)
   if k and k.action and k.action ~= "" and k.action ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = k.action }
     hud.updateSingleKeyState(code, true, false)
+    
+    state.controlKeyDownTime = state.controlKeyDownTime or {}
+    state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
+    state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
+    state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
+
     executeControlAction(k.action, code)
-    if k.action ~= "sustain" and k.action ~= "chordMod" then
+    if shouldRepeat(k.action) then
       stopControlRepeat(code)
       local entry = {}
       controlRepeatTimers[code] = entry
@@ -8239,6 +8537,8 @@ local function handleKeyDown(code)
           end)
         end
       end)
+    else
+      stopControlRepeat(code)
     end
     return true
   end
@@ -8275,12 +8575,19 @@ local function handleKeyDown(code)
 end
 
 local function handleKeyUp(code)
-
-
-  if code == 50 then -- Backtick
+  if code == 50 then -- Backtick released
     stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
+    state.modeSelectHeld = false
+    if not state.modeWasSelectedDuringHold then
+      state.currentMode = "Home"
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+    end
     hud.updateWebviewHud()
     return true
   end
@@ -8322,44 +8629,66 @@ local function handleKeyUp(code)
       return true
   end
 
+  local function cleanupSustainPitches()
+    if state.sustainedPitches then
+      for pitch, item in pairs(state.sustainedPitches) do
+        local channel = type(item) == "table" and item.channel or 0
+        local isCurrentlyHeld = false
+        for _, kInfo in pairs(state.pressedKeys) do
+          if type(kInfo) == "table" then
+            local pList = kInfo.pitches or { kInfo.pitch }
+            for _, p in ipairs(pList) do
+              if p == pitch then
+                isCurrentlyHeld = true
+                break
+              end
+            end
+            if isCurrentlyHeld then break end
+          end
+        end
+        if not isCurrentlyHeld then
+          midi.sendMidiNote("noteOff", pitch, 0, channel)
+        end
+      end
+      state.sustainedPitches = {}
+    end
+  end
+
   local ctrlKey = config.getControlKey(code)
   if ctrlKey then
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
     local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
+    
+    local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
+      if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
+        local wasSustain = state.sustainActive
+        applyStateSnapshot(state.controlKeyDownSnapshots[code])
+        if wasSustain and not state.sustainActive then
+          midi.sendMidiCC(64, 0)
+          cleanupSustainPitches()
+        elseif not wasSustain and state.sustainActive then
+          midi.sendMidiCC(64, 127)
+        end
+        hud.updateWebviewHud()
+        return true
+      end
+    end
+
     if act == "sustain" then
-      local holdDuration = state.sustainKeyDownTime and (hs.timer.secondsSinceEpoch() - state.sustainKeyDownTime) or 0
-      if holdDuration > 0.25 then
+      if state.sustainWasActiveOnPress then
         state.sustainActive = false
         midi.sendMidiCC(64, 0)
       else
-        if state.sustainWasActiveOnPress then
-          state.sustainActive = false
-          midi.sendMidiCC(64, 0)
-        else
-          state.sustainActive = true
-          midi.sendMidiCC(64, 127)
-        end
+        state.sustainActive = true
+        midi.sendMidiCC(64, 127)
       end
 
       if not state.sustainActive then
         midi.sendMidiCC(64, 0)
-        if state.sustainedPitches then
-          for pitch in pairs(state.sustainedPitches) do
-            local isCurrentlyHeld = false
-            for _, keyInfo in pairs(state.pressedKeys) do
-              if type(keyInfo) == "table" and keyInfo.pitch == pitch then
-                isCurrentlyHeld = true
-                break
-              end
-            end
-            if not isCurrentlyHeld then
-              midi.sendMidiNote("noteOff", pitch, 0)
-            end
-          end
-          state.sustainedPitches = {}
-        end
+        cleanupSustainPitches()
       end
 
       local spot = {
@@ -8371,15 +8700,10 @@ local function handleKeyUp(code)
       }
       hud.updateWebviewHud(spot)
     elseif act == "chordToggle" then
-      local holdDuration = state.chordKeyDownTime and (hs.timer.secondsSinceEpoch() - state.chordKeyDownTime) or 0
-      if holdDuration > 0.25 then
+      if state.chordWasActiveOnPress then
         state.chordModeActive = false
       else
-        if state.chordWasActiveOnPress then
-          state.chordModeActive = false
-        else
-          state.chordModeActive = true
-        end
+        state.chordModeActive = true
       end
       
       local spot = {

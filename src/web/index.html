@@ -110,6 +110,11 @@
   #hud-container.edit-mode-active {
     height: 460px;
   }
+  body.mode-select-active #hud-container {
+    opacity: 0.7;
+    filter: blur(1px);
+    transition: all 0.2s;
+  }
 
   .mod-gradient-overlay {
     position: absolute;
@@ -619,11 +624,11 @@
   .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(212, 163, 89, 0.15); }
 
   .key-pad.control-pad {
-    background: rgba(200, 190, 180, 0.08);
-    border-color: rgba(100, 95, 90, 0.6);
+    background: hsla(var(--action-bg-hsl), var(--action-bg-opacity));
+    border-color: hsla(var(--action-bg-hsl), var(--action-border-opacity));
   }
   .key-pad.control-pad:active, .key-pad.control-pad.pressed {
-    background: rgba(200, 190, 180, 0.2);
+    background: hsla(var(--action-bg-hsl), calc(var(--action-bg-opacity) + 0.15));
   }
 
   .key-pad.control-pad .key-note {
@@ -1493,11 +1498,11 @@
         <option value="17">1/32T</option>
         <option value="18">1/64T</option>
       </select>
-      <div id="gate-editor" class="bpm-editor" title="Arp Note Length / Gate">
-        <button id="gate-down" class="bpm-arrow-btn">&#9662;</button>
-        <span id="gate-value" class="bpm-display">80%</span>
-        <button id="gate-up" class="bpm-arrow-btn">&#9652;</button>
-      </div>
+      <select id="arp-quantize-select" class="badge-small" title="Arp Note Change Quantization">
+        <option value="None">SYNC: OFF</option>
+        <option value="Beat">SYNC: BEAT</option>
+        <option value="Bar">SYNC: BAR</option>
+      </select>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
         <span id="bpm-value" class="bpm-display">120 BPM</span>
@@ -1510,6 +1515,7 @@
         <div id="mod-wheel-label">MOD 0</div>
       </div>
       <div id="status-text" class="status-info"></div>
+      <div id="mode-indicator" style="color: #ffcc00; font-weight: bold; margin-left: 10px;"></div>
     </div>
 
     <div class="keyboard-grid" id="performance-view">
@@ -2359,7 +2365,7 @@
           // Update vertical split halves
           const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
           const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || '';
+          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || builtIn.noteLabel || builtIn.keyLabel || '';
           const halfBottom = pad.querySelector('.key-half-bottom .key-note');
           if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
         }
@@ -2874,56 +2880,17 @@
     let gateBtnInterval = null;
     let gateBtnDirection = 0;
 
-    const gateValue = document.getElementById('gate-value');
-    if (gateValue) {
-      gateValue.style.cursor = 'ns-resize';
-      gateValue.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        isGateDragging = true;
-        gateDragStartY = e.clientY;
-        gateDragAccum = 0;
-      });
-    }
-
-    function stopGateRepeat() {
-      if (gateBtnTimer) { clearTimeout(gateBtnTimer); gateBtnTimer = null; }
-      if (gateBtnInterval) { clearInterval(gateBtnInterval); gateBtnInterval = null; }
-      gateBtnDirection = 0;
-    }
-
-    function startGateRepeat(direction) {
-      stopGateRepeat();
-      gateBtnDirection = direction;
-      const sendStep = () => {
+    const arpQuantizeSelect = document.getElementById('arp-quantize-select');
+    if (arpQuantizeSelect) {
+      arpQuantizeSelect.addEventListener('change', (e) => {
         if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
           window.webkit.messageHandlers.midiControllerUC.postMessage({
-            type: gateBtnDirection > 0 ? 'gateUp' : 'gateDown'
+            type: 'setArpQuantize',
+            value: e.target.value
           });
         }
-      };
-      sendStep();
-
-      gateBtnTimer = setTimeout(() => {
-        gateBtnInterval = setInterval(() => {
-          sendStep();
-        }, 80);
-      }, 350);
+      });
     }
-
-    ['gate-up', 'gate-down'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) {
-        const dir = id === 'gate-up' ? 1 : -1;
-        btn.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          startGateRepeat(dir);
-        });
-        btn.addEventListener('mouseup', stopGateRepeat);
-        btn.addEventListener('mouseleave', stopGateRepeat);
-      }
-    });
 
     // BPM Editor handlers
     let hasBpmDragged = false;
@@ -3144,6 +3111,8 @@
     if (presetDuplicateBtn) {
       presetDuplicateBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        const activePreset = activePresetsList.find(p => p.id === currentActivePresetId);
+        if (activePreset && activePreset.isBuiltin) return;
         openPresetModal('duplicate');
       });
     }
@@ -3478,6 +3447,21 @@
         if (modeEl) modeEl.textContent = data.modeName;
       }
 
+      if (data.modeSelectHeld !== undefined) {
+        if (data.modeSelectHeld) {
+          document.body.classList.add('mode-select-active');
+        } else {
+          document.body.classList.remove('mode-select-active');
+        }
+      }
+
+      if (data.currentMode !== undefined) {
+        const modeIndicator = document.getElementById('mode-indicator');
+        if (modeIndicator) {
+          modeIndicator.textContent = data.currentMode === "Home" ? "" : "MODE: " + data.currentMode;
+        }
+      }
+
       if (data.arpEnabled !== undefined) {
         const arpPowerBtn = document.getElementById('arp-power-btn');
         if (arpPowerBtn) {
@@ -3511,9 +3495,9 @@
         if (arpRateSelect) arpRateSelect.value = data.arpRateIdx;
       }
 
-      if (data.arpGatePercent !== undefined) {
-        const gateVal = document.getElementById('gate-value');
-        if (gateVal) gateVal.textContent = data.arpGatePercent + '%';
+      if (data.arpQuantizeMode !== undefined) {
+        const arpQuantSelect = document.getElementById('arp-quantize-select');
+        if (arpQuantSelect) arpQuantSelect.value = data.arpQuantizeMode;
       }
 
       if (data.bpmDisplay !== undefined) {
@@ -3606,6 +3590,12 @@
           else fillEl.classList.remove('hot');
         }
         if (labelEl) labelEl.textContent = 'MOD ' + data.modWheel;
+      }
+
+      if (data.uiActionKeyHue !== undefined) {
+        document.documentElement.style.setProperty('--action-bg-hsl', `${data.uiActionKeyHue}, ${data.uiActionKeySat}%, ${data.uiActionKeyLight}%`);
+        document.documentElement.style.setProperty('--action-bg-opacity', data.uiActionKeyOpacity);
+        document.documentElement.style.setProperty('--action-border-opacity', data.uiActionKeyBorderOpacity);
       }
 
       if (data.keys) {
