@@ -1275,6 +1275,12 @@ local function handleKeyUp(code)
           end
         end
       end
+
+      local spot = {
+        title = "SUSTAIN (CC #64)",
+        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
+        targetId = "key-48",
         color = state.sustainActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
