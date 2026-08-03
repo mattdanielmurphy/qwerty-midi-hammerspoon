@@ -8103,7 +8103,6 @@ local function executeControlAction(act, code)
   elseif act == "sustain" then
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
     state.sustainWasActiveOnPress = state.sustainActive
-    state.sustainActive = true
     midi.sendMidiCC(64, 127)
 
     -- Retroactively sustain all non-arp notes currently being physically held down
@@ -8719,8 +8718,13 @@ local function handleKeyUp(code)
         midi.sendMidiCC(64, 0)
         cleanupSustainPitches()
       else
-        state.sustainActive = true
-        midi.sendMidiCC(64, 127)
+        state.sustainActive = not state.sustainWasActiveOnPress
+        if not state.sustainActive then
+          midi.sendMidiCC(64, 0)
+          cleanupSustainPitches()
+        else
+          midi.sendMidiCC(64, 127)
+        end
       end
 
       local spot = {
