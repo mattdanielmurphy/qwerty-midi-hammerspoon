@@ -639,7 +639,7 @@ local function executeControlAction(act, code)
             for _, p in ipairs(pitches) do
               if p then
                 state.sustainedPitches = state.sustainedPitches or {}
-                state.sustainedPitches[p] = { channel = ch }
+                table.insert(state.sustainedPitches, { pitch = p, channel = ch })
               end
             end
           end
