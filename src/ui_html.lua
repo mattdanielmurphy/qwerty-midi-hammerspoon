@@ -1238,134 +1238,7 @@ local HTML_UI_CONTENT = [[
     max-width: 70px;
   }
 
-  /* Hide split halves by default in single-label performance mode */
-  .key-pad .key-half {
-    display: none;
-  }
-
-  /* ===== DUAL-STACKED KEY RENDERING (EDIT MODE & STACKED PERFORMANCE MODE) ===== */
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad),
-  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) {
-    display: flex;
-    flex-direction: column;
-    justify-content: stretch;
-    align-items: stretch;
-    overflow: hidden;
-    padding: 0;
-    position: relative;
-  }
-  /* Hide original single center key-note label in key pads when stacked */
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-note,
-  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-note {
-    display: none;
-  }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-code,
-  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-code {
-    position: absolute;
-    top: 2px;
-    left: 3px;
-    z-index: 3;
-    font-size: 8px;
-    font-weight: 700;
-    color: rgba(242, 234, 225, 0.75);
-    background: rgba(0, 0, 0, 0.5);
-    padding: 0 3px;
-    border-radius: 3px;
-    pointer-events: none;
-  }
-  #hud-container.edit-mode-active .key-pad:not(.dummy-pad) > .key-row-icon,
-  #hud-container.stacked-labels-active .key-pad:not(.dummy-pad) > .key-row-icon {
-    display: none !important;
-  }
-  #hud-container.edit-mode-active .key-pad .key-half,
-  #hud-container.stacked-labels-active .key-pad .key-half {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    min-height: 0;
-    position: relative;
-    padding: 0 2px;
-    box-sizing: border-box;
-  }
-  .key-pad .key-half-top {
-    border-bottom: 1px solid rgba(212, 163, 89, 0.15);
-    background: rgba(138, 190, 242, 0.06);
-  }
-  .key-pad .key-half-top .key-note {
-    color: #8abef2;
-    font-size: 7.5px;
-    font-weight: 600;
-    line-height: 1.1;
-    margin: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 95%;
-    pointer-events: none;
-  }
-  .key-pad .key-half-bottom {
-    background: rgba(242, 234, 225, 0.02);
-  }
-  .key-pad .key-half-bottom .key-note {
-    color: #f2eae1;
-    font-size: 8px;
-    font-weight: 600;
-    line-height: 1.1;
-    margin: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 95%;
-    pointer-events: none;
-  }
-  .key-pad .key-half .half-label {
-    font-size: 5.5px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    position: absolute;
-    right: 2px;
-    bottom: 1px;
-    color: rgba(140, 130, 115, 0.4);
-    pointer-events: none;
-  }
-  .key-pad .key-half-top .half-label {
-    color: rgba(138, 190, 242, 0.4);
-    bottom: auto;
-    top: 1px;
-    left: auto;
-    right: 2px;
-  }
-  /* Shift Key Illumination / Highlight */
-  #hud-container.shift-active-labels .key-half-top,
-  #hud-container.shift-top-highlight .key-half-top,
-  .key-pad.shift-top-highlight .key-half-top {
-    background: rgba(138, 190, 242, 0.25) !important;
-    box-shadow: inset 0 0 8px rgba(138, 190, 242, 0.4);
-  }
-  #hud-container.shift-active-labels .key-half-top .key-note,
-  #hud-container.shift-top-highlight .key-half-top .key-note,
-  .key-pad.shift-top-highlight .key-half-top .key-note {
-    color: #ffffff !important;
-    text-shadow: 0 0 6px rgba(138, 190, 242, 0.9);
-    font-weight: 700;
-  }
-  /* Highlight for drop targets on halves */
-  #hud-container.edit-mode-active .key-half.drag-over-target {
-    background: rgba(212, 163, 89, 0.35) !important;
-    box-shadow: inset 0 0 12px #d4a359 !important;
-    border-radius: 4px;
-    z-index: 99 !important;
-  }
-  #hud-container.edit-mode-active.shift-assign-active .key-half-top {
-    background: rgba(94, 162, 235, 0.12);
-    border-bottom: 1px solid rgba(94, 162, 235, 0.4);
-  }
-  #hud-container.edit-mode-active.shift-assign-active .key-half-top .key-note {
-    color: #8abef2;
-  }
+  /* === SELECTED KEY STYLE === */
 
   /* === SELECTED KEY STYLE === */
   .key-pad.selected-key {
@@ -1511,6 +1384,7 @@ local HTML_UI_CONTENT = [[
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor">EDIT KEYS</button>
+      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library">Library 📖</button>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>
@@ -1880,33 +1754,7 @@ local HTML_UI_CONTENT = [[
             pad.appendChild(noteSpan);
             pad.appendChild(dotSpan);
 
-            // ===== VERTICAL SPLIT HALVES for Edit Mode =====
-            const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
-            const halfTop = document.createElement('div');
-            halfTop.className = 'key-half key-half-top';
-            halfTop.dataset.half = 'shift';
-            const noteTop = document.createElement('span');
-            noteTop.className = 'key-note';
-            noteTop.textContent = k.shiftLabel || builtIn.shiftLabel || k.noteLabel || k.keyLabel || '';
-            const labelTop = document.createElement('span');
-            labelTop.className = 'half-label';
-            labelTop.textContent = '⇧';
-            halfTop.appendChild(noteTop);
-            halfTop.appendChild(labelTop);
-            pad.appendChild(halfTop);
 
-            const halfBottom = document.createElement('div');
-            halfBottom.className = 'key-half key-half-bottom';
-            halfBottom.dataset.half = 'normal';
-            const noteBot = document.createElement('span');
-            noteBot.className = 'key-note';
-            noteBot.textContent = k.noteLabel || builtIn.noteLabel || k.keyLabel || '';
-            const labelBot = document.createElement('span');
-            labelBot.className = 'half-label';
-            labelBot.textContent = '⇥';
-            halfBottom.appendChild(noteBot);
-            halfBottom.appendChild(labelBot);
-            pad.appendChild(halfBottom);
 
           pad.addEventListener('mousedown', (e) => {
             if (isEditMode) {
@@ -1980,68 +1828,7 @@ local HTML_UI_CONTENT = [[
             document.querySelectorAll('.key-half.drag-over-target, .key-pad.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
           });
 
-          // Helper to add dragover/dragleave/drop to a half
-          function setupDropHandlers(halfEl, isShift) {
-            halfEl.addEventListener('dragover', (e) => {
-              if (!isEditMode || k.isDummy) return;
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'move';
-              if (!halfEl.classList.contains('drag-over-target')) {
-                halfEl.classList.add('drag-over-target');
-              }
-            });
 
-            halfEl.addEventListener('dragleave', () => {
-              halfEl.classList.remove('drag-over-target');
-            });
-
-            halfEl.addEventListener('drop', (e) => {
-              if (!isEditMode || k.isDummy) return;
-              e.preventDefault();
-              e.stopPropagation();
-              halfEl.classList.remove('drag-over-target');
-
-              let rawData = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
-              let data = null;
-              if (rawData) {
-                try { data = JSON.parse(rawData); } catch(err) {}
-              }
-              if (!data && draggedItemData) data = draggedItemData;
-              if (!data) return;
-
-              if (data.type === 'action') {
-                assignActionToKey(k.code, data.action, isShift);
-                pad.classList.add('just-updated-glow');
-                setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
-                showSpotlight({
-                  title: 'KEY ASSIGNED',
-                  val: 'Key [' + k.keyLabel + '] (' + (isShift ? 'Shift' : 'Normal') + ') → ' + data.action.name,
-                  sub: 'Unsaved changes'
-                });
-                setHasUnsavedChanges(true);
-              } else if (data.type === 'keyslot') {
-                if (data.code !== k.code) {
-                  swapKeyBindings(data.code, k.code);
-                  pad.classList.add('just-updated-glow');
-                  const srcPad = document.getElementById('key-' + data.code);
-                  if (srcPad) {
-                    srcPad.classList.add('just-updated-glow');
-                    setTimeout(() => srcPad.classList.remove('just-updated-glow'), 600);
-                  }
-                  setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
-                  showSpotlight({
-                    title: 'KEYS SWAPPED',
-                    val: 'Key [' + data.keyLabel + '] ↔ Key [' + k.keyLabel + ']',
-                    sub: 'Unsaved changes'
-                  });
-                  setHasUnsavedChanges(true);
-                }
-              }
-            });
-          }
-
-          setupDropHandlers(halfTop, true);   // shift half
-          setupDropHandlers(halfBottom, false); // normal half
 
           rowEl.appendChild(pad);
         });
@@ -2074,19 +1861,13 @@ local HTML_UI_CONTENT = [[
       if (!isNaN(code) && binding) {
         const pad = document.getElementById('key-' + code);
         if (pad) {
-          const noteEl = pad.querySelector(':scope > .key-note');
+          const noteEl = pad.querySelector('.key-note');
           if (noteEl) {
             // If shift mode active, show shift name; fall back to normal name if no shift defined
             noteEl.textContent = isShift
               ? (binding.shiftName || binding.shiftAction || binding.name || '')
               : (binding.name || binding.shiftName || binding.shiftAction || '');
           }
-          // Update vertical split halves
-          const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
-          const halfTop = pad.querySelector('.key-half-top .key-note');
-          if (halfTop) halfTop.textContent = binding.shiftName || binding.shiftAction || builtIn.shiftLabel || builtIn.noteLabel || builtIn.keyLabel || '';
-          const halfBottom = pad.querySelector('.key-half-bottom .key-note');
-          if (halfBottom) halfBottom.textContent = binding.name || binding.action || builtIn.noteLabel || builtIn.keyLabel || '';
         }
       }
     }
@@ -2448,28 +2229,15 @@ local HTML_UI_CONTENT = [[
       currentWorkingLayout[code].name = actionObj.name;
       currentWorkingLayout[code].typeClass = actionObj.typeClass;
     }
-
     setHasUnsavedChanges(true);
 
     const pad = document.getElementById('key-' + code);
     if (pad) {
-      const noteEl = pad.querySelector(':scope > .key-note');
-      if (!isShift) {
-        if (!shiftModeActive && noteEl) noteEl.textContent = actionObj.name;
-        pad.className = 'key-pad control-pad ' + (actionObj.typeClass || '');
-      } else if (shiftModeActive) {
-        if (noteEl) noteEl.textContent = actionObj.name;
+      const noteEl = pad.querySelector('.key-note');
+      if (noteEl) {
+        noteEl.textContent = actionObj.name;
       }
-      // Update vertical split halves
-      const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(code) || {} : {};
-      const halfTop = pad.querySelector('.key-half-top .key-note');
-      if (halfTop) halfTop.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].shiftName || currentWorkingLayout[code].shiftAction) || builtIn.shiftLabel || '';
-      const halfBottom = pad.querySelector('.key-half-bottom .key-note');
-      if (halfBottom) halfBottom.textContent = currentWorkingLayout[code] && (currentWorkingLayout[code].name || currentWorkingLayout[code].action) || builtIn.noteLabel || builtIn.keyLabel || '';
-      // Always set bottom note when assigning normal action
-      if (!isShift && halfBottom) halfBottom.textContent = actionObj.name;
-      // Always set top note when assigning shift action
-      if (isShift && halfTop) halfTop.textContent = actionObj.name;
+      pad.className = 'key-pad control-pad ' + (actionObj.typeClass || '');
       pad.classList.add('just-updated-glow');
       setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
     }
@@ -3072,7 +2840,17 @@ local HTML_UI_CONTENT = [[
     if (closeDrawerBtn) {
       closeDrawerBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        setEditMode(false);
+        const drawer = document.getElementById('action-library-drawer');
+        if (drawer) drawer.classList.remove('active');
+      });
+    }
+    
+    const toggleDrawerBtn = document.getElementById('toggle-drawer-btn');
+    if (toggleDrawerBtn) {
+      toggleDrawerBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const drawer = document.getElementById('action-library-drawer');
+        if (drawer) drawer.classList.toggle('active');
       });
     }
 
