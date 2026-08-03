@@ -3842,26 +3842,31 @@ local HTML_UI_CONTENT = [[
             l[rowName].forEach(k => {
               const pad = document.createElement('div');
               pad.id = 'key-' + k.code + '-shift';
-              pad.className = 'key-pad shift-pad';
+              pad.className = 'key-pad shift-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
               if (k.width) pad.style.width = k.width + 'px';
               pad.setAttribute('data-is-shift', 'true');
-              pad.setAttribute('draggable', 'true');
+              pad.setAttribute('draggable', k.isDummy ? 'false' : 'true');
 
               const codeSpan = document.createElement('span');
               codeSpan.className = 'key-code';
-              codeSpan.textContent = '⇧' + (k.keyLabel || '');
-
-              const noteSpan = document.createElement('span');
-              noteSpan.className = 'key-note';
-              noteSpan.textContent = k.shiftLabel || '';
+              codeSpan.textContent = '⇧' + k.keyLabel;
 
               const iconSpan = document.createElement('div');
               iconSpan.className = 'key-row-icon stacked-rows-icon';
               iconSpan.innerHTML = '<div class="rect top"></div><div class="rect bottom"></div>';
 
+              const builtIn = typeof getBuiltInKey !== 'undefined' ? getBuiltInKey(k.code) || {} : {};
+              const noteSpan = document.createElement('span');
+              noteSpan.className = 'key-note';
+              noteSpan.textContent = k.shiftLabel || builtIn.shiftLabel || builtIn.noteLabel || k.noteLabel || '';
+
+              const dotSpan = document.createElement('span');
+              dotSpan.className = 'latch-dot';
+
               pad.appendChild(iconSpan);
               pad.appendChild(codeSpan);
               pad.appendChild(noteSpan);
+              pad.appendChild(dotSpan);
               shiftRowEl.appendChild(pad);
             });
             rowEl.appendChild(shiftRowEl);
