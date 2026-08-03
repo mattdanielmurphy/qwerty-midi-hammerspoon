@@ -316,11 +316,11 @@ local function arpRemoveNote(code)
 
   local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
 
-  if state.arpLatchActive then
+  if state.arpLatchActive or state.sustainActive then
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode, we DO keep the notes for the held chord.
+    -- In latch mode or when sustain pedal is active, keep the notes for the arpeggiator
   else
     if state.arpTargetHeldNotes then
       state.arpTargetHeldNotes[code] = nil
@@ -349,8 +349,9 @@ end
 
 local function applyBpmChange()
   if state.arpTimer then
+    state.arpTimer:stop()
     local newInterval = getArpIntervalSeconds()
-    state.arpTimer:setNextTrigger(newInterval)
+    state.arpTimer = hs.timer.doEvery(newInterval, arpTick)
   end
 end
 

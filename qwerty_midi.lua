@@ -1523,11 +1523,11 @@ local function arpRemoveNote(code)
 
   local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
 
-  if state.arpLatchActive then
+  if state.arpLatchActive or state.sustainActive then
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode, we DO keep the notes for the held chord.
+    -- In latch mode or when sustain pedal is active, keep the notes for the arpeggiator
   else
     if state.arpTargetHeldNotes then
       state.arpTargetHeldNotes[code] = nil
@@ -1556,8 +1556,9 @@ end
 
 local function applyBpmChange()
   if state.arpTimer then
+    state.arpTimer:stop()
     local newInterval = getArpIntervalSeconds()
-    state.arpTimer:setNextTrigger(newInterval)
+    state.arpTimer = hs.timer.doEvery(newInterval, arpTick)
   end
 end
 
@@ -8587,7 +8588,9 @@ local function handleKeyUp(code)
               if isCurrentlyHeld then break end
             end
           end
-          if not isCurrentlyHeld then
+          -- Do NOT issue noteOff if this pitch is currently playing/held in arpeggiator
+          local isArpActivePitch = state.arpCurrentPitch and ((type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitch)
+          if not isCurrentlyHeld and not isArpActivePitch then
             midi.sendMidiNote("noteOff", pitch, 0, channel)
           end
         end
@@ -8631,6 +8634,23 @@ local function handleKeyUp(code)
         state.sustainActive = false
         midi.sendSustainCC(0)
         cleanupSustainPitches()
+
+        -- When sustain turns off and latch is disabled, clear any arpeggiator notes that are no longer physically held down
+        if not state.arpLatchActive and state.arpTargetHeldNotes then
+          local newTarget = {}
+          for codeKey, pitch in pairs(state.arpTargetHeldNotes) do
+            local baseCode = type(codeKey) == "string" and tonumber(codeKey:match("^(%d+)")) or tonumber(codeKey)
+            if baseCode and state.arpKeysCurrentlyHeld[baseCode] then
+              newTarget[codeKey] = pitch
+            end
+          end
+          state.arpTargetHeldNotes = newTarget
+          state.arpHeldNotes = {}
+          for k, v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+          if next(state.arpHeldNotes) == nil then
+            arpeggiator.stopArpTimer()
+          end
+        end
       else
         state.sustainActive = true
         midi.sendSustainCC(127)
