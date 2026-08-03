@@ -1556,9 +1556,8 @@ end
 
 local function applyBpmChange()
   if state.arpTimer then
-    state.arpTimer:stop()
-    state.arpTimer = nil
-    startArpTimer(true)
+    local newInterval = getArpIntervalSeconds()
+    state.arpTimer:setNextTrigger(newInterval)
   end
 end
 
@@ -1827,7 +1826,7 @@ local function setLogicBpmTarget(targetBpm)
     logicBpmDebounceTimer = nil
   end
 
-  logicBpmDebounceTimer = hs.timer.doAfter(0.20, function()
+  logicBpmDebounceTimer = hs.timer.doAfter(0.40, function()
     logicBpmDebounceTimer = nil
     if logicBpmTask then
       logicBpmTask:terminate()
