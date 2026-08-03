@@ -8622,42 +8622,45 @@ local function handleKeyUp(code)
     return true
   end
 
-  local noteKey = config.getNoteKey(code)
-  if noteKey then
-    local keyInfo = state.pressedKeys[code]
-    if keyInfo then
-      local pitches = type(keyInfo) == "table" and keyInfo.pitches or { keyInfo.pitch }
-      local isArpNote = type(keyInfo) == "table" and keyInfo.isArpNote
-      local isSustainedNote = type(keyInfo) == "table" and keyInfo.isSustainedNote
+  local keyInfo = state.pressedKeys[code]
+  if keyInfo and type(keyInfo) == "table" and not keyInfo.isControl and keyInfo.pitches then
+    local pitches = keyInfo.pitches
+    local isArpNote = keyInfo.isArpNote
+    local isSustainedNote = keyInfo.isSustainedNote
+    local keyChannel = keyInfo.channel or 0
 
-      local keyChannel = type(keyInfo) == "table" and keyInfo.channel or 0
-      if isArpNote then
-        for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
-      else
-        local sustainPedalHeld = false
-        for c, info in pairs(state.pressedKeys) do
-          if type(info) == "table" and info.isControl and info.action == "sustain" then
-            sustainPedalHeld = true
-            break
-          end
-        end
-        for _, playedPitch in ipairs(pitches) do
-          if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
-            state.sustainedPitches = state.sustainedPitches or {}
-            state.sustainedPitches[playedPitch] = { channel = keyChannel }
-          else
-            midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
-          end
+    if isArpNote then
+      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
+    else
+      local sustainPedalHeld = false
+      for c, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and info.isControl and info.action == "sustain" then
+          sustainPedalHeld = true
+          break
         end
       end
-      state.pressedKeys[code] = nil
-    else
-      -- Failsafe: keyInfo was missing from state.pressedKeys, calculate pitch & send noteOff directly
-      local isTop = noteKey.isTop
-      local fallbackPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-      midi.sendMidiNote("noteOff", fallbackPitch, 0, ch)
+      for _, playedPitch in ipairs(pitches) do
+        if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
+          state.sustainedPitches = state.sustainedPitches or {}
+          table.insert(state.sustainedPitches, { pitch = playedPitch, channel = keyChannel })
+        else
+          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+        end
+      end
     end
+    state.pressedKeys[code] = nil
+    hud.updateSingleKeyState(code, false, false)
+    hud.updateWebviewHud()
+    return true
+  end
+
+  local noteKey = config.getNoteKey(code)
+  if noteKey then
+    -- Fallback if pressedKeys entry was missing
+    local isTop = noteKey.isTop
+    local fallbackPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    midi.sendMidiNote("noteOff", fallbackPitch, 0, ch)
     hud.updateSingleKeyState(code, false, false)
     hud.updateWebviewHud()
     return true
@@ -8674,23 +8677,25 @@ local function handleKeyUp(code)
 
   local function cleanupSustainPitches()
     if state.sustainedPitches then
-      for pitch, item in pairs(state.sustainedPitches) do
-        local channel = type(item) == "table" and item.channel or 0
-        local isCurrentlyHeld = false
-        for _, kInfo in pairs(state.pressedKeys) do
-          if type(kInfo) == "table" then
-            local pList = kInfo.pitches or { kInfo.pitch }
-            for _, p in ipairs(pList) do
-              if p == pitch then
-                isCurrentlyHeld = true
-                break
+      for _, item in ipairs(state.sustainedPitches) do
+        if type(item) == "table" and item.pitch then
+          local pitch = item.pitch
+          local channel = item.channel or 0
+          local isCurrentlyHeld = false
+          for _, kInfo in pairs(state.pressedKeys) do
+            if type(kInfo) == "table" and not kInfo.isControl and kInfo.pitches then
+              for _, p in ipairs(kInfo.pitches) do
+                if p == pitch and (kInfo.channel or 0) == channel then
+                  isCurrentlyHeld = true
+                  break
+                end
               end
+              if isCurrentlyHeld then break end
             end
-            if isCurrentlyHeld then break end
           end
-        end
-        if not isCurrentlyHeld then
-          midi.sendMidiNote("noteOff", pitch, 0, channel)
+          if not isCurrentlyHeld then
+            midi.sendMidiNote("noteOff", pitch, 0, channel)
+          end
         end
       end
       state.sustainedPitches = {}
@@ -8710,10 +8715,10 @@ local function handleKeyUp(code)
         local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
         if (wasSustain or act == "sustain") and not state.sustainActive then
-          midi.sendMidiCC(64, 0)
+          midi.sendSustainCC(0)
           cleanupSustainPitches()
         elseif not wasSustain and state.sustainActive then
-          midi.sendMidiCC(64, 127)
+          midi.sendSustainCC(127)
         end
         local spot = act == "sustain" and {
           title = "SUSTAIN (CC #64)",
@@ -8730,11 +8735,11 @@ local function handleKeyUp(code)
     if act == "sustain" then
       if state.sustainWasActiveOnPress then
         state.sustainActive = false
-        midi.sendMidiCC(64, 0)
+        midi.sendSustainCC(0)
         cleanupSustainPitches()
       else
         state.sustainActive = true
-        midi.sendMidiCC(64, 127)
+        midi.sendSustainCC(127)
         -- Retroactively sustain all non-arp notes currently being physically held down
         for c, keyInfo in pairs(state.pressedKeys) do
           if type(keyInfo) == "table" and not keyInfo.isControl then
@@ -8745,7 +8750,7 @@ local function handleKeyUp(code)
               for _, p in ipairs(pitches) do
                 if p then
                   state.sustainedPitches = state.sustainedPitches or {}
-                  state.sustainedPitches[p] = { channel = ch }
+                  table.insert(state.sustainedPitches, { pitch = p, channel = ch })
                 end
               end
             end
@@ -8841,7 +8846,21 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
   if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = channel or 0 })
+    local ch = channel or 0
+    if cmd == "noteOff" or (cmd == "noteOn" and vel == 0) then
+      dev:sendCommand("noteOff", { note = noteNum, velocity = 0, channel = ch })
+      dev:sendCommand("noteOn", { note = noteNum, velocity = 0, channel = ch })
+    else
+      dev:sendCommand("noteOn", { note = noteNum, velocity = vel, channel = ch })
+    end
+  end
+end
+
+local function sendSustainCC(val)
+  local dev = getMidiDevice()
+  if not dev then return end
+  for ch = 0, 15 do
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = val, channel = ch })
   end
 end
 
@@ -8873,6 +8892,7 @@ return {
   getMidiDevice = getMidiDevice,
   sendMidiNote = sendMidiNote,
   sendMidiCC = sendMidiCC,
+  sendSustainCC = sendSustainCC,
   panicAllChannels = panicAllChannels
 }
 

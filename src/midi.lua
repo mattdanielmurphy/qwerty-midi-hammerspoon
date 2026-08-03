@@ -39,7 +39,21 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
   if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
   if dev then
-    dev:sendCommand(cmd, { note = noteNum, velocity = vel, channel = channel or 0 })
+    local ch = channel or 0
+    if cmd == "noteOff" or (cmd == "noteOn" and vel == 0) then
+      dev:sendCommand("noteOff", { note = noteNum, velocity = 0, channel = ch })
+      dev:sendCommand("noteOn", { note = noteNum, velocity = 0, channel = ch })
+    else
+      dev:sendCommand("noteOn", { note = noteNum, velocity = vel, channel = ch })
+    end
+  end
+end
+
+local function sendSustainCC(val)
+  local dev = getMidiDevice()
+  if not dev then return end
+  for ch = 0, 15 do
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = val, channel = ch })
   end
 end
 
@@ -71,6 +85,7 @@ return {
   getMidiDevice = getMidiDevice,
   sendMidiNote = sendMidiNote,
   sendMidiCC = sendMidiCC,
+  sendSustainCC = sendSustainCC,
   panicAllChannels = panicAllChannels
 }
 
