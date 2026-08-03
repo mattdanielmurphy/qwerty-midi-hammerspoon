@@ -612,7 +612,7 @@ local function createMidiWebview()
         local wv = _G.activeWatchers.midiWebview
         local frame = wv:frame()
         local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-        local editH = math.floor(560 * effectiveScale)
+        local editH = math.floor(580 * effectiveScale)
         if body.active then
           _savedNormalHeight = frame.h
           local diffH = editH - frame.h
@@ -3309,10 +3309,17 @@ local HTML_UI_CONTENT = [[
     transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  #hud-container.edit-mode-active .keyboard-grid {
+  /* Constrain width only if drawer is open */
+  #hud-container.drawer-open .keyboard-grid,
+  #hud-container.drawer-open #performance-view {
     max-width: calc(980px - 272px);
     transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    gap: 4px;
+  }
+
+  .keyboard-grid {
+    gap: 6px;
+    flex: 1;
+    transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   #hud-container.edit-mode-active .keyboard-row {
@@ -3325,13 +3332,9 @@ local HTML_UI_CONTENT = [[
                 font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  /* Compact key pads when drawer is open */
+  /* Remove height/width overrides in Edit Mode to allow natural sizing */
   #hud-container.edit-mode-active .key-pad {
-    width: 48px;
-    min-width: 48px;
-    flex-shrink: 0;
-    height: 44px;
-    gap: 0;
+    transition: font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
   #hud-container.edit-mode-active .key-pad .key-code {
     font-size: 8px;
@@ -3828,8 +3831,45 @@ local HTML_UI_CONTENT = [[
       ['number', 'upper', 'home', 'lower'].forEach(rowName => {
         const rowEl = document.getElementById('row-' + rowName);
         if (!rowEl) return;
+        // Render Shift Row + Normal Row
         if (l[rowName] && Array.isArray(l[rowName]) && l[rowName].length > 0) {
           rowEl.textContent = '';
+          
+          // Render Shift Row
+          if (isEditMode) {
+            const shiftRowEl = document.createElement('div');
+            shiftRowEl.className = 'keyboard-row shift-row';
+            l[rowName].forEach(k => {
+              const pad = document.createElement('div');
+              pad.id = 'key-' + k.code + '-shift';
+              pad.className = 'key-pad shift-pad';
+              if (k.width) pad.style.width = k.width + 'px';
+              pad.setAttribute('data-is-shift', 'true');
+              pad.setAttribute('draggable', 'true');
+
+              const codeSpan = document.createElement('span');
+              codeSpan.className = 'key-code';
+              codeSpan.textContent = '⇧' + (k.keyLabel || '');
+
+              const noteSpan = document.createElement('span');
+              noteSpan.className = 'key-note';
+              noteSpan.textContent = k.shiftLabel || '';
+
+              const iconSpan = document.createElement('div');
+              iconSpan.className = 'key-row-icon stacked-rows-icon';
+              iconSpan.innerHTML = '<div class="rect top"></div><div class="rect bottom"></div>';
+
+              pad.appendChild(iconSpan);
+              pad.appendChild(codeSpan);
+              pad.appendChild(noteSpan);
+              shiftRowEl.appendChild(pad);
+            });
+            rowEl.appendChild(shiftRowEl);
+          }
+
+          // Render Normal Row
+          const normalRowEl = document.createElement('div');
+          normalRowEl.className = 'keyboard-row';
           l[rowName].forEach(k => {
             const pad = document.createElement('div');
             pad.id = 'key-' + k.code;
@@ -3924,7 +3964,8 @@ local HTML_UI_CONTENT = [[
               code: k.code,
               keyLabel: k.keyLabel,
               rowName: rowName,
-              actionName: currentActionName
+              actionName: currentActionName,
+              isShift: pad.classList.contains('shift-pad')
             };
             e.dataTransfer.setData('application/json', JSON.stringify(payload));
             e.dataTransfer.setData('text/plain', JSON.stringify(payload));
@@ -3935,14 +3976,75 @@ local HTML_UI_CONTENT = [[
           pad.addEventListener('dragend', () => {
             pad.classList.remove('dragging-source');
             draggedItemData = null;
-            document.querySelectorAll('.key-half.drag-over-target, .key-pad.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+            document.querySelectorAll('.key-pad.drag-over-target').forEach(el => el.classList.remove('drag-over-target'));
+          });
+
+          pad.addEventListener('dragover', (e) => {
+            if (!isEditMode || k.isDummy) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            pad.classList.add('drag-over-target');
+          });
+
+          pad.addEventListener('dragleave', () => {
+            pad.classList.remove('drag-over-target');
+          });
+
+          pad.addEventListener('drop', (e) => {
+            if (!isEditMode || k.isDummy) return;
+            e.preventDefault();
+            e.stopPropagation();
+            pad.classList.remove('drag-over-target');
+
+            let rawData = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+            let data = null;
+            if (rawData) {
+              try { data = JSON.parse(rawData); } catch(err) {}
+            }
+            if (!data && draggedItemData) data = draggedItemData;
+            if (!data) return;
+
+            const isShiftTarget = pad.classList.contains('shift-pad');
+
+            if (data.type === 'action') {
+              assignActionToKey(k.code, data.action, isShiftTarget);
+              pad.classList.add('just-updated-glow');
+              setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
+              showSpotlight({
+                title: 'KEY ASSIGNED',
+                val: 'Key [' + k.keyLabel + '] (' + (isShiftTarget ? 'Shift' : 'Normal') + ') → ' + data.action.name,
+                sub: 'Unsaved changes'
+              });
+              setHasUnsavedChanges(true);
+            } else if (data.type === 'keyslot') {
+              if (data.code !== k.code || data.isShift !== isShiftTarget) {
+                swapKeyBindings(data.code, k.code, data.isShift, isShiftTarget);
+                pad.classList.add('just-updated-glow');
+                const srcPad = document.getElementById('key-' + data.code);
+                if (srcPad) {
+                  srcPad.classList.add('just-updated-glow');
+                  setTimeout(() => srcPad.classList.remove('just-updated-glow'), 600);
+                }
+                setTimeout(() => pad.classList.remove('just-updated-glow'), 600);
+                showSpotlight({
+                  title: 'KEYS SWAPPED',
+                  val: 'Key [' + data.keyLabel + '] ↔ Key [' + k.keyLabel + ']',
+                  sub: 'Unsaved changes'
+                });
+                setHasUnsavedChanges(true);
+              }
+            }
           });
 
 
 
-          rowEl.appendChild(pad);
-        });
-      }
+
+            normalRowEl.appendChild(pad);
+          });
+          rowEl.appendChild(normalRowEl);
+        }
+        
+
     });
   } catch (err) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
@@ -4073,6 +4175,7 @@ local HTML_UI_CONTENT = [[
 
     if (isEditMode) {
       container.classList.add('edit-mode-active');
+      container.classList.add('drawer-open');
       if (editBtn) editBtn.classList.add('active');
       if (drawer) drawer.classList.add('active');
 
@@ -4111,7 +4214,10 @@ local HTML_UI_CONTENT = [[
     } else {
       container.classList.remove('edit-mode-active');
       if (editBtn) editBtn.classList.remove('active');
-      if (drawer) drawer.classList.remove('active');
+      if (drawer) {
+        drawer.classList.remove('active');
+        document.getElementById('hud-container').classList.remove('drawer-open');
+      }
 
       // Reset shift mode on edit exit
       if (shiftModeActive) toggleShiftMode();
@@ -4951,7 +5057,10 @@ local HTML_UI_CONTENT = [[
       closeDrawerBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const drawer = document.getElementById('action-library-drawer');
-        if (drawer) drawer.classList.remove('active');
+        if (drawer) {
+          drawer.classList.remove('active');
+          document.getElementById('hud-container').classList.remove('drawer-open');
+        }
       });
     }
     
@@ -4960,7 +5069,10 @@ local HTML_UI_CONTENT = [[
       toggleDrawerBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         const drawer = document.getElementById('action-library-drawer');
-        if (drawer) drawer.classList.toggle('active');
+        if (drawer) {
+          drawer.classList.toggle('active');
+          document.getElementById('hud-container').classList.toggle('drawer-open', drawer.classList.contains('active'));
+        }
       });
     }
 

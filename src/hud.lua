@@ -595,7 +595,7 @@ local function createMidiWebview()
         local wv = _G.activeWatchers.midiWebview
         local frame = wv:frame()
         local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
-        local editH = math.floor(560 * effectiveScale)
+        local editH = math.floor(580 * effectiveScale)
         if body.active then
           _savedNormalHeight = frame.h
           local diffH = editH - frame.h
