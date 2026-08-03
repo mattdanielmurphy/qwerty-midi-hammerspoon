@@ -2808,16 +2808,32 @@ local HTML_UI_CONTENT = [[
     const drawerContainer = document.getElementById('drawer-categories-container');
     if (drawerContainer) {
       drawerContainer.addEventListener('mouseenter', function() {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
-          window.webkit.messageHandlers.midiController.postMessage({ type: 'hoverScrollable', state: true });
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'hoverScrollable', state: true });
         }
       });
       drawerContainer.addEventListener('mouseleave', function() {
-        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
-          window.webkit.messageHandlers.midiController.postMessage({ type: 'hoverScrollable', state: false });
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'hoverScrollable', state: false });
         }
       });
     }
+
+    // Delegate hover state to any scrollable element
+    document.body.addEventListener('mouseenter', function(e) {
+      if (e.target.matches('.drawer-content')) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'hoverScrollable', state: true });
+        }
+      }
+    }, true);
+    document.body.addEventListener('mouseleave', function(e) {
+      if (e.target.matches('.drawer-content')) {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'hoverScrollable', state: false });
+        }
+      }
+    }, true);
 
 
 
