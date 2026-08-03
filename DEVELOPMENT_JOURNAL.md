@@ -41,3 +41,9 @@
 - **2026-08-01**: Added `updateLatchedArpChordNotes()` to `arpeggiator.lua` — changing chord type via `chordUp`/`chordDown` while arp is latched now rebuilds held notes with the new chord's pitch offsets, so the arp immediately plays the new chord shape.
 
 - **2026-08-01**: Updated `updateLatchedArpNotes()` in `arpeggiator.lua` so that transposing octave/scale/key while in Chord Mode rebuilds all active chord pitches (`getChordPitches`), preserving full chord patterns instead of collapsing them into a single root note.
+
+## 2026-08-03
+- **DAW Multi-Channel Voice Cutoff Documentation & MIDI Channel Audit**: Documented Logic Pro single-track MIDI voice summing behavior across channels and verified row/channel isolation (`Channel 1`: Top Row, `Channel 2`: Bottom Row, `Channel 3`: Arp). Note cutoff when playing identical pitches across rows in DAW single-instrument tracks requires separate DAW instrument instances per channel.
+
+## 2026-08-03
+- **DAW Multi-Channel Voice Cutoff Documentation & MIDI Channel Audit**: Documented Logic Pro single-track MIDI voice summing behavior across channels and verified row/channel isolation (`Channel 1`: Top Row, `Channel 2`: Bottom Row, `Channel 3`: Arp). Note cutoff when playing identical pitches across rows in DAW single-instrument tracks requires separate DAW instrument instances per channel.
