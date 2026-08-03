@@ -896,6 +896,13 @@ function _G.toggleMidiMode(newState)
     if controls.stopAllControlRepeats then
       controls.stopAllControlRepeats()
     end
+    -- Stop arpeggiator and reset sustain to prevent stuck notes on disable
+    if arpeggiator and arpeggiator.stopArpTimer then
+      arpeggiator.stopArpTimer()
+    end
+    state.sustainActive = false
+    midi.sendMidiCC(64, 0)
+    
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.bpmInputMode = false
@@ -1232,10 +1239,10 @@ end
 local function stopArpTimer()
   state.arpBeatPosition = 0
   if state.arpActiveGateTimers then
-    for pitchInfo, timer in pairs(state.arpActiveGateTimers) do
-      if timer then timer:stop() end
+    for pitchInfo, entry in pairs(state.arpActiveGateTimers) do
+      if entry and entry.timer then entry.timer:stop() end
       local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
-      local ch = type(pitchInfo) == "table" and pitchInfo.channel or 0
+      local ch = entry and entry.channel or 0
       midi.sendMidiNote("noteOff", pitch, 0, ch)
     end
     state.arpActiveGateTimers = {}
@@ -1306,9 +1313,10 @@ local function arpTick()
 
   if #pitchList == 0 then
     if state.arpActiveGateTimers then
-      for pitch, timer in pairs(state.arpActiveGateTimers) do
-        if timer then timer:stop() end
-        midi.sendMidiNote("noteOff", pitch, 0)
+      for pitch, entry in pairs(state.arpActiveGateTimers) do
+        if entry and entry.timer then entry.timer:stop() end
+        local ch = entry and entry.channel or 0
+        midi.sendMidiNote("noteOff", pitch, 0, ch)
       end
       state.arpActiveGateTimers = {}
     end
@@ -1559,13 +1567,12 @@ local function applyGatePercentChange()
     local gateRatio = (state.arpGatePercent or 80.0) / 100.0
     if state.arpActiveGateTimers then
       if gateRatio <= 1.0 then
-        for pitch, timer in pairs(state.arpActiveGateTimers) do
+        for pitch, entry in pairs(state.arpActiveGateTimers) do
           local curPitchNum = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
           if pitch ~= curPitchNum then
-            if timer then timer:stop() end
-            local p = type(pitch) == "table" and pitch.pitch or pitch
-            local c = type(pitch) == "table" and pitch.channel or 0
-            midi.sendMidiNote("noteOff", p, 0, c)
+            if entry and entry.timer then entry.timer:stop() end
+            local ch = entry and entry.channel or 0
+            midi.sendMidiNote("noteOff", pitch, 0, ch)
             state.arpActiveGateTimers[pitch] = nil
           end
         end
@@ -8614,8 +8621,14 @@ local function handleKeyUp(code)
         end
       end
       state.pressedKeys[code] = nil
-      hud.updateSingleKeyState(code, false, false)
+    else
+      -- Failsafe: keyInfo was missing from state.pressedKeys, calculate pitch & send noteOff directly
+      local isTop = noteKey.isTop
+      local fallbackPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+      midi.sendMidiNote("noteOff", fallbackPitch, 0, ch)
     end
+    hud.updateSingleKeyState(code, false, false)
     hud.updateWebviewHud()
     return true
   end

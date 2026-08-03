@@ -46,6 +46,13 @@ function _G.toggleMidiMode(newState)
     if controls.stopAllControlRepeats then
       controls.stopAllControlRepeats()
     end
+    -- Stop arpeggiator and reset sustain to prevent stuck notes on disable
+    if arpeggiator and arpeggiator.stopArpTimer then
+      arpeggiator.stopArpTimer()
+    end
+    state.sustainActive = false
+    midi.sendMidiCC(64, 0)
+    
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.bpmInputMode = false

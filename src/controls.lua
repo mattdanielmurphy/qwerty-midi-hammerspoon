@@ -1160,8 +1160,14 @@ local function handleKeyUp(code)
         end
       end
       state.pressedKeys[code] = nil
-      hud.updateSingleKeyState(code, false, false)
+    else
+      -- Failsafe: keyInfo was missing from state.pressedKeys, calculate pitch & send noteOff directly
+      local isTop = noteKey.isTop
+      local fallbackPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+      local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+      midi.sendMidiNote("noteOff", fallbackPitch, 0, ch)
     end
+    hud.updateSingleKeyState(code, false, false)
     hud.updateWebviewHud()
     return true
   end
