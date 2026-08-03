@@ -8679,13 +8679,20 @@ local function handleKeyUp(code)
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
         local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
-        if wasSustain and not state.sustainActive then
+        if (wasSustain or act == "sustain") and not state.sustainActive then
           midi.sendMidiCC(64, 0)
           cleanupSustainPitches()
         elseif not wasSustain and state.sustainActive then
           midi.sendMidiCC(64, 127)
         end
-        hud.updateWebviewHud()
+        local spot = act == "sustain" and {
+          title = "SUSTAIN (CC #64)",
+          value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
+          subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
+          targetId = "key-48",
+          color = state.sustainActive and "#d4a359" or "#b5aba0"
+        } or nil
+        hud.updateWebviewHud(spot)
         return true
       end
     end
@@ -8694,14 +8701,10 @@ local function handleKeyUp(code)
       if state.sustainWasActiveOnPress then
         state.sustainActive = false
         midi.sendMidiCC(64, 0)
+        cleanupSustainPitches()
       else
         state.sustainActive = true
         midi.sendMidiCC(64, 127)
-      end
-
-      if not state.sustainActive then
-        midi.sendMidiCC(64, 0)
-        cleanupSustainPitches()
       end
 
       local spot = {
