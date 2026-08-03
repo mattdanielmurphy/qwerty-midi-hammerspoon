@@ -4179,6 +4179,9 @@ local HTML_UI_CONTENT = [[
       if (editBtn) editBtn.classList.add('active');
       if (drawer) drawer.classList.add('active');
 
+      initGrid(LAYOUT_DATA);
+      if (typeof updateAllKeyLabels === 'function') updateAllKeyLabels();
+
       document.querySelectorAll('.key-pad:not(.dummy-pad)').forEach(pad => {
         pad.setAttribute('draggable', 'true');
       });
@@ -4216,8 +4219,11 @@ local HTML_UI_CONTENT = [[
       if (editBtn) editBtn.classList.remove('active');
       if (drawer) {
         drawer.classList.remove('active');
-        document.getElementById('hud-container').classList.remove('drawer-open');
       }
+      container.classList.remove('drawer-open');
+
+      initGrid(LAYOUT_DATA);
+      if (typeof updateAllKeyLabels === 'function') updateAllKeyLabels();
 
       // Reset shift mode on edit exit
       if (shiftModeActive) toggleShiftMode();
@@ -5071,7 +5077,7 @@ local HTML_UI_CONTENT = [[
         const drawer = document.getElementById('action-library-drawer');
         if (drawer) {
           drawer.classList.toggle('active');
-          document.getElementById('hud-container').classList.toggle('drawer-open', drawer.classList.contains('active'));
+          document.getElementById('hud-container').classList.toggle('drawer-open');
         }
       });
     }
