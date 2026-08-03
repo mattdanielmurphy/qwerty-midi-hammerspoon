@@ -8103,19 +8103,21 @@ local function executeControlAction(act, code)
   elseif act == "sustain" then
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
     state.sustainWasActiveOnPress = state.sustainActive
-    midi.sendMidiCC(64, 127)
+    if state.sustainActive then
+      midi.sendMidiCC(64, 127)
 
-    -- Retroactively sustain all non-arp notes currently being physically held down
-    for code, keyInfo in pairs(state.pressedKeys) do
-      if type(keyInfo) == "table" and not keyInfo.isControl then
-        keyInfo.isSustainedNote = true
-        if not keyInfo.isArpNote then
-          local pitches = keyInfo.pitches or { keyInfo.pitch }
-          local ch = keyInfo.channel or 0
-          for _, p in ipairs(pitches) do
-            if p then
-              state.sustainedPitches = state.sustainedPitches or {}
-              state.sustainedPitches[p] = { channel = ch }
+      -- Retroactively sustain all non-arp notes currently being physically held down
+      for code, keyInfo in pairs(state.pressedKeys) do
+        if type(keyInfo) == "table" and not keyInfo.isControl then
+          keyInfo.isSustainedNote = true
+          if not keyInfo.isArpNote then
+            local pitches = keyInfo.pitches or { keyInfo.pitch }
+            local ch = keyInfo.channel or 0
+            for _, p in ipairs(pitches) do
+              if p then
+                state.sustainedPitches = state.sustainedPitches or {}
+                state.sustainedPitches[p] = { channel = ch }
+              end
             end
           end
         end
@@ -8726,15 +8728,30 @@ local function handleKeyUp(code)
     end
 
     if act == "sustain" then
-      state.sustainActive = not state.sustainWasActiveOnPress
-      midi.sendMidiCC(64, 0)
-      cleanupSustainPitches()
-
-      local spot = {
-        title = "SUSTAIN (CC #64)",
-        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
-        targetId = "key-48",
+      if state.sustainWasActiveOnPress then
+        state.sustainActive = false
+        midi.sendMidiCC(64, 0)
+        cleanupSustainPitches()
+      else
+        state.sustainActive = true
+        midi.sendMidiCC(64, 127)
+        -- Retroactively sustain all non-arp notes currently being physically held down
+        for c, keyInfo in pairs(state.pressedKeys) do
+          if type(keyInfo) == "table" and not keyInfo.isControl then
+            keyInfo.isSustainedNote = true
+            if not keyInfo.isArpNote then
+              local pitches = keyInfo.pitches or { keyInfo.pitch }
+              local ch = keyInfo.channel or 0
+              for _, p in ipairs(pitches) do
+                if p then
+                  state.sustainedPitches = state.sustainedPitches or {}
+                  state.sustainedPitches[p] = { channel = ch }
+                end
+              end
+            end
+          end
+        end
+      end
         color = state.sustainActive and "#d4a359" or "#b5aba0"
       }
       hud.updateWebviewHud(spot)
