@@ -8658,9 +8658,11 @@ local function handleKeyUp(code)
   if noteKey then
     -- Fallback if pressedKeys entry was missing
     local isTop = noteKey.isTop
-    local fallbackPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+    local chordPitches = transposer.getChordPitches(noteKey.baseNote, isTop)
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-    midi.sendMidiNote("noteOff", fallbackPitch, 0, ch)
+    for _, pitch in ipairs(chordPitches) do
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
+    end
     hud.updateSingleKeyState(code, false, false)
     hud.updateWebviewHud()
     return true
