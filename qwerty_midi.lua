@@ -8107,7 +8107,7 @@ local function executeControlAction(act, code)
 
     -- Retroactively sustain all non-arp notes currently being physically held down
     for code, keyInfo in pairs(state.pressedKeys) do
-      if type(keyInfo) == "table" then
+      if type(keyInfo) == "table" and not keyInfo.isControl then
         keyInfo.isSustainedNote = true
         if not keyInfo.isArpNote then
           local pitches = keyInfo.pitches or { keyInfo.pitch }
@@ -8572,15 +8572,21 @@ local function handleKeyDown(code)
     local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
     local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
     local arpActive = state.arpEnabled and arpEnabledForRow
-    local sustainActive = state.sustainActive
     local isArpNote = arpActive
     if state.shiftHeld then
       isArpNote = not arpActive
     end
-    local isSustainedNote = state.shiftHeld and (not sustainActive) or ((not state.shiftHeld) and sustainActive)
+    local sustainPedalHeld = false
+    for c, info in pairs(state.pressedKeys) do
+      if type(info) == "table" and info.isControl and info.action == "sustain" then
+        sustainPedalHeld = true
+        break
+      end
+    end
+    local effectiveSustain = (state.shiftHeld and (not (state.sustainActive or sustainPedalHeld))) or ((not state.shiftHeld) and (state.sustainActive or sustainPedalHeld))
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
     
-    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch }
     
     if isArpNote then 
       for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
@@ -8626,8 +8632,15 @@ local function handleKeyUp(code)
       if isArpNote then
         for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
       else
+        local sustainPedalHeld = false
+        for c, info in pairs(state.pressedKeys) do
+          if type(info) == "table" and info.isControl and info.action == "sustain" then
+            sustainPedalHeld = true
+            break
+          end
+        end
         for _, playedPitch in ipairs(pitches) do
-          if isSustainedNote and state.sustainActive then
+          if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
             state.sustainedPitches = state.sustainedPitches or {}
             state.sustainedPitches[playedPitch] = { channel = keyChannel }
           else
@@ -8713,19 +8726,9 @@ local function handleKeyUp(code)
     end
 
     if act == "sustain" then
-      if state.sustainWasActiveOnPress then
-        state.sustainActive = false
-        midi.sendMidiCC(64, 0)
-        cleanupSustainPitches()
-      else
-        state.sustainActive = not state.sustainWasActiveOnPress
-        if not state.sustainActive then
-          midi.sendMidiCC(64, 0)
-          cleanupSustainPitches()
-        else
-          midi.sendMidiCC(64, 127)
-        end
-      end
+      state.sustainActive = not state.sustainWasActiveOnPress
+      midi.sendMidiCC(64, 0)
+      cleanupSustainPitches()
 
       local spot = {
         title = "SUSTAIN (CC #64)",
