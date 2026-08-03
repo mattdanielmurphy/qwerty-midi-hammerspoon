@@ -8555,7 +8555,7 @@ local function handleKeyDown(code)
     if state.shiftHeld then
       isArpNote = not arpActive
     end
-    local isSustainedNote = state.shiftHeld and (not sustainActive) or sustainActive
+    local isSustainedNote = state.shiftHeld and (not sustainActive) or ((not state.shiftHeld) and sustainActive)
     local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
     
     state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = isSustainedNote, channel = ch }
