@@ -1476,7 +1476,8 @@ local function arpTickEngine(eng, isTopRow)
     if eng.targetHeldNotes then
       for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
     end
-    if countTableKeys(eng.heldNotes) == 0 then
+    local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
       stopEngineState(eng)
       if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 then
         if state.arpTimer then state.arpTimer:stop(); state.arpTimer = nil end
@@ -1736,7 +1737,8 @@ local function arpRemoveNote(code)
       if eng.targetHeldNotes then
         for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
       end
-      if countTableKeys(eng.heldNotes) == 0 then
+      local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
         stopEngineState(eng)
         local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
         if countTableKeys(otherEng.heldNotes) == 0 then
@@ -6043,7 +6045,8 @@ local HTML_UI_CONTENT = [[
               el.dataset.baseClass = baseClass;
             }
 
-            el.classList.toggle('latched-key', !!k.latched);
+            const isLatched = !!k.latched || (data.arpHeldNotes && (!!data.arpHeldNotes[code] || !!data.arpHeldNotes[code + '_'] || Object.keys(data.arpHeldNotes).some(key => key.startsWith(code + '_'))));
+            el.classList.toggle('latched-key', isLatched);
             el.classList.toggle('pressed', !!k.pressed);
             el.classList.toggle('sustain-active', !!k.sustainActive);
             el.classList.toggle('arp-held', !!k.arpHeld);
@@ -6115,6 +6118,24 @@ local HTML_UI_CONTENT = [[
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'pong', timestamp: Date.now() });
     }
   };
+
+window.updateArpPitches = function(activeCodes, heldCodes) {
+  document.querySelectorAll('.key-pad.arp-playing').forEach(el => el.classList.remove('arp-playing'));
+  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
+  if (Array.isArray(activeCodes)) {
+    activeCodes.forEach(code => {
+      const el = document.getElementById('key-' + code);
+      if (el) el.classList.add('arp-playing');
+    });
+  }
+  if (Array.isArray(heldCodes)) {
+    heldCodes.forEach(code => {
+      const el = document.getElementById('key-' + code);
+      if (el) el.classList.add('arp-held', 'latched-key');
+    });
+  }
+};
+
 window.updateKeyState = function(code, pressed, latched) {
   const el = document.getElementById('key-' + code);
   if (el) {
@@ -6126,7 +6147,6 @@ window.updateKeyState = function(code, pressed, latched) {
 </script>
 </body>
 </html>
-
 ]]
 
 return HTML_UI_CONTENT

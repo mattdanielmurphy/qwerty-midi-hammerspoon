@@ -119,7 +119,8 @@ local function arpTickEngine(eng, isTopRow)
     if eng.targetHeldNotes then
       for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
     end
-    if countTableKeys(eng.heldNotes) == 0 then
+    local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
       stopEngineState(eng)
       if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 then
         if state.arpTimer then state.arpTimer:stop(); state.arpTimer = nil end
@@ -379,7 +380,8 @@ local function arpRemoveNote(code)
       if eng.targetHeldNotes then
         for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
       end
-      if countTableKeys(eng.heldNotes) == 0 then
+      local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
         stopEngineState(eng)
         local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
         if countTableKeys(otherEng.heldNotes) == 0 then
