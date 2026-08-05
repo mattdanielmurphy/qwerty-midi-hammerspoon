@@ -1584,12 +1584,16 @@ end
 local function updateLatchedArpNotes()
   if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
 
-  -- Rebuild arpTargetHeldNotes / arpHeldNotes using base keycodes
+  -- Count how many entries each base keycode currently has.
+  -- If a base keycode has multiple entries it was originally entered as a chord
+  -- and should stay expanded as a chord even if chord mode is now off.
+  local baseCodeCounts = {}
   local uniqueBaseCodes = {}
   local keysToRemove = {}
   for code, _ in pairs(state.arpHeldNotes) do
     local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
     if rawCode then
+      baseCodeCounts[rawCode] = (baseCodeCounts[rawCode] or 0) + 1
       uniqueBaseCodes[rawCode] = true
       table.insert(keysToRemove, code)
     end
@@ -1602,9 +1606,12 @@ local function updateLatchedArpNotes()
   for rawCode, _ in pairs(uniqueBaseCodes) do
     local noteKey = config.getNoteKey(rawCode)
     if noteKey then
-      local isChord = state.quoteHeld or state.chordModeActive
+      -- Use chord expansion if chord mode is currently on OR if this keycode
+      -- was originally entered as a chord (multiple entries for the same base code)
+      local wasChord = (baseCodeCounts[rawCode] or 1) > 1
+      local isChord = state.quoteHeld or state.chordModeActive or wasChord
       if isChord then
-        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
+        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop, true)
         for _, p in ipairs(newPitches) do
           state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
         end
@@ -2064,9 +2071,9 @@ local function getIntervalInfo(noteNum)
   return nil, semitonesFromRoot
 end
 
-local function getTransposedChordPitches(basePitch, isTopRow)
+local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
   local rootPitch = getTransposedPitch(basePitch, isTopRow)
-  if not (state.quoteHeld or state.chordModeActive) then
+  if not forceChord and not (state.quoteHeld or state.chordModeActive) then
     return { rootPitch }
   end
   local chordDef = state.CHORDS[state.chordIdx] or state.CHORDS[1]

@@ -57,9 +57,9 @@ local function getIntervalInfo(noteNum)
   return nil, semitonesFromRoot
 end
 
-local function getTransposedChordPitches(basePitch, isTopRow)
+local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
   local rootPitch = getTransposedPitch(basePitch, isTopRow)
-  if not (state.quoteHeld or state.chordModeActive) then
+  if not forceChord and not (state.quoteHeld or state.chordModeActive) then
     return { rootPitch }
   end
   local chordDef = state.CHORDS[state.chordIdx] or state.CHORDS[1]
