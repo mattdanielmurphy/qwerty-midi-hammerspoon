@@ -54,3 +54,5 @@
 ## 2026-08-03
 - **DAW Multi-Channel Voice Cutoff Documentation & MIDI Channel Audit**: Documented Logic Pro single-track MIDI voice summing behavior across channels and verified row/channel isolation (`Channel 1`: Top Row, `Channel 2`: Bottom Row, `Channel 3`: Arp). Note cutoff when playing identical pitches across rows in DAW single-instrument tracks requires separate DAW instrument instances per channel.
 - **Add Icons to Arp Notifications**: Updated `src/ui_html.lua` and `src/hud.lua`/`src/controls.lua` to support inline HTML in spotlight notification titles, and injected the `stacked-rows-icon` HTML for top/bottom row Arpeggiator toggle notifications for clearer visual feedback. Link: [2026-08-04_23-31_add-icons-arp-notifications.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-08-04_23-31_add-icons-arp-notifications.md)
+
+- **2026-08-05**: Fixed dual arpeggiator freeze issue by coalescing HUD webview IPC updates, adding `pcall` execution guards around arp tick engines, and adding latency telemetry for `arpTick` > 15ms.

@@ -807,6 +807,60 @@ local function pongWebview()
     hudLog("pong")
 end
 
+local function processLogFile(path, label, output)
+  table.insert(output, "\n--- " .. label .. " ---")
+  table.insert(output, "Full log filepath: " .. path)
+  local f = io.open(path, "r")
+  if not f then
+    table.insert(output, "(File not found)")
+    return
+  end
+
+  local allLines = {}
+  for line in f:lines() do
+    table.insert(allLines, line)
+  end
+  f:close()
+
+  if #allLines == 0 then
+    table.insert(output, "(Log is empty)")
+    return
+  end
+
+  local seen = {}
+  local errorLines = {}
+  for _, line in ipairs(allLines) do
+    local lower = line:lower()
+    if lower:find("error") or lower:find("fail") or lower:find("exception") or lower:find("crash") or lower:find("warn") or lower:find("err") then
+      if not seen[line] then
+        seen[line] = true
+        table.insert(errorLines, line)
+      end
+    end
+  end
+
+  if #errorLines > 0 then
+    table.insert(output, "[Detected Errors/Warnings (" .. #errorLines .. " lines)]:")
+    for _, line in ipairs(errorLines) do
+      table.insert(output, "  " .. line)
+    end
+  end
+
+  table.insert(output, "[Recent Activity (last 20 lines)]:")
+  local startIndex = math.max(1, #allLines - 19)
+  local recentCount = 0
+  for i = startIndex, #allLines do
+    local line = allLines[i]
+    if not seen[line] then
+      table.insert(output, "  " .. line)
+      recentCount = recentCount + 1
+    end
+  end
+  if recentCount == 0 and #errorLines > 0 then
+    table.insert(output, "  (All recent lines were already listed under errors)")
+  end
+end
+
 local function dumpMidiLogs()
   local output = {}
   table.insert(output, "=== QWERTY MIDI DIAGNOSTICS & LOGS ===")
@@ -815,22 +869,10 @@ local function dumpMidiLogs()
   table.insert(output, "Last Heartbeat: " .. tostring(os.time() - lastHeartbeat) .. "s ago")
   table.insert(output, "Last Pong: " .. tostring(os.time() - lastPongTime) .. "s ago (Latency: " .. lastLatencyMs .. "ms)")
   table.insert(output, "Eval Failures: " .. tostring(evalFailCount))
-  table.insert(output, "\n--- /tmp/midi_startup.log (last 20 lines) ---")
-  local f = io.open("/tmp/midi_startup.log", "r")
-  if f then
-    local lines = {}
-    for line in f:lines() do table.insert(lines, line) end
-    f:close()
-    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
-  end
-  table.insert(output, "\n--- /tmp/wv_js.log (last 20 lines) ---")
-  local fjs = io.open("/tmp/wv_js.log", "r")
-  if fjs then
-    local lines = {}
-    for line in fjs:lines() do table.insert(lines, line) end
-    fjs:close()
-    for i = math.max(1, #lines - 20), #lines do table.insert(output, lines[i]) end
-  end
+  
+  processLogFile("/tmp/midi_startup.log", "Startup Log", output)
+  processLogFile("/tmp/wv_js.log", "Webview JS Log", output)
+
   local res = table.concat(output, "\n")
   print(res)
   hs.pasteboard.setContents(res)
@@ -864,8 +906,60 @@ local function reloadMidiWebview()
   return createMidiWebview()
 end
 
+local function fastUpdateArp()
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+
+  local arpHeldPitches = {}
+  local currentArpPitches = {}
+  
+  if state.arpLinked then
+    if state.arpEnabled then
+      for _, pitch in pairs(state.arpHeldNotes or {}) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      if p then currentArpPitches[p] = true end
+    end
+  else
+    if state.arpEnabled and state.arpTopEnabled then
+      for _, pitch in pairs(state.arpEngineTop.heldNotes or {}) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
+      if p then currentArpPitches[p] = true end
+    end
+    if state.arpEnabled and state.arpBottomEnabled then
+      for _, pitch in pairs(state.arpEngineBottom.heldNotes or {}) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
+      if p then currentArpPitches[p] = true end
+    end
+  end
+
+  local activeCodes = {}
+  local heldCodes = {}
+  local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
+
+  if arpActive then
+    for code, kData in pairs(config.getActiveNoteKeysMap()) do
+      local noteNum = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+      if currentArpPitches[noteNum] then
+        table.insert(activeCodes, tostring(code))
+      end
+      if arpHeldPitches[noteNum] then
+        table.insert(heldCodes, tostring(code))
+      end
+    end
+  end
+
+  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s);", hs.json.encode(activeCodes), hs.json.encode(heldCodes))
+  safeEvaluateJS(js)
+end
+
 return {
   setControlsModule = setControlsModule,
+  fastUpdateArp = fastUpdateArp,
   updateSingleKeyState = updateSingleKeyState,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,

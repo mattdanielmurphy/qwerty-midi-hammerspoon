@@ -263,7 +263,11 @@ local function arpTick()
   if not state.arpLinked then
     p1 = arpTickEngine(state.arpEngineTop, true)
     p2 = arpTickEngine(state.arpEngineBottom, false)
-    updateHud(nil, p1 or p2)
+    if hudModule and hudModule.fastUpdateArp then
+      hudModule.fastUpdateArp()
+    else
+      updateHud(nil, p1 or p2)
+    end
   else
     -- Coupled logic...
   end
