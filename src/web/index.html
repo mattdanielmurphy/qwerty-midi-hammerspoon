@@ -3518,13 +3518,20 @@
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               }
             }
-            el.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
-            if (k.latched) el.classList.add('latched-key');
-            if (k.pressed) el.classList.add('pressed');
-            if (k.sustainActive) el.classList.add('sustain-active');
-            // Arp dot indicators: arp-held = pitch is in pool, arp-playing = actively sounding
-            if (k.arpHeld) el.classList.add('arp-held');
-            if (k.arpPlaying) el.classList.add('arp-playing');
+            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
+            if (el.dataset.baseClass !== baseClass) {
+              const currentStatusClasses = Array.from(el.classList).filter(c =>
+                ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing'].includes(c)
+              );
+              el.className = baseClass + (currentStatusClasses.length ? ' ' + currentStatusClasses.join(' ') : '');
+              el.dataset.baseClass = baseClass;
+            }
+
+            el.classList.toggle('latched-key', !!k.latched);
+            el.classList.toggle('pressed', !!k.pressed);
+            el.classList.toggle('sustain-active', !!k.sustainActive);
+            el.classList.toggle('arp-held', !!k.arpHeld);
+            el.classList.toggle('arp-playing', !!k.arpPlaying);
 
             const isShift = data.shiftHeld || shiftModeActive;
             const effAction = isShift ? (k.shiftAction || k.action) : k.action;
@@ -3595,10 +3602,8 @@
 window.updateKeyState = function(code, pressed, latched) {
   const el = document.getElementById('key-' + code);
   if (el) {
-    if (pressed) el.classList.add('pressed');
-    else el.classList.remove('pressed');
-    if (latched) el.classList.add('latched-key');
-    else el.classList.remove('latched-key');
+    el.classList.toggle('pressed', !!pressed);
+    el.classList.toggle('latched-key', !!latched);
   }
 };
 
