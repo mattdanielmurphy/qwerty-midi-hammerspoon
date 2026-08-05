@@ -1,4 +1,5 @@
 ## 2026-08-05
+- **HUD Key Flickering Fix:** Fixed key flickering in HUD webview by caching base class in dataset (`el.dataset.baseClass`) and using atomic `classList.toggle` for status classes, preventing class list thrashing during rapid updates.
 - **Modular JSON Layouts & Action Catalog:** Refactored action catalog to `actions/actions.json` and layout definitions to `layouts/*.json`. Removed edit mode UI and drawer from webview; added header `<select id="layout-select">` dropdown to switch between available JSON layouts.
 - **Top Toolbar Decluttering & On-Key Arp State:** Removed the redundant `ARP: OFF / ON / LATCH` top header button to free up space. Arp state is now rendered directly on control key caps (`Arp`, `Top Arp`, `Bottom Arp`).
 - **Clean Key Labels & Cyan Latch Mode Styling:** Stripped all redundant `: ON` / `: OFF` text suffixes from control key caps. Added a vibrant cyan/teal glowing theme (`.latch-mode-active` `#00E5FF`) and `Arp 🔒` lock indicator when Latch mode is active.
