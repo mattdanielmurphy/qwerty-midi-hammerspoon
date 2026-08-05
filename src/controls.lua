@@ -797,25 +797,38 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpTopToggle" then
     state.arpTopEnabled = not state.arpTopEnabled
+    if state.arpTopEnabled and state.arpImplicitlyDisabled then
+      state.arpImplicitlyDisabled = false
+      if not state.arpEnabled then
+        arpeggiator.setArpPowerImplicit(true)
+      end
+    end
+
     if not state.arpTopEnabled then
-      if not state.arpLinked then
-        arpeggiator.clearRowEngine(true)
+      if state.arpEnabled and not state.arpBottomEnabled then
+        state.arpImplicitlyDisabled = true
+        arpeggiator.setArpPowerImplicit(false)
       else
-        local toRemove = {}
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and noteKey.isTop then
-            table.insert(toRemove, code)
+        if not state.arpLinked then
+          arpeggiator.clearRowEngine(true)
+        else
+          local toRemove = {}
+          for c in pairs(state.arpHeldNotes) do
+            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
+            local noteKey = rawCode and config.getNoteKey(rawCode)
+            if noteKey and noteKey.isTop then
+              table.insert(toRemove, c)
+            end
           end
-        end
-        for _, code in ipairs(toRemove) do
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-        local remaining = 0
-        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-        if remaining == 0 then
-          arpeggiator.stopArpTimer()
+          for _, c in ipairs(toRemove) do
+            state.arpHeldNotes[c] = nil
+            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
+          end
+          local remaining = 0
+          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+          if remaining == 0 then
+            arpeggiator.stopArpTimer()
+          end
         end
       end
     end
@@ -829,25 +842,38 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpBottomToggle" then
     state.arpBottomEnabled = not state.arpBottomEnabled
+    if state.arpBottomEnabled and state.arpImplicitlyDisabled then
+      state.arpImplicitlyDisabled = false
+      if not state.arpEnabled then
+        arpeggiator.setArpPowerImplicit(true)
+      end
+    end
+
     if not state.arpBottomEnabled then
-      if not state.arpLinked then
-        arpeggiator.clearRowEngine(false)
+      if state.arpEnabled and not state.arpTopEnabled then
+        state.arpImplicitlyDisabled = true
+        arpeggiator.setArpPowerImplicit(false)
       else
-        local toRemove = {}
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and not noteKey.isTop then
-            table.insert(toRemove, code)
+        if not state.arpLinked then
+          arpeggiator.clearRowEngine(false)
+        else
+          local toRemove = {}
+          for c in pairs(state.arpHeldNotes) do
+            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
+            local noteKey = rawCode and config.getNoteKey(rawCode)
+            if noteKey and (not noteKey.isTop) then
+              table.insert(toRemove, c)
+            end
           end
-        end
-        for _, code in ipairs(toRemove) do
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-        local remaining = 0
-        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-        if remaining == 0 then
-          arpeggiator.stopArpTimer()
+          for _, c in ipairs(toRemove) do
+            state.arpHeldNotes[c] = nil
+            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
+          end
+          local remaining = 0
+          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+          if remaining == 0 then
+            arpeggiator.stopArpTimer()
+          end
         end
       end
     end

@@ -186,12 +186,30 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   -- Pre-compute set of all pitches in the arp pool (values of arpHeldNotes)
   -- and the currently active arp pitch, for per-key dot indicators.
   local arpHeldPitches = {}
-  local currentArpPitch = activeArpPitch or (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch)
-  if state.arpEnabled then
-    for _, pitch in pairs(state.arpHeldNotes) do
-      if type(pitch) == "number" then
-        arpHeldPitches[pitch] = true
+  local currentArpPitches = {}
+  
+  if state.arpLinked then
+    if state.arpEnabled then
+      for _, pitch in pairs(state.arpHeldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      if p then currentArpPitches[p] = true end
+    end
+  else
+    if state.arpEnabled and state.arpTopEnabled then
+      for _, pitch in pairs(state.arpEngineTop.heldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
+      if p then currentArpPitches[p] = true end
+    end
+    if state.arpEnabled and state.arpBottomEnabled then
+      for _, pitch in pairs(state.arpEngineBottom.heldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
+      if p then currentArpPitches[p] = true end
     end
   end
 
@@ -210,23 +228,32 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and currentArpPitch and noteNum == currentArpPitch then
+    if state.arpEnabled and currentArpPitches[noteNum] then
       isPressed = true
     end
 
-    -- Latch check: arpHeldNotes may use compound keys like "45_60" (code_pitch) in chord mode.
-    -- We need to check if any entry in arpHeldNotes starts with our base keycode.
     local isLatched = false
     if state.arpEnabled and state.arpLatchActive then
       local codeStr = tostring(code)
-      for heldCode, _ in pairs(state.arpHeldNotes) do
-        local heldBase = tostring(heldCode):match("^(%d+)")
-        if heldBase == codeStr then
-          isLatched = true
-          break
+      if state.arpLinked then
+        for heldCode, _ in pairs(state.arpHeldNotes) do
+          if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+        end
+      else
+        if state.arpTopEnabled then
+          for heldCode, _ in pairs(state.arpEngineTop.heldNotes) do
+            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+          end
+        end
+        if not isLatched and state.arpBottomEnabled then
+          for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
+            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+          end
         end
       end
     end
+
+    local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
 
     keyUpdates[tostring(code)] = {
       note = noteName,
@@ -236,8 +263,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
-      arpHeld = state.arpEnabled and (arpHeldPitches[noteNum] == true),
-      arpPlaying = state.arpEnabled and (currentArpPitch ~= nil) and (noteNum == currentArpPitch),
+      arpHeld = arpActive and (arpHeldPitches[noteNum] == true),
+      arpPlaying = arpActive and (currentArpPitches[noteNum] == true),
       outOfBounds = (noteNum < 0 or noteNum > 127)
     }
   end
@@ -2022,7 +2049,10 @@ local function toggleArpPower()
   local valStr = "ARP: OFF"
   local subStr = "Arp Disabled"
   if state.arpEnabled then
-    if state.arpLatchActive then
+    if not state.arpTopEnabled and not state.arpBottomEnabled then
+      valStr = "ARP: ON (MUTED)"
+      subStr = "⚠️ Top & Bottom rows are both disabled"
+    elseif state.arpLatchActive then
       valStr = "ARP: LATCH"
       subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
     else
@@ -2312,6 +2342,26 @@ local function clearRowEngine(isTop)
   end
 end
 
+local function setArpPowerImplicit(enabled)
+  state.arpEnabled = enabled
+  if not enabled then
+    stopArpTimer()
+    if state.arpCurrentPitch then
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      state.arpCurrentPitch = nil
+    end
+    stopEngineState(state.arpEngineTop)
+    stopEngineState(state.arpEngineBottom)
+  else
+    if countTableKeys(state.arpHeldNotes) > 0 or countTableKeys(state.arpEngineTop.heldNotes) > 0 or countTableKeys(state.arpEngineBottom.heldNotes) > 0 then
+      if not state.arpTimer then startArpTimer() end
+    end
+  end
+  updateHud()
+end
+
 local function toggleArpLink()
   state.arpLinked = not state.arpLinked
   if state.arpLinked then
@@ -2410,7 +2460,8 @@ return {
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,
   toggleArpLink = toggleArpLink,
-  clearRowEngine = clearRowEngine
+  clearRowEngine = clearRowEngine,
+  setArpPowerImplicit = setArpPowerImplicit
 }
 
 
@@ -8582,25 +8633,38 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpTopToggle" then
     state.arpTopEnabled = not state.arpTopEnabled
+    if state.arpTopEnabled and state.arpImplicitlyDisabled then
+      state.arpImplicitlyDisabled = false
+      if not state.arpEnabled then
+        arpeggiator.setArpPowerImplicit(true)
+      end
+    end
+
     if not state.arpTopEnabled then
-      if not state.arpLinked then
-        arpeggiator.clearRowEngine(true)
+      if state.arpEnabled and not state.arpBottomEnabled then
+        state.arpImplicitlyDisabled = true
+        arpeggiator.setArpPowerImplicit(false)
       else
-        local toRemove = {}
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and noteKey.isTop then
-            table.insert(toRemove, code)
+        if not state.arpLinked then
+          arpeggiator.clearRowEngine(true)
+        else
+          local toRemove = {}
+          for c in pairs(state.arpHeldNotes) do
+            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
+            local noteKey = rawCode and config.getNoteKey(rawCode)
+            if noteKey and noteKey.isTop then
+              table.insert(toRemove, c)
+            end
           end
-        end
-        for _, code in ipairs(toRemove) do
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-        local remaining = 0
-        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-        if remaining == 0 then
-          arpeggiator.stopArpTimer()
+          for _, c in ipairs(toRemove) do
+            state.arpHeldNotes[c] = nil
+            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
+          end
+          local remaining = 0
+          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+          if remaining == 0 then
+            arpeggiator.stopArpTimer()
+          end
         end
       end
     end
@@ -8614,25 +8678,38 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpBottomToggle" then
     state.arpBottomEnabled = not state.arpBottomEnabled
+    if state.arpBottomEnabled and state.arpImplicitlyDisabled then
+      state.arpImplicitlyDisabled = false
+      if not state.arpEnabled then
+        arpeggiator.setArpPowerImplicit(true)
+      end
+    end
+
     if not state.arpBottomEnabled then
-      if not state.arpLinked then
-        arpeggiator.clearRowEngine(false)
+      if state.arpEnabled and not state.arpTopEnabled then
+        state.arpImplicitlyDisabled = true
+        arpeggiator.setArpPowerImplicit(false)
       else
-        local toRemove = {}
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and not noteKey.isTop then
-            table.insert(toRemove, code)
+        if not state.arpLinked then
+          arpeggiator.clearRowEngine(false)
+        else
+          local toRemove = {}
+          for c in pairs(state.arpHeldNotes) do
+            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
+            local noteKey = rawCode and config.getNoteKey(rawCode)
+            if noteKey and (not noteKey.isTop) then
+              table.insert(toRemove, c)
+            end
           end
-        end
-        for _, code in ipairs(toRemove) do
-          state.arpHeldNotes[code] = nil
-          state.arpKeysCurrentlyHeld[code] = nil
-        end
-        local remaining = 0
-        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-        if remaining == 0 then
-          arpeggiator.stopArpTimer()
+          for _, c in ipairs(toRemove) do
+            state.arpHeldNotes[c] = nil
+            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
+          end
+          local remaining = 0
+          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+          if remaining == 0 then
+            arpeggiator.stopArpTimer()
+          end
         end
       end
     end

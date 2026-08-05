@@ -814,7 +814,10 @@ local function toggleArpPower()
   local valStr = "ARP: OFF"
   local subStr = "Arp Disabled"
   if state.arpEnabled then
-    if state.arpLatchActive then
+    if not state.arpTopEnabled and not state.arpBottomEnabled then
+      valStr = "ARP: ON (MUTED)"
+      subStr = "⚠️ Top & Bottom rows are both disabled"
+    elseif state.arpLatchActive then
       valStr = "ARP: LATCH"
       subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
     else
@@ -1104,6 +1107,26 @@ local function clearRowEngine(isTop)
   end
 end
 
+local function setArpPowerImplicit(enabled)
+  state.arpEnabled = enabled
+  if not enabled then
+    stopArpTimer()
+    if state.arpCurrentPitch then
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      state.arpCurrentPitch = nil
+    end
+    stopEngineState(state.arpEngineTop)
+    stopEngineState(state.arpEngineBottom)
+  else
+    if countTableKeys(state.arpHeldNotes) > 0 or countTableKeys(state.arpEngineTop.heldNotes) > 0 or countTableKeys(state.arpEngineBottom.heldNotes) > 0 then
+      if not state.arpTimer then startArpTimer() end
+    end
+  end
+  updateHud()
+end
+
 local function toggleArpLink()
   state.arpLinked = not state.arpLinked
   if state.arpLinked then
@@ -1202,6 +1225,7 @@ return {
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,
   toggleArpLink = toggleArpLink,
-  clearRowEngine = clearRowEngine
+  clearRowEngine = clearRowEngine,
+  setArpPowerImplicit = setArpPowerImplicit
 }
 

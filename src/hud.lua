@@ -169,12 +169,30 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   -- Pre-compute set of all pitches in the arp pool (values of arpHeldNotes)
   -- and the currently active arp pitch, for per-key dot indicators.
   local arpHeldPitches = {}
-  local currentArpPitch = activeArpPitch or (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch)
-  if state.arpEnabled then
-    for _, pitch in pairs(state.arpHeldNotes) do
-      if type(pitch) == "number" then
-        arpHeldPitches[pitch] = true
+  local currentArpPitches = {}
+  
+  if state.arpLinked then
+    if state.arpEnabled then
+      for _, pitch in pairs(state.arpHeldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      if p then currentArpPitches[p] = true end
+    end
+  else
+    if state.arpEnabled and state.arpTopEnabled then
+      for _, pitch in pairs(state.arpEngineTop.heldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
+      if p then currentArpPitches[p] = true end
+    end
+    if state.arpEnabled and state.arpBottomEnabled then
+      for _, pitch in pairs(state.arpEngineBottom.heldNotes) do
+        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
+      end
+      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
+      if p then currentArpPitches[p] = true end
     end
   end
 
@@ -193,23 +211,32 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and currentArpPitch and noteNum == currentArpPitch then
+    if state.arpEnabled and currentArpPitches[noteNum] then
       isPressed = true
     end
 
-    -- Latch check: arpHeldNotes may use compound keys like "45_60" (code_pitch) in chord mode.
-    -- We need to check if any entry in arpHeldNotes starts with our base keycode.
     local isLatched = false
     if state.arpEnabled and state.arpLatchActive then
       local codeStr = tostring(code)
-      for heldCode, _ in pairs(state.arpHeldNotes) do
-        local heldBase = tostring(heldCode):match("^(%d+)")
-        if heldBase == codeStr then
-          isLatched = true
-          break
+      if state.arpLinked then
+        for heldCode, _ in pairs(state.arpHeldNotes) do
+          if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+        end
+      else
+        if state.arpTopEnabled then
+          for heldCode, _ in pairs(state.arpEngineTop.heldNotes) do
+            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+          end
+        end
+        if not isLatched and state.arpBottomEnabled then
+          for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
+            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
+          end
         end
       end
     end
+
+    local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
 
     keyUpdates[tostring(code)] = {
       note = noteName,
@@ -219,8 +246,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       typeClass = typeClass,
       pressed = isPressed,
       latched = isLatched,
-      arpHeld = state.arpEnabled and (arpHeldPitches[noteNum] == true),
-      arpPlaying = state.arpEnabled and (currentArpPitch ~= nil) and (noteNum == currentArpPitch),
+      arpHeld = arpActive and (arpHeldPitches[noteNum] == true),
+      arpPlaying = arpActive and (currentArpPitches[noteNum] == true),
       outOfBounds = (noteNum < 0 or noteNum > 127)
     }
   end
