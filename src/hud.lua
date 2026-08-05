@@ -286,6 +286,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     logicSyncEnabled = state.logicSyncEnabled,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
+    arpLinked = state.arpLinked,
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,

@@ -89,6 +89,7 @@ local state = {
   lastArpMode = 1,
   arpTopEnabled = getSetting("arpTopEnabled", true),
   arpBottomEnabled = getSetting("arpBottomEnabled", true),
+  arpLinked = getSetting("arpLinked", true),
 
   -- BPM Input Mode & Sync State
   bpmInputMode = false,
@@ -174,6 +175,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
   hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
   hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
+  hs.settings.set("qwertyMidi_arpLinked", state.arpLinked == true)
   hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
   hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
   hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
@@ -215,8 +217,8 @@ local defaultNumberRowControls = {
   [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
   [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
   [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
-  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "modeDown",     shiftName = "Mode -" },
-  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "modeUp",       shiftName = "Mode +" },
+  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
+  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "botVolDown",   shiftName = "BotVol -" },
   [25] = { key = "9", name = "Rel -",    action = "relDown",        shiftAction = "relDown",      shiftName = "Rel -" },
   [29] = { key = "0", name = "Rel +",    action = "relUp",          shiftAction = "relUp",        shiftName = "Rel +" },
   [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
@@ -264,7 +266,8 @@ local ACTION_CATALOG = {
       { id = "arpRateUp", name = "Arp Rate +", typeClass = "ctrl-arprate", description = "Increase arpeggiator speed" },
       { id = "arpRateDown", name = "Arp Rate -", typeClass = "ctrl-arprate", description = "Decrease arpeggiator speed" },
       { id = "arpGateUp", name = "Arp Gate +", typeClass = "ctrl-arpgate", description = "Lengthen arpeggiator gate" },
-      { id = "arpGateDown", name = "Arp Gate -", typeClass = "ctrl-arpgate", description = "Shorten arpeggiator gate" }
+      { id = "arpGateDown", name = "Arp Gate -", typeClass = "ctrl-arpgate", description = "Shorten arpeggiator gate" },
+      { id = "arpLinkToggle", name = "Arp Link", typeClass = "ctrl-arplink", description = "Toggle linked/split arp mode" }
     }
   },
   {

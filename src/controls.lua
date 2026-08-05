@@ -65,6 +65,7 @@ local function captureStateSnapshot(label)
     arpBpm = state.arpBpm,
     arpTopEnabled = state.arpTopEnabled,
     arpBottomEnabled = state.arpBottomEnabled,
+    arpLinked = state.arpLinked,
     modWheel = state.ccStates[1] or 0,
     sustainActive = state.sustainActive,
     chordModeActive = state.chordModeActive
@@ -101,6 +102,7 @@ local function applyStateSnapshot(snap)
   state.arpBpm = snap.arpBpm
   state.arpTopEnabled = snap.arpTopEnabled
   state.arpBottomEnabled = snap.arpBottomEnabled
+  if snap.arpLinked ~= nil then state.arpLinked = snap.arpLinked end
   state.ccStates[1] = snap.modWheel
   
   if snap.sustainActive ~= nil then state.sustainActive = snap.sustainActive end
@@ -283,7 +285,7 @@ local function executeControlAction(act, code)
   if act == "modeDown" or act == "modeUp" or
      act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
      act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
-     act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
+     act == "arpLinkToggle" or act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
      act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
      act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
      act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
@@ -666,6 +668,8 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
     arpeggiator.toggleArpPower()
+  elseif act == "arpLinkToggle" then
+    arpeggiator.toggleArpLink()
   elseif act == "chordToggle" then
     state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
     state.chordWasActiveOnPress = state.chordModeActive
