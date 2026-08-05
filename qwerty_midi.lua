@@ -2296,6 +2296,22 @@ end
 
 initLogicSync()
 
+local function clearRowEngine(isTop)
+  local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+  stopEngineState(eng)
+  eng.heldNotes = {}
+  eng.targetHeldNotes = {}
+  eng.keysCurrentlyHeld = {}
+  eng.latchClearedForNewChord = false
+  local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
+  if countTableKeys(otherEng.heldNotes) == 0 then
+    if state.arpTimer then
+      state.arpTimer:stop()
+      state.arpTimer = nil
+    end
+  end
+end
+
 local function toggleArpLink()
   state.arpLinked = not state.arpLinked
   if state.arpLinked then
@@ -2393,7 +2409,8 @@ return {
   syncLogicBpm = syncLogicBpm,
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,
-  toggleArpLink = toggleArpLink
+  toggleArpLink = toggleArpLink,
+  clearRowEngine = clearRowEngine
 }
 
 
@@ -3891,8 +3908,8 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
-      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor">EDIT KEYS</button>
-      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library">Library 📖</button>
+      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor" style="display:none">EDIT KEYS</button>
+      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library" style="display:none">Library 📖</button>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>
@@ -8566,11 +8583,24 @@ local function executeControlAction(act, code)
   elseif act == "arpTopToggle" then
     state.arpTopEnabled = not state.arpTopEnabled
     if not state.arpTopEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and noteKey.isTop then
+      if not state.arpLinked then
+        arpeggiator.clearRowEngine(true)
+      else
+        local toRemove = {}
+        for code in pairs(state.arpHeldNotes) do
+          local noteKey = config.getNoteKey(code)
+          if noteKey and noteKey.isTop then
+            table.insert(toRemove, code)
+          end
+        end
+        for _, code in ipairs(toRemove) do
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
+        end
+        local remaining = 0
+        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+        if remaining == 0 then
+          arpeggiator.stopArpTimer()
         end
       end
     end
@@ -8585,11 +8615,24 @@ local function executeControlAction(act, code)
   elseif act == "arpBottomToggle" then
     state.arpBottomEnabled = not state.arpBottomEnabled
     if not state.arpBottomEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and not noteKey.isTop then
+      if not state.arpLinked then
+        arpeggiator.clearRowEngine(false)
+      else
+        local toRemove = {}
+        for code in pairs(state.arpHeldNotes) do
+          local noteKey = config.getNoteKey(code)
+          if noteKey and not noteKey.isTop then
+            table.insert(toRemove, code)
+          end
+        end
+        for _, code in ipairs(toRemove) do
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
+        end
+        local remaining = 0
+        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+        if remaining == 0 then
+          arpeggiator.stopArpTimer()
         end
       end
     end

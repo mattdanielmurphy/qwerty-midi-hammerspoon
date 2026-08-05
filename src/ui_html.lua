@@ -1386,8 +1386,8 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
-      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor">EDIT KEYS</button>
-      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library">Library 📖</button>
+      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor" style="display:none">EDIT KEYS</button>
+      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library" style="display:none">Library 📖</button>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>

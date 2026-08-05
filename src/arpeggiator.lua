@@ -1088,6 +1088,22 @@ end
 
 initLogicSync()
 
+local function clearRowEngine(isTop)
+  local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+  stopEngineState(eng)
+  eng.heldNotes = {}
+  eng.targetHeldNotes = {}
+  eng.keysCurrentlyHeld = {}
+  eng.latchClearedForNewChord = false
+  local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
+  if countTableKeys(otherEng.heldNotes) == 0 then
+    if state.arpTimer then
+      state.arpTimer:stop()
+      state.arpTimer = nil
+    end
+  end
+end
+
 local function toggleArpLink()
   state.arpLinked = not state.arpLinked
   if state.arpLinked then
@@ -1185,6 +1201,7 @@ return {
   syncLogicBpm = syncLogicBpm,
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,
-  toggleArpLink = toggleArpLink
+  toggleArpLink = toggleArpLink,
+  clearRowEngine = clearRowEngine
 }
 

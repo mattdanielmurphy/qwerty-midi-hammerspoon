@@ -798,11 +798,24 @@ local function executeControlAction(act, code)
   elseif act == "arpTopToggle" then
     state.arpTopEnabled = not state.arpTopEnabled
     if not state.arpTopEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and noteKey.isTop then
+      if not state.arpLinked then
+        arpeggiator.clearRowEngine(true)
+      else
+        local toRemove = {}
+        for code in pairs(state.arpHeldNotes) do
+          local noteKey = config.getNoteKey(code)
+          if noteKey and noteKey.isTop then
+            table.insert(toRemove, code)
+          end
+        end
+        for _, code in ipairs(toRemove) do
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
+        end
+        local remaining = 0
+        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+        if remaining == 0 then
+          arpeggiator.stopArpTimer()
         end
       end
     end
@@ -817,11 +830,24 @@ local function executeControlAction(act, code)
   elseif act == "arpBottomToggle" then
     state.arpBottomEnabled = not state.arpBottomEnabled
     if not state.arpBottomEnabled then
-      for code in pairs(state.arpHeldNotes) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey and not noteKey.isTop then
+      if not state.arpLinked then
+        arpeggiator.clearRowEngine(false)
+      else
+        local toRemove = {}
+        for code in pairs(state.arpHeldNotes) do
+          local noteKey = config.getNoteKey(code)
+          if noteKey and not noteKey.isTop then
+            table.insert(toRemove, code)
+          end
+        end
+        for _, code in ipairs(toRemove) do
           state.arpHeldNotes[code] = nil
           state.arpKeysCurrentlyHeld[code] = nil
+        end
+        local remaining = 0
+        for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
+        if remaining == 0 then
+          arpeggiator.stopArpTimer()
         end
       end
     end

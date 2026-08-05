@@ -1,5 +1,8 @@
 # Development Journal
 
+## 2026-08-04
+- **Dual Independent Arpeggiators:** Refactored single arpeggiator into dual-engine system (top/bottom row). Each row can run its own arp pattern independently while sharing settings (BPM, rate, gate, direction). Shift+7 toggles Linked/Split mode. Shift+8 remapped to Bottom Volume Down. Link: [2026-08-04_22-50_dual-independent-arpeggiators.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-08-04_22-50_dual-independent-arpeggiators.md)
+
 ## 2026-07-31
 - **Lightweight Key IPC & 30 FPS HUD Throttling:** Discovered timer queue and WebKit IPC saturation during rapid playing. Implemented 0.05ms `updateKeyState` IPC for instant key down/up feedback and 30 FPS coalescing for full HUD renders. Link: [2026-07-31_23-54_lightweight-key-ipc-30fps-throttling.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-31_23-54_lightweight-key-ipc-30fps-throttling.md)
 - **Fixed `halfBot` Undefined Variable Crash in `initGrid`:** Pinpointed exact line 2001 `TypeError` using `./tmp/qwerty_midi_debug.log`. Renamed `halfBot` to `halfBottom`, resolving broken grid UI and restoring 100% webview rendering. Link: [2026-07-31_23-52_fix-initgrid-halfbot-undefined-crash.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-07-31_23-52_fix-initgrid-halfbot-undefined-crash.md)
