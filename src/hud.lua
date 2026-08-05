@@ -173,10 +173,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   
   if state.arpLinked then
     if state.arpEnabled then
-      for _, pitch in pairs(state.arpHeldNotes) do
+      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
+      for _, pitch in pairs(held or {}) do
         if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
       if p then currentArpPitches[p] = true end
     end
   else
@@ -914,10 +915,11 @@ local function fastUpdateArp()
   
   if state.arpLinked then
     if state.arpEnabled then
-      for _, pitch in pairs(state.arpHeldNotes or {}) do
+      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
+      for _, pitch in pairs(held or {}) do
         if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
       if p then currentArpPitches[p] = true end
     end
   else

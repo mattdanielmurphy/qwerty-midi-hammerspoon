@@ -4,6 +4,11 @@ local HTML_UI_CONTENT = [[
 <head>
 <meta charset="utf-8">
 <style>
+  :root {
+    --action-bg-hsl: 35, 30%, 18%;
+    --action-bg-opacity: 0.85;
+    --action-border-opacity: 0.4;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
   input, textarea, [contenteditable] { user-select: auto; -webkit-user-select: auto; }
   html, body {
@@ -3609,18 +3614,25 @@ local HTML_UI_CONTENT = [[
   };
 
 window.updateArpPitches = function(activeCodes, heldCodes) {
-  document.querySelectorAll('.key-pad.arp-playing').forEach(el => el.classList.remove('arp-playing'));
-  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held', 'latched-key'));
+  document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
+    el.classList.remove('arp-playing');
+    if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
+  });
+  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
   if (Array.isArray(activeCodes)) {
     activeCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-playing');
+      if (el && !el.classList.contains('control-pad')) {
+        el.classList.add('arp-playing', 'pressed');
+      }
     });
   }
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-held', 'latched-key');
+      if (el && !el.classList.contains('control-pad')) {
+        el.classList.add('arp-held', 'latched-key');
+      }
     });
   }
 };
@@ -3628,7 +3640,9 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
 window.updateKeyState = function(code, pressed, latched) {
   const el = document.getElementById('key-' + code);
   if (el) {
-    el.classList.toggle('pressed', !!pressed);
+    if (pressed) el.dataset.physicallyPressed = 'true';
+    else delete el.dataset.physicallyPressed;
+    el.classList.toggle('pressed', !!pressed || (el.classList.contains('arp-playing')));
     el.classList.toggle('latched-key', !!latched);
   }
 };

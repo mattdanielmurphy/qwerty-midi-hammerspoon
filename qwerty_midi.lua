@@ -190,10 +190,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   
   if state.arpLinked then
     if state.arpEnabled then
-      for _, pitch in pairs(state.arpHeldNotes) do
+      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
+      for _, pitch in pairs(held or {}) do
         if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
       if p then currentArpPitches[p] = true end
     end
   else
@@ -931,10 +932,11 @@ local function fastUpdateArp()
   
   if state.arpLinked then
     if state.arpEnabled then
-      for _, pitch in pairs(state.arpHeldNotes or {}) do
+      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
+      for _, pitch in pairs(held or {}) do
         if type(pitch) == "number" then arpHeldPitches[pitch] = true end
       end
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
       if p then currentArpPitches[p] = true end
     end
   else
@@ -1624,7 +1626,7 @@ local function arpTick()
     p1 = arpTickEngine(state.arpEngineTop, true)
     p2 = arpTickEngine(state.arpEngineBottom, false)
   else
-    p1 = arpTickEngine(state.arpEngineLinked, false)
+    p1 = arpTickEngine(state.arpEngineTop, false)
   end
 
   if hudModule and hudModule.fastUpdateArp then
@@ -2485,6 +2487,11 @@ local HTML_UI_CONTENT = [[
 <head>
 <meta charset="utf-8">
 <style>
+  :root {
+    --action-bg-hsl: 35, 30%, 18%;
+    --action-bg-opacity: 0.85;
+    --action-border-opacity: 0.4;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
   input, textarea, [contenteditable] { user-select: auto; -webkit-user-select: auto; }
   html, body {
@@ -6090,18 +6097,25 @@ local HTML_UI_CONTENT = [[
   };
 
 window.updateArpPitches = function(activeCodes, heldCodes) {
-  document.querySelectorAll('.key-pad.arp-playing').forEach(el => el.classList.remove('arp-playing'));
-  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held', 'latched-key'));
+  document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
+    el.classList.remove('arp-playing');
+    if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
+  });
+  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
   if (Array.isArray(activeCodes)) {
     activeCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-playing');
+      if (el && !el.classList.contains('control-pad')) {
+        el.classList.add('arp-playing', 'pressed');
+      }
     });
   }
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-held', 'latched-key');
+      if (el && !el.classList.contains('control-pad')) {
+        el.classList.add('arp-held', 'latched-key');
+      }
     });
   }
 };
@@ -6109,7 +6123,9 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
 window.updateKeyState = function(code, pressed, latched) {
   const el = document.getElementById('key-' + code);
   if (el) {
-    el.classList.toggle('pressed', !!pressed);
+    if (pressed) el.dataset.physicallyPressed = 'true';
+    else delete el.dataset.physicallyPressed;
+    el.classList.toggle('pressed', !!pressed || (el.classList.contains('arp-playing')));
     el.classList.toggle('latched-key', !!latched);
   }
 };

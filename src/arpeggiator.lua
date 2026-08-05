@@ -267,7 +267,7 @@ local function arpTick()
     p1 = arpTickEngine(state.arpEngineTop, true)
     p2 = arpTickEngine(state.arpEngineBottom, false)
   else
-    p1 = arpTickEngine(state.arpEngineLinked, false)
+    p1 = arpTickEngine(state.arpEngineTop, false)
   end
 
   if hudModule and hudModule.fastUpdateArp then
