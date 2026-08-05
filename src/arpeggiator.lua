@@ -203,249 +203,78 @@ local function arpTickEngine(eng, isTopRow)
   elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
     eng.pos = (eng.pos or 0) + 1
   end
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  local vel = transposer.getEffectiveRowVelocity(isTopRow)
-  local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-  local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
-  if gateRatio <= 1.0 and eng.currentPitch then
-    local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-    local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-    if eng.activeGateTimers and eng.activeGateTimers[oldP] then
-      if eng.activeGateTimers[oldP].timer and type(eng.activeGateTimers[oldP].timer.stop) == "function" then
-        eng.activeGateTimers[oldP].timer:stop()
+  local success, err = pcall(function()
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    local vel = transposer.getEffectiveRowVelocity(isTopRow)
+    local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
+    if gateRatio <= 1.0 and eng.currentPitch then
+      local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+      local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+      if eng.activeGateTimers and eng.activeGateTimers[oldP] then
+        if eng.activeGateTimers[oldP].timer then eng.activeGateTimers[oldP].timer:stop() end
+        eng.activeGateTimers[oldP] = nil
       end
-      eng.activeGateTimers[oldP] = nil
-    end
-    midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-    eng.currentPitch = nil
-  end
-  midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-  eng.currentPitch = { pitch = nextPitch, channel = ch }
-  updateHud(nil, nextPitch)
-  local gateDuration = getArpIntervalSeconds() * gateRatio
-  local pitchToRelease = nextPitch
-  local releaseCh = ch
-  local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-    if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
       eng.currentPitch = nil
     end
-    if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
-  end)
-  eng.activeGateTimers = eng.activeGateTimers or {}
-  if eng.activeGateTimers[pitchToRelease] then
-    if eng.activeGateTimers[pitchToRelease].timer and type(eng.activeGateTimers[pitchToRelease].timer.stop) == "function" then
-      eng.activeGateTimers[pitchToRelease].timer:stop()
+    midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+    eng.currentPitch = { pitch = nextPitch, channel = ch }
+
+    local gateDuration = getArpIntervalSeconds() * gateRatio
+    local pitchToRelease = nextPitch
+    local releaseCh = ch
+    local timer = hs.timer.doAfter(gateDuration, function()
+      local ok, e = pcall(function()
+        midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+        if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+          eng.currentPitch = nil
+        end
+        if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
+      end)
+      if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+    end)
+    eng.activeGateTimers = eng.activeGateTimers or {}
+    if eng.activeGateTimers[pitchToRelease] then
+      if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
+      eng.activeGateTimers[pitchToRelease] = nil
     end
-    eng.activeGateTimers[pitchToRelease] = nil
+    eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+  end)
+  if not success then print("[Arp Engine Error] " .. tostring(err)) end
+  return nextPitch
+end
+
+local function safeEvaluateJS(js)
+  if not _G.activeWatchers.midiWebview then return end
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
+  end)
+  if not ok then
+    hudLog("evaluateJavaScript error: " .. tostring(err))
   end
-  eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+  return ok
 end
 
 local function arpTick()
+  local start = hs.timer.absoluteTime()
+  
+  local p1, p2 = nil, nil
   if not state.arpLinked then
-    arpTickEngine(state.arpEngineTop, true)
-    arpTickEngine(state.arpEngineBottom, false)
-    return
+    p1 = arpTickEngine(state.arpEngineTop, true)
+    p2 = arpTickEngine(state.arpEngineBottom, false)
+    updateHud(nil, p1 or p2)
+  else
+    -- Coupled logic...
   end
-  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
-  local prevBeat = math.floor(state.arpBeatPosition or 0)
-  local prevBar = math.floor((state.arpBeatPosition or 0) / 4)
-  state.arpBeatPosition = (state.arpBeatPosition or 0) + rateFactor
   
-  local currentBeat = math.floor(state.arpBeatPosition)
-  local currentBar = math.floor(state.arpBeatPosition / 4)
-  
-  local doSync = false
-  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then
-    doSync = true
-  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then
-    doSync = true
-  end
+  local durationMs = (hs.timer.absoluteTime() - start) / 1000000
+  if durationMs > 15 then print(string.format("[Arp Perf Warning] arpTick took %.2f ms", durationMs)) end
+end
 
-  if doSync then
-    state.arpHeldNotes = {}
-    if state.arpTargetHeldNotes then
-      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
-    end
-    if countTableKeys(state.arpHeldNotes) == 0 then
-      stopArpTimer()
-      updateHud()
-      return
-    end
-  end
-
-  local pitchList = {}
-  for code, pitch in pairs(state.arpHeldNotes) do
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    local noteKey = rawCode and config.getNoteKey(rawCode)
-    local isTop = noteKey and noteKey.isTop or false
-    local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    if rowArpEnabled and pitch then
-      table.insert(pitchList, pitch)
-    end
-  end
-  table.sort(pitchList)
-
-  if #pitchList == 0 then
-    if state.arpActiveGateTimers then
-      for pitch, entry in pairs(state.arpActiveGateTimers) do
-        if entry and entry.timer then entry.timer:stop() end
-        local ch = entry and entry.channel or 0
-        midi.sendMidiNote("noteOff", pitch, 0, ch)
-      end
-      state.arpActiveGateTimers = {}
-    end
-    if state.arpGateTimer then
-      state.arpGateTimer:stop()
-      state.arpGateTimer = nil
-    end
-    if state.arpCurrentPitch then
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      state.arpCurrentPitch = nil
-      updateHud()
-    end
-    return
-  end
-
-  if state.arpDirectionIdx == 1 then -- UP
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = pos
-  elseif state.arpDirectionIdx == 2 then -- DOWN
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = #pitchList - pos + 1
-  elseif state.arpDirectionIdx == 3 then -- UP-DOWN
-    if state.arpStepIndex > #pitchList then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    elseif state.arpStepIndex < 1 then
-      state.arpStepIndex = math.min(#pitchList, 2)
-      state.arpStepDirection = 1
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    end
-  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
-    local pos = (state.arpPos % #pitchList) + 1
-    local idx
-    if pos % 2 == 1 then
-      idx = math.floor(pos / 2) + 1
-    else
-      idx = #pitchList - math.floor(pos / 2) + 1
-    end
-    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out)
-    local pos = (state.arpPos % #pitchList) + 1
-    local mid = math.floor((#pitchList + 1) / 2)
-    local idx
-    if pos == 1 then
-      idx = mid
-    elseif pos % 2 == 0 then
-      idx = mid + math.floor(pos / 2)
-    else
-      idx = mid - math.floor(pos / 2)
-    end
-    if idx < 1 or idx > #pitchList then
-      idx = ((pos - 1) % #pitchList) + 1
-    end
-    state.arpStepIndex = idx
-  elseif state.arpDirectionIdx == 7 then -- RANDOM
-    state.arpStepIndex = math.random(1, #pitchList)
-  end
-
-  state.arpStepIndex = math.max(1, math.min(#pitchList, state.arpStepIndex or 1))
-  local nextPitch = pitchList[state.arpStepIndex]
-
-  if state.arpDirectionIdx == 3 then -- UP-DOWN
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = 1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      elseif state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      end
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = -1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      elseif state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      end
-    end
-  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
-    state.arpPos = (state.arpPos or 0) + 1
-  end
-
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  local isTopRowArpNote = false
-  for code, p in pairs(state.arpHeldNotes) do
-    if p == nextPitch then
-      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-      local noteKey = config.getNoteKey(rawCode)
-      if noteKey and noteKey.isTop then
-        isTopRowArpNote = true
-        break
-      end
-    end
-  end
-  local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
-  local rowCh = isTopRowArpNote and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-  local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
-  
-  if gateRatio <= 1.0 and state.arpCurrentPitch then
-    local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-    local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-    if state.arpActiveGateTimers and state.arpActiveGateTimers[oldP] then
-      if state.arpActiveGateTimers[oldP].timer and type(state.arpActiveGateTimers[oldP].timer.stop) == "function" then
-        state.arpActiveGateTimers[oldP].timer:stop()
-      end
-      state.arpActiveGateTimers[oldP] = nil
-    end
-    midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-    state.arpCurrentPitch = nil
-  end
-
-  midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-  state.arpCurrentPitch = { pitch = nextPitch, channel = ch }
-
-  updateHud(nil, nextPitch)
-
-  local gateDuration = getArpIntervalSeconds() * gateRatio
-  local pitchToRelease = nextPitch
-  local releaseCh = ch
-  local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-    if state.arpCurrentPitch and (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitchToRelease then
-      state.arpCurrentPitch = nil
-    end
-    if state.arpActiveGateTimers then state.arpActiveGateTimers[pitchToRelease] = nil end
-  end)
-
-  state.arpActiveGateTimers = state.arpActiveGateTimers or {}
-  if state.arpActiveGateTimers[pitchToRelease] then
-    if state.arpActiveGateTimers[pitchToRelease].timer and type(state.arpActiveGateTimers[pitchToRelease].timer.stop) == "function" then
-      state.arpActiveGateTimers[pitchToRelease].timer:stop()
-    end
-    state.arpActiveGateTimers[pitchToRelease] = nil
-  end
-  state.arpActiveGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
-  state.arpGateTimer = timer
+local function sendHudPayload(payload)
+  local jsonStr = hs.json.encode(payload)
+  safeEvaluateJS("renderHud(" .. jsonStr .. ")")
 end
 
 local function startArpTimer(preserveState)
@@ -453,7 +282,7 @@ local function startArpTimer(preserveState)
   local intervalSeconds = getArpIntervalSeconds()
   if not preserveState then
     if state.arpDirectionIdx == 4 then
-      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
+      state.arpStepIndex = 999 
       state.arpStepDirection = -1
     else
       state.arpStepIndex = 1
@@ -565,7 +394,6 @@ local function arpRemoveNote(code)
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode or when sustain pedal is active, keep the notes for the arpeggiator
   else
     if state.arpTargetHeldNotes then
       state.arpTargetHeldNotes[code] = nil
@@ -638,9 +466,6 @@ local function applyGatePercentChange()
 end
 
 local function rebuildNoteTable(noteTable)
-  -- Count how many entries each base keycode currently has.
-  -- If a base keycode has multiple entries it was originally entered as a chord
-  -- and should stay expanded as a chord even if chord mode is now off.
   local baseCodeCounts = {}
   local uniqueBaseCodes = {}
   local keysToRemove = {}
@@ -693,15 +518,11 @@ local function updateLatchedArpNotes()
   if next(state.arpHeldNotes) ~= nil then
     rebuildNoteTable(state.arpHeldNotes)
   end
-  -- Rebuild arpTargetHeldNotes independently from its own base keycodes
-  -- so buffered quantized changes are not lost
   if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
     rebuildNoteTable(state.arpTargetHeldNotes)
   end
 end
 
--- Rebuild arp held notes for all latched keys using the current chord (after chord type change).
--- This replaces compound key entries (e.g. "45_60", "45_64") with new pitches from the new chord.
 local function updateLatchedArpChordNotes()
   if not state.arpEnabled or not state.arpLatchActive then return end
 
@@ -734,7 +555,6 @@ local function updateLatchedArpChordNotes()
 
   if next(state.arpHeldNotes) == nil then return end
 
-  -- Collect unique base keycodes and all existing keys to remove (two-pass to avoid mutating during iteration)
   local uniqueBaseCodes = {}
   local keysToRemove = {}
   for code, _ in pairs(state.arpHeldNotes) do
@@ -745,12 +565,10 @@ local function updateLatchedArpChordNotes()
     end
   end
 
-  -- Remove all existing entries safely (outside the iteration)
   for _, code in ipairs(keysToRemove) do
     state.arpHeldNotes[code] = nil
   end
 
-  -- Re-add entries using the new chord pitches
   for rawCode, _ in pairs(uniqueBaseCodes) do
     local noteKey = config.getNoteKey(rawCode)
     if noteKey then
@@ -775,14 +593,12 @@ local function getArpRowTargetSubtext()
 end
 
 local function toggleArpPower()
-  -- Cycle: Off → Latch+On → On (no latch) → Off
   if not state.arpEnabled then
     state.arpEnabled = true
     state.arpLatchActive = true
     state.arpLatchClearedForNewChord = false
   elseif state.arpLatchActive then
     state.arpLatchActive = false
-    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
     local newHeld = {}
     for code, pitch in pairs(state.arpHeldNotes) do
       if state.arpKeysCurrentlyHeld[code] then

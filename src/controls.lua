@@ -833,7 +833,7 @@ local function executeControlAction(act, code)
       end
     end
     local spot = {
-      title = "TOP ROW ARP",
+      title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
       value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-top-toggle",
@@ -878,7 +878,7 @@ local function executeControlAction(act, code)
       end
     end
     local spot = {
-      title = "BOTTOM ROW ARP",
+      title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
       value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-bottom-toggle",

@@ -81,6 +81,9 @@ local HTML_UI_CONTENT = [[
     color: #b5aba0;
     text-transform: uppercase;
     margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .spotlight-val {
@@ -245,6 +248,17 @@ local HTML_UI_CONTENT = [[
   .badge-small option {
     background: #181614;
     color: #d4a359;
+  }
+
+  #layout-select {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    text-align-last: left;
+    padding-left: 6px;
+    padding-right: 6px;
   }
 
   .badge option {
@@ -698,6 +712,26 @@ local HTML_UI_CONTENT = [[
   .key-pad.sustain-active .key-note {
     color: #d4a359;
     font-weight: 600;
+  }
+
+  .key-pad.latch-active {
+    background: rgba(212, 163, 89, 0.28) !important;
+    border-color: #d4a359 !important;
+    box-shadow: 0 0 8px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2) !important;
+  }
+  .key-pad.latch-active .key-note {
+    color: #ffd885 !important;
+    font-weight: 700 !important;
+  }
+
+  .key-pad.latch-mode-active {
+    background: rgba(0, 229, 255, 0.22) !important;
+    border-color: #00e5ff !important;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.5), inset 0 0 8px rgba(0, 229, 255, 0.25) !important;
+  }
+  .key-pad.latch-mode-active .key-note {
+    color: #00e5ff !important;
+    font-weight: 700 !important;
   }
 
   .key-pad {
@@ -1345,7 +1379,6 @@ local HTML_UI_CONTENT = [[
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <button id="arp-power-btn" class="arp-btn">ARP: OFF</button>
       <select id="arp-dir-select" class="badge-small" title="Arp Direction">
         <option value="1">UP</option>
         <option value="2">DOWN</option>
@@ -1386,8 +1419,7 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
-      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor" style="display:none">EDIT KEYS</button>
-      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library" style="display:none">Library 📖</button>
+      <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>
@@ -1425,71 +1457,7 @@ local HTML_UI_CONTENT = [[
       </div>
     </div>
 
-    <!-- Slide-Out Action Library Drawer for Layout Editor -->
-    <div id="action-library-drawer" class="drawer-panel">
-      <div id="drawer-header" class="drawer-header">
-        <div class="drawer-title">
-          <span>ACTION LIBRARY</span>
-          <span class="drawer-subtitle">Drag action to key slot or swap keys</span>
-        </div>
-        <div class="drawer-header-actions">
-          <!-- shift mode toggle removed -->
-          <button id="undo-layout-btn" class="drawer-icon-btn disabled" title="Undo (Cmd+Z)">&#x21A9;</button>
-          <button id="redo-layout-btn" class="drawer-icon-btn disabled" title="Redo (Cmd+Shift+Z)">&#x21AA;</button>
-          <button id="close-drawer-btn" class="drawer-close-btn" title="Close Drawer">&times;</button>
-        </div>
-      </div>
 
-      <!-- Layout Presets Toolbar -->
-      <div id="preset-bar-container" class="preset-bar">
-        <div class="preset-label-row">
-          <span class="preset-bar-title">LAYOUT PRESET</span>
-          <span id="preset-modified-badge" class="preset-modified-badge hidden">• Modified</span>
-        </div>
-        <div class="preset-controls-row">
-          <select id="preset-select" class="preset-dropdown" title="Select Layout Preset"></select>
-          <button id="preset-save-as-btn" class="drawer-icon-btn" title="Save As New Preset" style="font-size:9px;padding:1px 4px;">+ Save</button>
-          <button id="preset-rename-btn" class="drawer-icon-btn" title="Rename Preset">✏️</button>
-          <button id="preset-duplicate-btn" class="drawer-icon-btn" title="Duplicate Preset">📋</button>
-          <button id="preset-delete-btn" class="drawer-icon-btn" title="Delete Preset">🗑️</button>
-        </div>
-      </div>
-
-      <input type="text" id="drawer-search-input" class="drawer-search-input" placeholder="Search actions..." />
-      <div id="drawer-categories-container" class="drawer-content"></div>
-      <div class="drawer-footer">
-        <button id="save-layout-btn" class="drawer-action-btn primary disabled">Save</button>
-        <button id="reset-layout-btn" class="drawer-action-btn warning">Reset</button>
-        <button id="cancel-layout-btn" class="drawer-action-btn secondary">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Selection Marquee Box -->
-  <div id="selection-marquee"></div>
-
-  <!-- Right-Click Context Menu for Selected Keys -->
-  <div id="key-context-menu">
-    <div class="ctx-item" data-action="revert-note">
-      <span class="ctx-icon">🎵</span> Revert to Note (Clear Action)
-    </div>
-    <div class="ctx-separator"></div>
-    <div class="ctx-item danger" data-action="deselect-all">
-      <span class="ctx-icon">✕</span> Deselect All
-    </div>
-  </div>
-
-  <!-- Preset Modal Dialog Overlay -->
-  <div id="preset-modal-overlay" class="preset-modal-overlay hidden">
-    <div class="preset-modal-card">
-      <div id="preset-modal-title" class="preset-modal-title">Save Preset As</div>
-      <input type="text" id="preset-modal-input" class="preset-modal-input" placeholder="Preset name..." />
-      <div class="preset-modal-actions">
-        <button id="preset-modal-cancel" class="drawer-action-btn secondary">Cancel</button>
-        <button id="preset-modal-confirm" class="drawer-action-btn primary">Save</button>
-      </div>
-    </div>
-  </div>
 
 <script>
   // Anti-Suspension Web Audio Sentinel: Keeps WebKit ProcessThrottler active as Foreground Media
@@ -2436,33 +2404,33 @@ local HTML_UI_CONTENT = [[
     activePresetsList = presets || [];
     currentActivePresetId = activeId || 'default';
 
-    const select = document.getElementById('preset-select');
+    const select = document.getElementById('layout-select');
     if (!select) return;
 
     select.textContent = '';
     activePresetsList.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
-      opt.textContent = p.name + (p.isBuiltin ? ' (Default)' : '');
+      opt.textContent = p.name;
       if (p.id === currentActivePresetId) opt.selected = true;
       select.appendChild(opt);
     });
-
-    const activePreset = activePresetsList.find(p => p.id === currentActivePresetId);
-    const isBuiltin = activePreset ? activePreset.isBuiltin : (currentActivePresetId === 'default');
-
-    const renameBtn = document.getElementById('preset-rename-btn');
-    const deleteBtn = document.getElementById('preset-delete-btn');
-
-    if (renameBtn) {
-      renameBtn.disabled = isBuiltin;
-      renameBtn.classList.toggle('disabled', isBuiltin);
-    }
-    if (deleteBtn) {
-      deleteBtn.disabled = isBuiltin;
-      deleteBtn.classList.toggle('disabled', isBuiltin);
-    }
   }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const layoutSelectEl = document.getElementById('layout-select');
+    if (layoutSelectEl) {
+      layoutSelectEl.addEventListener('change', (e) => {
+        const selectedId = e.target.value;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
+          window.webkit.messageHandlers.midiController.postMessage({
+            type: 'selectPreset',
+            id: selectedId
+          });
+        }
+      });
+    }
+  });
 
   function openPresetModal(mode) {
     const overlay = document.getElementById('preset-modal-overlay');
@@ -3275,7 +3243,7 @@ local HTML_UI_CONTENT = [[
     if (spotlightTimer1) clearTimeout(spotlightTimer1);
     if (spotlightTimer2) clearTimeout(spotlightTimer2);
 
-    titleEl.textContent = spotlight.title || '';
+    titleEl.innerHTML = spotlight.title || '';
     // Accept both 'value' (Lua convention) and 'val' (JS convention)
     const valText = spotlight.value !== undefined ? spotlight.value : spotlight.val;
     valEl.textContent = valText !== undefined ? valText : '';

@@ -1,0 +1,62 @@
+[
+  {
+    "category": "Arpeggiator",
+    "actions": [
+      { "id": "arpToggle", "name": "Arp On/Off", "typeClass": "ctrl-arp", "description": "Toggle arpeggiator engine" },
+      { "id": "arpTopToggle", "name": "Top Arp", "typeClass": "ctrl-arptop", "description": "Toggle top row arpeggiator" },
+      { "id": "arpBottomToggle", "name": "Bot Arp", "typeClass": "ctrl-arpbot", "description": "Toggle bottom row arpeggiator" },
+      { "id": "arpDirUp", "name": "Arp Dir +", "typeClass": "ctrl-arpdir", "description": "Cycle arpeggiator direction up" },
+      { "id": "arpDirDown", "name": "Arp Dir -", "typeClass": "ctrl-arpdir", "description": "Cycle arpeggiator direction down" },
+      { "id": "arpRateUp", "name": "Arp Rate +", "typeClass": "ctrl-arprate", "description": "Increase arpeggiator speed" },
+      { "id": "arpRateDown", "name": "Arp Rate -", "typeClass": "ctrl-arprate", "description": "Decrease arpeggiator speed" },
+      { "id": "arpGateUp", "name": "Arp Gate +", "typeClass": "ctrl-arpgate", "description": "Lengthen arpeggiator gate" },
+      { "id": "arpGateDown", "name": "Arp Gate -", "typeClass": "ctrl-arpgate", "description": "Shorten arpeggiator gate" }
+    ]
+  },
+  {
+    "category": "Scale & Pitch",
+    "actions": [
+      { "id": "rootUp", "name": "Root +", "typeClass": "ctrl-root", "description": "Shift root note up" },
+      { "id": "rootDown", "name": "Root -", "typeClass": "ctrl-root", "description": "Shift root note down" },
+      { "id": "modeUp", "name": "Mode +", "typeClass": "ctrl-mode", "description": "Cycle scale/mode forward" },
+      { "id": "modeDown", "name": "Mode -", "typeClass": "ctrl-mode", "description": "Cycle scale/mode backward" },
+      { "id": "trnspUp", "name": "Trnsp +", "typeClass": "ctrl-trnsp", "description": "Transpose semitone up" },
+      { "id": "trnspDown", "name": "Trnsp -", "typeClass": "ctrl-trnsp", "description": "Transpose semitone down" },
+      { "id": "octaveUp", "name": "Main Oct +", "typeClass": "ctrl-oct", "description": "Shift main octave up" },
+      { "id": "octaveDown", "name": "Main Oct -", "typeClass": "ctrl-oct", "description": "Shift main octave down" },
+      { "id": "botOctUp", "name": "Bot Oct +", "typeClass": "ctrl-oct", "description": "Shift bottom octave up" },
+      { "id": "botOctDown", "name": "Bot Oct -", "typeClass": "ctrl-oct", "description": "Shift bottom octave down" },
+      { "id": "topOctUp", "name": "Top Oct +", "typeClass": "ctrl-topoct", "description": "Shift top row octave up" },
+      { "id": "topOctDown", "name": "Top Oct -", "typeClass": "ctrl-topoct", "description": "Shift top row octave down" },
+      { "id": "randomScale", "name": "Random Scale", "typeClass": "ctrl-rand", "description": "Pick random scale & root" }
+    ]
+  },
+  {
+    "category": "Volume & CC",
+    "actions": [
+      { "id": "sustain", "name": "Sustain", "typeClass": "latch-active", "description": "Sustain pedal CC64 toggle/hold" },
+      { "id": "volUp", "name": "Vol +", "typeClass": "ctrl-vol", "description": "Increase bottom row velocity" },
+      { "id": "volDown", "name": "Vol -", "typeClass": "ctrl-vol", "description": "Decrease bottom row velocity" },
+      { "id": "topVolUp", "name": "Top Vol +", "typeClass": "ctrl-vol", "description": "Increase top row velocity" },
+      { "id": "topVolDown", "name": "Top Vol -", "typeClass": "ctrl-vol", "description": "Decrease top row velocity" },
+      { "id": "modWheelUp", "name": "Mod +", "typeClass": "ctrl-modw", "description": "Increase modulation wheel CC1" },
+      { "id": "modWheelDown", "name": "Mod -", "typeClass": "ctrl-modw", "description": "Decrease modulation wheel CC1" },
+      { "id": "panic", "name": "Panic!", "typeClass": "ctrl-panic", "description": "Send all-notes-off MIDI panic" }
+    ]
+  },
+  {
+    "category": "Tempo & View",
+    "actions": [
+      { "id": "undoState", "name": "Undo", "typeClass": "ctrl-reset", "description": "Undo last controller state change (scale, pitch, octave, etc.)" },
+      { "id": "redoState", "name": "Redo", "typeClass": "ctrl-reset", "description": "Redo previous controller state change" },
+      { "id": "bpmUp", "name": "BPM +", "typeClass": "ctrl-bpm", "description": "Increase tempo" },
+      { "id": "bpmDown", "name": "BPM -", "typeClass": "ctrl-bpm", "description": "Decrease tempo" },
+      { "id": "relUp", "name": "Release +", "typeClass": "ctrl-rel", "description": "Increase release length" },
+      { "id": "relDown", "name": "Release -", "typeClass": "ctrl-rel", "description": "Decrease release length" },
+      { "id": "zoomIn", "name": "Zoom +", "typeClass": "ctrl-zoom", "description": "Zoom in HUD size" },
+      { "id": "zoomOut", "name": "Zoom -", "typeClass": "ctrl-zoom", "description": "Zoom out HUD size" },
+      { "id": "resetAll", "name": "Reset All", "typeClass": "ctrl-reset", "description": "Reset settings to defaults" },
+      { "id": "none", "name": "Unassigned", "typeClass": "", "description": "Unassign key" }
+    ]
+  }
+]

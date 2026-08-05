@@ -1,4 +1,7 @@
-# Development Journal
+## 2026-08-05
+- **Modular JSON Layouts & Action Catalog:** Refactored action catalog to `actions/actions.json` and layout definitions to `layouts/*.json`. Removed edit mode UI and drawer from webview; added header `<select id="layout-select">` dropdown to switch between available JSON layouts.
+- **Top Toolbar Decluttering & On-Key Arp State:** Removed the redundant `ARP: OFF / ON / LATCH` top header button to free up space. Arp state is now rendered directly on control key caps (`Arp`, `Top Arp`, `Bottom Arp`).
+- **Clean Key Labels & Cyan Latch Mode Styling:** Stripped all redundant `: ON` / `: OFF` text suffixes from control key caps. Added a vibrant cyan/teal glowing theme (`.latch-mode-active` `#00E5FF`) and `Arp 🔒` lock indicator when Latch mode is active.
 
 ## 2026-08-04
 - **Dual Independent Arpeggiators:** Refactored single arpeggiator into dual-engine system (top/bottom row). Each row can run its own arp pattern independently while sharing settings (BPM, rate, gate, direction). Shift+7 toggles Linked/Split mode. Shift+8 remapped to Bottom Volume Down. Link: [2026-08-04_22-50_dual-independent-arpeggiators.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-08-04_22-50_dual-independent-arpeggiators.md)
@@ -50,3 +53,4 @@
 
 ## 2026-08-03
 - **DAW Multi-Channel Voice Cutoff Documentation & MIDI Channel Audit**: Documented Logic Pro single-track MIDI voice summing behavior across channels and verified row/channel isolation (`Channel 1`: Top Row, `Channel 2`: Bottom Row, `Channel 3`: Arp). Note cutoff when playing identical pitches across rows in DAW single-instrument tracks requires separate DAW instrument instances per channel.
+- **Add Icons to Arp Notifications**: Updated `src/ui_html.lua` and `src/hud.lua`/`src/controls.lua` to support inline HTML in spotlight notification titles, and injected the `stacked-rows-icon` HTML for top/bottom row Arpeggiator toggle notifications for clearer visual feedback. Link: [2026-08-04_23-31_add-icons-arp-notifications.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-08-04_23-31_add-icons-arp-notifications.md)

@@ -1,0 +1,20 @@
+{
+  "id": "synth_lead",
+  "name": "Synth Lead (Single Row)",
+  "description": "Custom layout for solo lead performance.",
+  "upper_row": [
+    { "code": 12, "label": "Q", "baseNote": 60 },
+    { "code": 13, "label": "W", "baseNote": 62 },
+    { "code": 14, "label": "E", "baseNote": 64 },
+    { "code": 15, "label": "R", "baseNote": 65 },
+    { "code": 17, "label": "T", "baseNote": 67 },
+    { "code": 16, "label": "Y", "baseNote": 69 },
+    { "code": 32, "label": "U", "baseNote": 71 },
+    { "code": 34, "label": "I", "baseNote": 72 }
+  ],
+  "lower_row": [],
+  "home_row_controls": [
+    { "code": 48, "label": "Tab", "name": "Sustain", "action": "sustain" },
+    { "code": 0,  "label": "A",   "name": "Arp",     "action": "arpToggle" }
+  ]
+}

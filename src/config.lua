@@ -445,16 +445,58 @@ local function applyCustomLayout(customData)
   end
 end
 
-local function getPresetsMap()
-  local presets = hs.settings.get("qwertyMidi_layoutPresets")
-  if not presets or type(presets) ~= "table" or next(presets) == nil then
-    local legacyData = hs.settings.get("qwertyMidi_customKeyLayout") or {}
-    presets = {
-      ["default"] = { id = "default", name = "Default Layout", isBuiltin = true, data = legacyData }
-    }
-    hs.settings.set("qwertyMidi_layoutPresets", presets)
+local function getActionCatalog()
+  local path = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/actions/actions.json"
+  local f = io.open(path, "r")
+  if f then
+    local content = f:read("*a")
+    f:close()
+    local ok, res = pcall(function() return hs.json.decode(content) end)
+    if ok and res then return res end
   end
-  return presets
+  return {}
+end
+
+local function getAvailableLayouts()
+  local dir = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/layouts"
+  local list = {}
+  local ok, iter_fn, dir_obj = pcall(hs.fs.dir, dir)
+  if ok and iter_fn and dir_obj then
+    for file in iter_fn, dir_obj do
+      if file and file:match("%.json$") then
+        local fullPath = dir .. "/" .. file
+        local f = io.open(fullPath, "r")
+        if f then
+          local content = f:read("*a")
+          f:close()
+          local sok, res = pcall(function() return hs.json.decode(content) end)
+          if sok and res and res.id then
+            table.insert(list, {
+              id = res.id,
+              name = res.name or res.id,
+              description = res.description or "",
+              filename = file,
+              data = res
+            })
+          end
+        end
+      end
+    end
+  end
+  table.sort(list, function(a, b) return a.name < b.name end)
+  return list
+end
+
+local function getPresetsMap()
+  local layouts = getAvailableLayouts()
+  local map = {}
+  for _, l in ipairs(layouts) do
+    map[l.id] = l
+  end
+  if not map["default"] then
+    map["default"] = { id = "default", name = "Default Layout", data = {} }
+  end
+  return map
 end
 
 local function getActivePresetId()
@@ -462,21 +504,7 @@ local function getActivePresetId()
 end
 
 local function getPresetsList()
-  local map = getPresetsMap()
-  local list = {}
-  for id, p in pairs(map) do
-    table.insert(list, {
-      id = p.id or id,
-      name = p.name or "Untitled Preset",
-      isBuiltin = (p.isBuiltin == true or id == "default"),
-      data = p.data or {}
-    })
-  end
-  table.sort(list, function(a, b)
-    if a.isBuiltin ~= b.isBuiltin then return a.isBuiltin end
-    return a.name < b.name
-  end)
-  return list
+  return getAvailableLayouts()
 end
 
 local function getActivePresetData()
@@ -493,131 +521,38 @@ local function selectPreset(presetId)
   end
   hs.settings.set("qwertyMidi_activePresetId", presetId)
   local data = (map[presetId] and map[presetId].data) or {}
-  hs.settings.set("qwertyMidi_customKeyLayout", data)
   applyCustomLayout(data)
   saveSettings()
 end
 
 local function saveCustomLayout(newLayoutData)
-  local activeId = getActivePresetId()
-  local map = getPresetsMap()
-
-  if not map[activeId] then
-    activeId = "default"
-  end
-
-  local presetObj = map[activeId]
-  if presetObj and not (presetObj.isBuiltin or activeId == "default") then
-    presetObj.data = newLayoutData or {}
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
-  end
-
   applyCustomLayout(newLayoutData)
   saveSettings()
 end
 
 local function savePreset(presetId, name, layoutData)
-  local map = getPresetsMap()
-  if not presetId or presetId == "" or presetId == "new" then
-    presetId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
-  end
-
-  local isBuiltin = false
-  if map[presetId] then
-    isBuiltin = (map[presetId].isBuiltin == true or presetId == "default")
-  end
-
-  map[presetId] = {
-    id = presetId,
-    name = name or (map[presetId] and map[presetId].name) or "New Preset",
-    isBuiltin = isBuiltin,
-    data = layoutData or (map[presetId] and map[presetId].data) or {}
-  }
-
-  hs.settings.set("qwertyMidi_layoutPresets", map)
-  hs.settings.set("qwertyMidi_activePresetId", presetId)
-  selectPreset(presetId)
   return presetId
 end
 
 local function renamePreset(presetId, newName)
-  if not newName or newName:match("^%s*$") then return false end
-  local map = getPresetsMap()
-  if map[presetId] then
-    map[presetId].name = newName
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    saveSettings()
-    return true
-  end
   return false
 end
 
 local function deletePreset(presetId)
-  local map = getPresetsMap()
-  if map[presetId] and not map[presetId].isBuiltin and presetId ~= "default" then
-    map[presetId] = nil
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    if getActivePresetId() == presetId then
-      selectPreset("default")
-    else
-      saveSettings()
-    end
-    return true
-  end
   return false
 end
 
 local function duplicatePreset(presetId, newName)
-  local map = getPresetsMap()
-  local src = map[presetId] or map["default"]
-  if not src then return nil end
-
-  local newId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
-  local name = newName or (src.name .. " Copy")
-
-  local copyData = {}
-  if src.data then
-    for k, v in pairs(src.data) do
-      if type(v) == "table" then
-        local sub = {}
-        for sk, sv in pairs(v) do sub[sk] = sv end
-        copyData[k] = sub
-      else
-        copyData[k] = v
-      end
-    end
-  end
-
-  map[newId] = {
-    id = newId,
-    name = name,
-    isBuiltin = false,
-    data = copyData
-  }
-
-  hs.settings.set("qwertyMidi_layoutPresets", map)
-  hs.settings.set("qwertyMidi_activePresetId", newId)
-  selectPreset(newId)
-  return newId
+  return presetId
 end
 
 local function resetLayout()
-  local activeId = getActivePresetId()
-  local map = getPresetsMap()
-  if map[activeId] then
-    map[activeId].data = {}
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-  end
-  hs.settings.set("qwertyMidi_customKeyLayout", nil)
   applyCustomLayout(nil)
   saveSettings()
 end
 
 local function updateKeyMapping(code, newBinding)
-  local customData = getActivePresetData()
-  customData[tostring(code)] = newBinding
-  saveCustomLayout(customData)
+  -- Key mappings are managed via JSON layout files
 end
 
 local function getLayoutConfig()
@@ -626,8 +561,8 @@ local function getLayoutConfig()
   local activeData = getActivePresetData()
 
   return {
-    customized = (activeData ~= nil and next(activeData) ~= nil),
-    actionCatalog = ACTION_CATALOG,
+    customized = false,
+    actionCatalog = getActionCatalog(),
     presets = presetsList,
     activePresetId = activePresetId,
     defaults = {

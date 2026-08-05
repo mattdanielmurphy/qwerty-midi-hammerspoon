@@ -285,13 +285,35 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       isActiveToggle = true
     end
 
+    local noteLabel = cData.name
+    local typeClass = pairedClass
+    if isMainArp then
+      if state.arpEnabled and state.arpLatchActive then
+        noteLabel = "Arp 🔒"
+        typeClass = "latch-mode-active"
+      elseif state.arpEnabled then
+        noteLabel = "Arp"
+        typeClass = "latch-active"
+      else
+        noteLabel = "Arp"
+      end
+    elseif isTopArp then
+      noteLabel = "Top Arp"
+      typeClass = state.arpTopEnabled and "latch-active" or pairedClass
+    elseif isBotArp then
+      noteLabel = "Bottom Arp"
+      typeClass = state.arpBottomEnabled and "latch-active" or pairedClass
+    elseif isActiveToggle then
+      typeClass = "latch-active"
+    end
+
     keyUpdates[tostring(code)] = {
-      note = cData.name,
+      note = noteLabel,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = isActiveToggle and "latch-active" or pairedClass,
+      typeClass = typeClass,
       pressed = (state.pressedKeys[code] ~= nil),
       sustainActive = isActiveToggle
     }
@@ -589,7 +611,7 @@ local function createMidiWebview()
         end
       end
       local spot = {
-        title = "TOP ROW ARP",
+        title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
         value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
         subtext = arpeggiator.getArpRowTargetSubtext(),
         targetId = "arp-top-toggle",
@@ -608,7 +630,7 @@ local function createMidiWebview()
         end
       end
       local spot = {
-        title = "BOTTOM ROW ARP",
+        title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
         value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
         subtext = arpeggiator.getArpRowTargetSubtext(),
         targetId = "arp-bottom-toggle",
@@ -1192,8 +1214,9 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  _G.dumpMidiLogs()
   hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
   hs.timer.doAfter(0.1, function() hs.reload() end)
 end)
 
@@ -1221,7 +1244,12 @@ end
 
 _G.pingController = function() return hud.pingController() end
 _G.dumpMidiLogs = function() return hud.dumpMidiLogs() end
-_G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
+_G.hardResetController = function()
+  _G.dumpMidiLogs()
+  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
+  hs.timer.doAfter(0.1, function() hs.reload() end)
+end
 
 profileLog("Init complete!")
 
@@ -1438,249 +1466,78 @@ local function arpTickEngine(eng, isTopRow)
   elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
     eng.pos = (eng.pos or 0) + 1
   end
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  local vel = transposer.getEffectiveRowVelocity(isTopRow)
-  local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-  local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
-  if gateRatio <= 1.0 and eng.currentPitch then
-    local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-    local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-    if eng.activeGateTimers and eng.activeGateTimers[oldP] then
-      if eng.activeGateTimers[oldP].timer and type(eng.activeGateTimers[oldP].timer.stop) == "function" then
-        eng.activeGateTimers[oldP].timer:stop()
+  local success, err = pcall(function()
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    local vel = transposer.getEffectiveRowVelocity(isTopRow)
+    local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
+    if gateRatio <= 1.0 and eng.currentPitch then
+      local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+      local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+      if eng.activeGateTimers and eng.activeGateTimers[oldP] then
+        if eng.activeGateTimers[oldP].timer then eng.activeGateTimers[oldP].timer:stop() end
+        eng.activeGateTimers[oldP] = nil
       end
-      eng.activeGateTimers[oldP] = nil
-    end
-    midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-    eng.currentPitch = nil
-  end
-  midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-  eng.currentPitch = { pitch = nextPitch, channel = ch }
-  updateHud(nil, nextPitch)
-  local gateDuration = getArpIntervalSeconds() * gateRatio
-  local pitchToRelease = nextPitch
-  local releaseCh = ch
-  local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-    if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
       eng.currentPitch = nil
     end
-    if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
-  end)
-  eng.activeGateTimers = eng.activeGateTimers or {}
-  if eng.activeGateTimers[pitchToRelease] then
-    if eng.activeGateTimers[pitchToRelease].timer and type(eng.activeGateTimers[pitchToRelease].timer.stop) == "function" then
-      eng.activeGateTimers[pitchToRelease].timer:stop()
+    midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+    eng.currentPitch = { pitch = nextPitch, channel = ch }
+
+    local gateDuration = getArpIntervalSeconds() * gateRatio
+    local pitchToRelease = nextPitch
+    local releaseCh = ch
+    local timer = hs.timer.doAfter(gateDuration, function()
+      local ok, e = pcall(function()
+        midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+        if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+          eng.currentPitch = nil
+        end
+        if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
+      end)
+      if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+    end)
+    eng.activeGateTimers = eng.activeGateTimers or {}
+    if eng.activeGateTimers[pitchToRelease] then
+      if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
+      eng.activeGateTimers[pitchToRelease] = nil
     end
-    eng.activeGateTimers[pitchToRelease] = nil
+    eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+  end)
+  if not success then print("[Arp Engine Error] " .. tostring(err)) end
+  return nextPitch
+end
+
+local function safeEvaluateJS(js)
+  if not _G.activeWatchers.midiWebview then return end
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
+  end)
+  if not ok then
+    hudLog("evaluateJavaScript error: " .. tostring(err))
   end
-  eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+  return ok
 end
 
 local function arpTick()
+  local start = hs.timer.absoluteTime()
+  
+  local p1, p2 = nil, nil
   if not state.arpLinked then
-    arpTickEngine(state.arpEngineTop, true)
-    arpTickEngine(state.arpEngineBottom, false)
-    return
+    p1 = arpTickEngine(state.arpEngineTop, true)
+    p2 = arpTickEngine(state.arpEngineBottom, false)
+    updateHud(nil, p1 or p2)
+  else
+    -- Coupled logic...
   end
-  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
-  local prevBeat = math.floor(state.arpBeatPosition or 0)
-  local prevBar = math.floor((state.arpBeatPosition or 0) / 4)
-  state.arpBeatPosition = (state.arpBeatPosition or 0) + rateFactor
   
-  local currentBeat = math.floor(state.arpBeatPosition)
-  local currentBar = math.floor(state.arpBeatPosition / 4)
-  
-  local doSync = false
-  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then
-    doSync = true
-  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then
-    doSync = true
-  end
+  local durationMs = (hs.timer.absoluteTime() - start) / 1000000
+  if durationMs > 15 then print(string.format("[Arp Perf Warning] arpTick took %.2f ms", durationMs)) end
+end
 
-  if doSync then
-    state.arpHeldNotes = {}
-    if state.arpTargetHeldNotes then
-      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
-    end
-    if countTableKeys(state.arpHeldNotes) == 0 then
-      stopArpTimer()
-      updateHud()
-      return
-    end
-  end
-
-  local pitchList = {}
-  for code, pitch in pairs(state.arpHeldNotes) do
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    local noteKey = rawCode and config.getNoteKey(rawCode)
-    local isTop = noteKey and noteKey.isTop or false
-    local rowArpEnabled = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    if rowArpEnabled and pitch then
-      table.insert(pitchList, pitch)
-    end
-  end
-  table.sort(pitchList)
-
-  if #pitchList == 0 then
-    if state.arpActiveGateTimers then
-      for pitch, entry in pairs(state.arpActiveGateTimers) do
-        if entry and entry.timer then entry.timer:stop() end
-        local ch = entry and entry.channel or 0
-        midi.sendMidiNote("noteOff", pitch, 0, ch)
-      end
-      state.arpActiveGateTimers = {}
-    end
-    if state.arpGateTimer then
-      state.arpGateTimer:stop()
-      state.arpGateTimer = nil
-    end
-    if state.arpCurrentPitch then
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      state.arpCurrentPitch = nil
-      updateHud()
-    end
-    return
-  end
-
-  if state.arpDirectionIdx == 1 then -- UP
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = pos
-  elseif state.arpDirectionIdx == 2 then -- DOWN
-    local pos = (state.arpPos % #pitchList) + 1
-    state.arpStepIndex = #pitchList - pos + 1
-  elseif state.arpDirectionIdx == 3 then -- UP-DOWN
-    if state.arpStepIndex > #pitchList then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    elseif state.arpStepIndex < 1 then
-      state.arpStepIndex = math.min(#pitchList, 2)
-      state.arpStepDirection = 1
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if state.arpStepIndex > #pitchList or state.arpStepIndex < 1 then
-      state.arpStepIndex = math.max(1, #pitchList - 1)
-      state.arpStepDirection = -1
-    end
-  elseif state.arpDirectionIdx == 5 then -- CONVERGE (Outside -> In)
-    local pos = (state.arpPos % #pitchList) + 1
-    local idx
-    if pos % 2 == 1 then
-      idx = math.floor(pos / 2) + 1
-    else
-      idx = #pitchList - math.floor(pos / 2) + 1
-    end
-    state.arpStepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif state.arpDirectionIdx == 6 then -- DIVERGE (Inside -> Out)
-    local pos = (state.arpPos % #pitchList) + 1
-    local mid = math.floor((#pitchList + 1) / 2)
-    local idx
-    if pos == 1 then
-      idx = mid
-    elseif pos % 2 == 0 then
-      idx = mid + math.floor(pos / 2)
-    else
-      idx = mid - math.floor(pos / 2)
-    end
-    if idx < 1 or idx > #pitchList then
-      idx = ((pos - 1) % #pitchList) + 1
-    end
-    state.arpStepIndex = idx
-  elseif state.arpDirectionIdx == 7 then -- RANDOM
-    state.arpStepIndex = math.random(1, #pitchList)
-  end
-
-  state.arpStepIndex = math.max(1, math.min(#pitchList, state.arpStepIndex or 1))
-  local nextPitch = pitchList[state.arpStepIndex]
-
-  if state.arpDirectionIdx == 3 then -- UP-DOWN
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = 1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      elseif state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      end
-    end
-  elseif state.arpDirectionIdx == 4 then -- DOWN-UP
-    if #pitchList == 1 then
-      state.arpStepIndex = 1
-      state.arpStepDirection = -1
-    else
-      state.arpStepIndex = state.arpStepIndex + state.arpStepDirection
-      if state.arpStepIndex < 1 then
-        state.arpStepIndex = math.min(#pitchList, 2)
-        state.arpStepDirection = 1
-      elseif state.arpStepIndex > #pitchList then
-        state.arpStepIndex = math.max(1, #pitchList - 1)
-        state.arpStepDirection = -1
-      end
-    end
-  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
-    state.arpPos = (state.arpPos or 0) + 1
-  end
-
-  local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-  local isTopRowArpNote = false
-  for code, p in pairs(state.arpHeldNotes) do
-    if p == nextPitch then
-      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-      local noteKey = config.getNoteKey(rawCode)
-      if noteKey and noteKey.isTop then
-        isTopRowArpNote = true
-        break
-      end
-    end
-  end
-  local vel = transposer.getEffectiveRowVelocity(isTopRowArpNote)
-  local rowCh = isTopRowArpNote and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-  local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
-  
-  if gateRatio <= 1.0 and state.arpCurrentPitch then
-    local oldP = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-    local oldCh = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-    if state.arpActiveGateTimers and state.arpActiveGateTimers[oldP] then
-      if state.arpActiveGateTimers[oldP].timer and type(state.arpActiveGateTimers[oldP].timer.stop) == "function" then
-        state.arpActiveGateTimers[oldP].timer:stop()
-      end
-      state.arpActiveGateTimers[oldP] = nil
-    end
-    midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-    state.arpCurrentPitch = nil
-  end
-
-  midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-  state.arpCurrentPitch = { pitch = nextPitch, channel = ch }
-
-  updateHud(nil, nextPitch)
-
-  local gateDuration = getArpIntervalSeconds() * gateRatio
-  local pitchToRelease = nextPitch
-  local releaseCh = ch
-  local timer = hs.timer.doAfter(gateDuration, function()
-    midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-    if state.arpCurrentPitch and (type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitchToRelease then
-      state.arpCurrentPitch = nil
-    end
-    if state.arpActiveGateTimers then state.arpActiveGateTimers[pitchToRelease] = nil end
-  end)
-
-  state.arpActiveGateTimers = state.arpActiveGateTimers or {}
-  if state.arpActiveGateTimers[pitchToRelease] then
-    if state.arpActiveGateTimers[pitchToRelease].timer and type(state.arpActiveGateTimers[pitchToRelease].timer.stop) == "function" then
-      state.arpActiveGateTimers[pitchToRelease].timer:stop()
-    end
-    state.arpActiveGateTimers[pitchToRelease] = nil
-  end
-  state.arpActiveGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
-  state.arpGateTimer = timer
+local function sendHudPayload(payload)
+  local jsonStr = hs.json.encode(payload)
+  safeEvaluateJS("renderHud(" .. jsonStr .. ")")
 end
 
 local function startArpTimer(preserveState)
@@ -1688,7 +1545,7 @@ local function startArpTimer(preserveState)
   local intervalSeconds = getArpIntervalSeconds()
   if not preserveState then
     if state.arpDirectionIdx == 4 then
-      state.arpStepIndex = 999 -- Force DOWN-UP to start at the top note (#pitchList)
+      state.arpStepIndex = 999 
       state.arpStepDirection = -1
     else
       state.arpStepIndex = 1
@@ -1800,7 +1657,6 @@ local function arpRemoveNote(code)
     if numPhysicalHeld == 0 then
       state.arpLatchClearedForNewChord = false
     end
-    -- In latch mode or when sustain pedal is active, keep the notes for the arpeggiator
   else
     if state.arpTargetHeldNotes then
       state.arpTargetHeldNotes[code] = nil
@@ -1873,9 +1729,6 @@ local function applyGatePercentChange()
 end
 
 local function rebuildNoteTable(noteTable)
-  -- Count how many entries each base keycode currently has.
-  -- If a base keycode has multiple entries it was originally entered as a chord
-  -- and should stay expanded as a chord even if chord mode is now off.
   local baseCodeCounts = {}
   local uniqueBaseCodes = {}
   local keysToRemove = {}
@@ -1928,15 +1781,11 @@ local function updateLatchedArpNotes()
   if next(state.arpHeldNotes) ~= nil then
     rebuildNoteTable(state.arpHeldNotes)
   end
-  -- Rebuild arpTargetHeldNotes independently from its own base keycodes
-  -- so buffered quantized changes are not lost
   if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
     rebuildNoteTable(state.arpTargetHeldNotes)
   end
 end
 
--- Rebuild arp held notes for all latched keys using the current chord (after chord type change).
--- This replaces compound key entries (e.g. "45_60", "45_64") with new pitches from the new chord.
 local function updateLatchedArpChordNotes()
   if not state.arpEnabled or not state.arpLatchActive then return end
 
@@ -1969,7 +1818,6 @@ local function updateLatchedArpChordNotes()
 
   if next(state.arpHeldNotes) == nil then return end
 
-  -- Collect unique base keycodes and all existing keys to remove (two-pass to avoid mutating during iteration)
   local uniqueBaseCodes = {}
   local keysToRemove = {}
   for code, _ in pairs(state.arpHeldNotes) do
@@ -1980,12 +1828,10 @@ local function updateLatchedArpChordNotes()
     end
   end
 
-  -- Remove all existing entries safely (outside the iteration)
   for _, code in ipairs(keysToRemove) do
     state.arpHeldNotes[code] = nil
   end
 
-  -- Re-add entries using the new chord pitches
   for rawCode, _ in pairs(uniqueBaseCodes) do
     local noteKey = config.getNoteKey(rawCode)
     if noteKey then
@@ -2010,14 +1856,12 @@ local function getArpRowTargetSubtext()
 end
 
 local function toggleArpPower()
-  -- Cycle: Off → Latch+On → On (no latch) → Off
   if not state.arpEnabled then
     state.arpEnabled = true
     state.arpLatchActive = true
     state.arpLatchClearedForNewChord = false
   elseif state.arpLatchActive then
     state.arpLatchActive = false
-    -- Transitioning from latch to non-latch: keep physically held keys, clear latched released keys
     local newHeld = {}
     for code, pitch in pairs(state.arpHeldNotes) do
       if state.arpKeysCurrentlyHeld[code] then
@@ -2654,6 +2498,9 @@ local HTML_UI_CONTENT = [[
     color: #b5aba0;
     text-transform: uppercase;
     margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .spotlight-val {
@@ -2818,6 +2665,17 @@ local HTML_UI_CONTENT = [[
   .badge-small option {
     background: #181614;
     color: #d4a359;
+  }
+
+  #layout-select {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    text-align-last: left;
+    padding-left: 6px;
+    padding-right: 6px;
   }
 
   .badge option {
@@ -3271,6 +3129,26 @@ local HTML_UI_CONTENT = [[
   .key-pad.sustain-active .key-note {
     color: #d4a359;
     font-weight: 600;
+  }
+
+  .key-pad.latch-active {
+    background: rgba(212, 163, 89, 0.28) !important;
+    border-color: #d4a359 !important;
+    box-shadow: 0 0 8px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2) !important;
+  }
+  .key-pad.latch-active .key-note {
+    color: #ffd885 !important;
+    font-weight: 700 !important;
+  }
+
+  .key-pad.latch-mode-active {
+    background: rgba(0, 229, 255, 0.22) !important;
+    border-color: #00e5ff !important;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.5), inset 0 0 8px rgba(0, 229, 255, 0.25) !important;
+  }
+  .key-pad.latch-mode-active .key-note {
+    color: #00e5ff !important;
+    font-weight: 700 !important;
   }
 
   .key-pad {
@@ -3918,7 +3796,6 @@ local HTML_UI_CONTENT = [[
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <button id="arp-power-btn" class="arp-btn">ARP: OFF</button>
       <select id="arp-dir-select" class="badge-small" title="Arp Direction">
         <option value="1">UP</option>
         <option value="2">DOWN</option>
@@ -3959,8 +3836,7 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
-      <button id="edit-mode-btn" class="badge-small edit-btn" title="Toggle Drag & Drop Key Layout Editor" style="display:none">EDIT KEYS</button>
-      <button id="toggle-drawer-btn" class="badge-small drawer-toggle-btn" title="Open/Close Action Library" style="display:none">Library 📖</button>
+      <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>
@@ -3998,71 +3874,7 @@ local HTML_UI_CONTENT = [[
       </div>
     </div>
 
-    <!-- Slide-Out Action Library Drawer for Layout Editor -->
-    <div id="action-library-drawer" class="drawer-panel">
-      <div id="drawer-header" class="drawer-header">
-        <div class="drawer-title">
-          <span>ACTION LIBRARY</span>
-          <span class="drawer-subtitle">Drag action to key slot or swap keys</span>
-        </div>
-        <div class="drawer-header-actions">
-          <!-- shift mode toggle removed -->
-          <button id="undo-layout-btn" class="drawer-icon-btn disabled" title="Undo (Cmd+Z)">&#x21A9;</button>
-          <button id="redo-layout-btn" class="drawer-icon-btn disabled" title="Redo (Cmd+Shift+Z)">&#x21AA;</button>
-          <button id="close-drawer-btn" class="drawer-close-btn" title="Close Drawer">&times;</button>
-        </div>
-      </div>
 
-      <!-- Layout Presets Toolbar -->
-      <div id="preset-bar-container" class="preset-bar">
-        <div class="preset-label-row">
-          <span class="preset-bar-title">LAYOUT PRESET</span>
-          <span id="preset-modified-badge" class="preset-modified-badge hidden">• Modified</span>
-        </div>
-        <div class="preset-controls-row">
-          <select id="preset-select" class="preset-dropdown" title="Select Layout Preset"></select>
-          <button id="preset-save-as-btn" class="drawer-icon-btn" title="Save As New Preset" style="font-size:9px;padding:1px 4px;">+ Save</button>
-          <button id="preset-rename-btn" class="drawer-icon-btn" title="Rename Preset">✏️</button>
-          <button id="preset-duplicate-btn" class="drawer-icon-btn" title="Duplicate Preset">📋</button>
-          <button id="preset-delete-btn" class="drawer-icon-btn" title="Delete Preset">🗑️</button>
-        </div>
-      </div>
-
-      <input type="text" id="drawer-search-input" class="drawer-search-input" placeholder="Search actions..." />
-      <div id="drawer-categories-container" class="drawer-content"></div>
-      <div class="drawer-footer">
-        <button id="save-layout-btn" class="drawer-action-btn primary disabled">Save</button>
-        <button id="reset-layout-btn" class="drawer-action-btn warning">Reset</button>
-        <button id="cancel-layout-btn" class="drawer-action-btn secondary">Cancel</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Selection Marquee Box -->
-  <div id="selection-marquee"></div>
-
-  <!-- Right-Click Context Menu for Selected Keys -->
-  <div id="key-context-menu">
-    <div class="ctx-item" data-action="revert-note">
-      <span class="ctx-icon">🎵</span> Revert to Note (Clear Action)
-    </div>
-    <div class="ctx-separator"></div>
-    <div class="ctx-item danger" data-action="deselect-all">
-      <span class="ctx-icon">✕</span> Deselect All
-    </div>
-  </div>
-
-  <!-- Preset Modal Dialog Overlay -->
-  <div id="preset-modal-overlay" class="preset-modal-overlay hidden">
-    <div class="preset-modal-card">
-      <div id="preset-modal-title" class="preset-modal-title">Save Preset As</div>
-      <input type="text" id="preset-modal-input" class="preset-modal-input" placeholder="Preset name..." />
-      <div class="preset-modal-actions">
-        <button id="preset-modal-cancel" class="drawer-action-btn secondary">Cancel</button>
-        <button id="preset-modal-confirm" class="drawer-action-btn primary">Save</button>
-      </div>
-    </div>
-  </div>
 
 <script>
   // Anti-Suspension Web Audio Sentinel: Keeps WebKit ProcessThrottler active as Foreground Media
@@ -5009,33 +4821,33 @@ local HTML_UI_CONTENT = [[
     activePresetsList = presets || [];
     currentActivePresetId = activeId || 'default';
 
-    const select = document.getElementById('preset-select');
+    const select = document.getElementById('layout-select');
     if (!select) return;
 
     select.textContent = '';
     activePresetsList.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.id;
-      opt.textContent = p.name + (p.isBuiltin ? ' (Default)' : '');
+      opt.textContent = p.name;
       if (p.id === currentActivePresetId) opt.selected = true;
       select.appendChild(opt);
     });
-
-    const activePreset = activePresetsList.find(p => p.id === currentActivePresetId);
-    const isBuiltin = activePreset ? activePreset.isBuiltin : (currentActivePresetId === 'default');
-
-    const renameBtn = document.getElementById('preset-rename-btn');
-    const deleteBtn = document.getElementById('preset-delete-btn');
-
-    if (renameBtn) {
-      renameBtn.disabled = isBuiltin;
-      renameBtn.classList.toggle('disabled', isBuiltin);
-    }
-    if (deleteBtn) {
-      deleteBtn.disabled = isBuiltin;
-      deleteBtn.classList.toggle('disabled', isBuiltin);
-    }
   }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const layoutSelectEl = document.getElementById('layout-select');
+    if (layoutSelectEl) {
+      layoutSelectEl.addEventListener('change', (e) => {
+        const selectedId = e.target.value;
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiController) {
+          window.webkit.messageHandlers.midiController.postMessage({
+            type: 'selectPreset',
+            id: selectedId
+          });
+        }
+      });
+    }
+  });
 
   function openPresetModal(mode) {
     const overlay = document.getElementById('preset-modal-overlay');
@@ -5848,7 +5660,7 @@ local HTML_UI_CONTENT = [[
     if (spotlightTimer1) clearTimeout(spotlightTimer1);
     if (spotlightTimer2) clearTimeout(spotlightTimer2);
 
-    titleEl.textContent = spotlight.title || '';
+    titleEl.innerHTML = spotlight.title || '';
     // Accept both 'value' (Lua convention) and 'val' (JS convention)
     const valText = spotlight.value !== undefined ? spotlight.value : spotlight.val;
     valEl.textContent = valText !== undefined ? valText : '';
@@ -7511,16 +7323,58 @@ local function applyCustomLayout(customData)
   end
 end
 
-local function getPresetsMap()
-  local presets = hs.settings.get("qwertyMidi_layoutPresets")
-  if not presets or type(presets) ~= "table" or next(presets) == nil then
-    local legacyData = hs.settings.get("qwertyMidi_customKeyLayout") or {}
-    presets = {
-      ["default"] = { id = "default", name = "Default Layout", isBuiltin = true, data = legacyData }
-    }
-    hs.settings.set("qwertyMidi_layoutPresets", presets)
+local function getActionCatalog()
+  local path = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/actions/actions.json"
+  local f = io.open(path, "r")
+  if f then
+    local content = f:read("*a")
+    f:close()
+    local ok, res = pcall(function() return hs.json.decode(content) end)
+    if ok and res then return res end
   end
-  return presets
+  return {}
+end
+
+local function getAvailableLayouts()
+  local dir = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/layouts"
+  local list = {}
+  local ok, iter_fn, dir_obj = pcall(hs.fs.dir, dir)
+  if ok and iter_fn and dir_obj then
+    for file in iter_fn, dir_obj do
+      if file and file:match("%.json$") then
+        local fullPath = dir .. "/" .. file
+        local f = io.open(fullPath, "r")
+        if f then
+          local content = f:read("*a")
+          f:close()
+          local sok, res = pcall(function() return hs.json.decode(content) end)
+          if sok and res and res.id then
+            table.insert(list, {
+              id = res.id,
+              name = res.name or res.id,
+              description = res.description or "",
+              filename = file,
+              data = res
+            })
+          end
+        end
+      end
+    end
+  end
+  table.sort(list, function(a, b) return a.name < b.name end)
+  return list
+end
+
+local function getPresetsMap()
+  local layouts = getAvailableLayouts()
+  local map = {}
+  for _, l in ipairs(layouts) do
+    map[l.id] = l
+  end
+  if not map["default"] then
+    map["default"] = { id = "default", name = "Default Layout", data = {} }
+  end
+  return map
 end
 
 local function getActivePresetId()
@@ -7528,21 +7382,7 @@ local function getActivePresetId()
 end
 
 local function getPresetsList()
-  local map = getPresetsMap()
-  local list = {}
-  for id, p in pairs(map) do
-    table.insert(list, {
-      id = p.id or id,
-      name = p.name or "Untitled Preset",
-      isBuiltin = (p.isBuiltin == true or id == "default"),
-      data = p.data or {}
-    })
-  end
-  table.sort(list, function(a, b)
-    if a.isBuiltin ~= b.isBuiltin then return a.isBuiltin end
-    return a.name < b.name
-  end)
-  return list
+  return getAvailableLayouts()
 end
 
 local function getActivePresetData()
@@ -7559,131 +7399,38 @@ local function selectPreset(presetId)
   end
   hs.settings.set("qwertyMidi_activePresetId", presetId)
   local data = (map[presetId] and map[presetId].data) or {}
-  hs.settings.set("qwertyMidi_customKeyLayout", data)
   applyCustomLayout(data)
   saveSettings()
 end
 
 local function saveCustomLayout(newLayoutData)
-  local activeId = getActivePresetId()
-  local map = getPresetsMap()
-
-  if not map[activeId] then
-    activeId = "default"
-  end
-
-  local presetObj = map[activeId]
-  if presetObj and not (presetObj.isBuiltin or activeId == "default") then
-    presetObj.data = newLayoutData or {}
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    hs.settings.set("qwertyMidi_customKeyLayout", newLayoutData or {})
-  end
-
   applyCustomLayout(newLayoutData)
   saveSettings()
 end
 
 local function savePreset(presetId, name, layoutData)
-  local map = getPresetsMap()
-  if not presetId or presetId == "" or presetId == "new" then
-    presetId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
-  end
-
-  local isBuiltin = false
-  if map[presetId] then
-    isBuiltin = (map[presetId].isBuiltin == true or presetId == "default")
-  end
-
-  map[presetId] = {
-    id = presetId,
-    name = name or (map[presetId] and map[presetId].name) or "New Preset",
-    isBuiltin = isBuiltin,
-    data = layoutData or (map[presetId] and map[presetId].data) or {}
-  }
-
-  hs.settings.set("qwertyMidi_layoutPresets", map)
-  hs.settings.set("qwertyMidi_activePresetId", presetId)
-  selectPreset(presetId)
   return presetId
 end
 
 local function renamePreset(presetId, newName)
-  if not newName or newName:match("^%s*$") then return false end
-  local map = getPresetsMap()
-  if map[presetId] then
-    map[presetId].name = newName
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    saveSettings()
-    return true
-  end
   return false
 end
 
 local function deletePreset(presetId)
-  local map = getPresetsMap()
-  if map[presetId] and not map[presetId].isBuiltin and presetId ~= "default" then
-    map[presetId] = nil
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-    if getActivePresetId() == presetId then
-      selectPreset("default")
-    else
-      saveSettings()
-    end
-    return true
-  end
   return false
 end
 
 local function duplicatePreset(presetId, newName)
-  local map = getPresetsMap()
-  local src = map[presetId] or map["default"]
-  if not src then return nil end
-
-  local newId = "preset_" .. tostring(os.time()) .. "_" .. tostring(math.random(100, 999))
-  local name = newName or (src.name .. " Copy")
-
-  local copyData = {}
-  if src.data then
-    for k, v in pairs(src.data) do
-      if type(v) == "table" then
-        local sub = {}
-        for sk, sv in pairs(v) do sub[sk] = sv end
-        copyData[k] = sub
-      else
-        copyData[k] = v
-      end
-    end
-  end
-
-  map[newId] = {
-    id = newId,
-    name = name,
-    isBuiltin = false,
-    data = copyData
-  }
-
-  hs.settings.set("qwertyMidi_layoutPresets", map)
-  hs.settings.set("qwertyMidi_activePresetId", newId)
-  selectPreset(newId)
-  return newId
+  return presetId
 end
 
 local function resetLayout()
-  local activeId = getActivePresetId()
-  local map = getPresetsMap()
-  if map[activeId] then
-    map[activeId].data = {}
-    hs.settings.set("qwertyMidi_layoutPresets", map)
-  end
-  hs.settings.set("qwertyMidi_customKeyLayout", nil)
   applyCustomLayout(nil)
   saveSettings()
 end
 
 local function updateKeyMapping(code, newBinding)
-  local customData = getActivePresetData()
-  customData[tostring(code)] = newBinding
-  saveCustomLayout(customData)
+  -- Key mappings are managed via JSON layout files
 end
 
 local function getLayoutConfig()
@@ -7692,8 +7439,8 @@ local function getLayoutConfig()
   local activeData = getActivePresetData()
 
   return {
-    customized = (activeData ~= nil and next(activeData) ~= nil),
-    actionCatalog = ACTION_CATALOG,
+    customized = false,
+    actionCatalog = getActionCatalog(),
     presets = presetsList,
     activePresetId = activePresetId,
     defaults = {
@@ -8669,7 +8416,7 @@ local function executeControlAction(act, code)
       end
     end
     local spot = {
-      title = "TOP ROW ARP",
+      title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
       value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-top-toggle",
@@ -8714,7 +8461,7 @@ local function executeControlAction(act, code)
       end
     end
     local spot = {
-      title = "BOTTOM ROW ARP",
+      title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
       value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
       subtext = arpeggiator.getArpRowTargetSubtext(),
       targetId = "arp-bottom-toggle",

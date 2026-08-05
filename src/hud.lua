@@ -268,13 +268,35 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       isActiveToggle = true
     end
 
+    local noteLabel = cData.name
+    local typeClass = pairedClass
+    if isMainArp then
+      if state.arpEnabled and state.arpLatchActive then
+        noteLabel = "Arp 🔒"
+        typeClass = "latch-mode-active"
+      elseif state.arpEnabled then
+        noteLabel = "Arp"
+        typeClass = "latch-active"
+      else
+        noteLabel = "Arp"
+      end
+    elseif isTopArp then
+      noteLabel = "Top Arp"
+      typeClass = state.arpTopEnabled and "latch-active" or pairedClass
+    elseif isBotArp then
+      noteLabel = "Bottom Arp"
+      typeClass = state.arpBottomEnabled and "latch-active" or pairedClass
+    elseif isActiveToggle then
+      typeClass = "latch-active"
+    end
+
     keyUpdates[tostring(code)] = {
-      note = cData.name,
+      note = noteLabel,
       action = cData.action,
       shiftNote = cData.shiftName or cData.name,
       shiftAction = cData.shiftAction,
       isControl = true,
-      typeClass = isActiveToggle and "latch-active" or pairedClass,
+      typeClass = typeClass,
       pressed = (state.pressedKeys[code] ~= nil),
       sustainActive = isActiveToggle
     }
@@ -572,7 +594,7 @@ local function createMidiWebview()
         end
       end
       local spot = {
-        title = "TOP ROW ARP",
+        title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
         value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
         subtext = arpeggiator.getArpRowTargetSubtext(),
         targetId = "arp-top-toggle",
@@ -591,7 +613,7 @@ local function createMidiWebview()
         end
       end
       local spot = {
-        title = "BOTTOM ROW ARP",
+        title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
         value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
         subtext = arpeggiator.getArpRowTargetSubtext(),
         targetId = "arp-bottom-toggle",

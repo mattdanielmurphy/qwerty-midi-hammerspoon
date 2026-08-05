@@ -314,8 +314,9 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", funct
 end)
 
 _G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+  _G.dumpMidiLogs()
   hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Executing full Hammerspoon hard reload..." }):send()
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
   hs.timer.doAfter(0.1, function() hs.reload() end)
 end)
 
@@ -343,7 +344,12 @@ end
 
 _G.pingController = function() return hud.pingController() end
 _G.dumpMidiLogs = function() return hud.dumpMidiLogs() end
-_G.hardResetController = function() hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5); hs.reload() end
+_G.hardResetController = function()
+  _G.dumpMidiLogs()
+  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
+  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
+  hs.timer.doAfter(0.1, function() hs.reload() end)
+end
 
 profileLog("Init complete!")
 
