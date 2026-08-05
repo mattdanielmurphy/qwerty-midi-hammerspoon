@@ -1237,7 +1237,7 @@ local function handleKeyUp(code)
     local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
     
     local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
-    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "chordToggle" then
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
         local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
