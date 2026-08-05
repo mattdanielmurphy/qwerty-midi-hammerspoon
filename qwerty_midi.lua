@@ -1581,16 +1581,14 @@ local function applyGatePercentChange()
   end
 end
 
-local function updateLatchedArpNotes()
-  if not state.arpEnabled or next(state.arpHeldNotes) == nil then return end
-
+local function rebuildNoteTable(noteTable)
   -- Count how many entries each base keycode currently has.
   -- If a base keycode has multiple entries it was originally entered as a chord
   -- and should stay expanded as a chord even if chord mode is now off.
   local baseCodeCounts = {}
   local uniqueBaseCodes = {}
   local keysToRemove = {}
-  for code, _ in pairs(state.arpHeldNotes) do
+  for code, _ in pairs(noteTable) do
     local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
     if rawCode then
       baseCodeCounts[rawCode] = (baseCodeCounts[rawCode] or 0) + 1
@@ -1600,32 +1598,37 @@ local function updateLatchedArpNotes()
   end
 
   for _, code in ipairs(keysToRemove) do
-    state.arpHeldNotes[code] = nil
+    noteTable[code] = nil
   end
 
   for rawCode, _ in pairs(uniqueBaseCodes) do
     local noteKey = config.getNoteKey(rawCode)
     if noteKey then
-      -- Use chord expansion if chord mode is currently on OR if this keycode
-      -- was originally entered as a chord (multiple entries for the same base code)
       local wasChord = (baseCodeCounts[rawCode] or 1) > 1
       local isChord = state.quoteHeld or state.chordModeActive or wasChord
       if isChord then
         local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop, true)
         for _, p in ipairs(newPitches) do
-          state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
+          noteTable[tostring(rawCode) .. "_" .. tostring(p)] = p
         end
       else
         local newPitch = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
-        state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(newPitch)] = newPitch
+        noteTable[tostring(rawCode) .. "_" .. tostring(newPitch)] = newPitch
       end
     end
   end
-  if state.arpTargetHeldNotes then
-    state.arpTargetHeldNotes = {}
-    for k, v in pairs(state.arpHeldNotes) do
-      state.arpTargetHeldNotes[k] = v
-    end
+end
+
+local function updateLatchedArpNotes()
+  if not state.arpEnabled then return end
+
+  if next(state.arpHeldNotes) ~= nil then
+    rebuildNoteTable(state.arpHeldNotes)
+  end
+  -- Rebuild arpTargetHeldNotes independently from its own base keycodes
+  -- so buffered quantized changes are not lost
+  if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
+    rebuildNoteTable(state.arpTargetHeldNotes)
   end
 end
 
