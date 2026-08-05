@@ -80,6 +80,11 @@ end
 local function applyStateSnapshot(snap)
   isRestoringControllerState = true
 
+  -- Capture current values before overwriting so we can skip no-op arp restarts
+  local prevBpm = state.arpBpm
+  local prevRateIdx = state.arpRateIdx
+  local prevGatePercent = state.arpGatePercent
+
   state.currentRoot = snap.currentRoot
   state.currentScaleIdx = snap.currentScaleIdx
   state.octaveShift = snap.octaveShift
@@ -102,8 +107,12 @@ local function applyStateSnapshot(snap)
   if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
 
   arpeggiator.updateLatchedArpNotes()
-  arpeggiator.applyBpmChange()
-  arpeggiator.applyGatePercentChange()
+  if snap.arpBpm ~= prevBpm or snap.arpRateIdx ~= prevRateIdx then
+    arpeggiator.applyBpmChange()
+  end
+  if snap.arpGatePercent ~= prevGatePercent then
+    arpeggiator.applyGatePercentChange()
+  end
   midi.sendMidiCC(1, snap.modWheel)
 
   isRestoringControllerState = false
@@ -1237,7 +1246,7 @@ local function handleKeyUp(code)
     local act = state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action
     
     local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
-    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "chordToggle" then
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
         local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
