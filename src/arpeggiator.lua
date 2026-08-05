@@ -34,6 +34,7 @@ end
 
 state.arpEngineTop = newArpEngine()
 state.arpEngineBottom = newArpEngine()
+state.arpEngineLinked = newArpEngine()
 
 local function setHudModule(m)
   hudModule = m
@@ -70,6 +71,7 @@ end
 local function stopArpTimer()
   stopEngineState(state.arpEngineTop)
   stopEngineState(state.arpEngineBottom)
+  stopEngineState(state.arpEngineLinked)
   state.arpBeatPosition = 0
   if state.arpActiveGateTimers then
     for pitchInfo, entry in pairs(state.arpActiveGateTimers) do
@@ -264,13 +266,14 @@ local function arpTick()
   if not state.arpLinked then
     p1 = arpTickEngine(state.arpEngineTop, true)
     p2 = arpTickEngine(state.arpEngineBottom, false)
-    if hudModule and hudModule.fastUpdateArp then
-      hudModule.fastUpdateArp()
-    else
-      updateHud(nil, p1 or p2)
-    end
   else
-    -- Coupled logic...
+    p1 = arpTickEngine(state.arpEngineLinked, false)
+  end
+
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  else
+    updateHud(nil, p1 or p2)
   end
   
   local durationMs = (hs.timer.absoluteTime() - start) / 1000000
@@ -300,121 +303,82 @@ local function startArpTimer(preserveState)
 end
 
 local function arpAddNote(code, pitch)
-  if not state.arpLinked then
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    local noteKey = rawCode and config.getNoteKey(rawCode)
-    local isTop = noteKey and noteKey.isTop or false
-    local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-    local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
-    if state.arpLatchActive then
-      if numPhysicalHeld == 0 or not eng.latchClearedForNewChord then
-        eng.targetHeldNotes = {}
-        eng.latchClearedForNewChord = true
-        if eng.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
-          local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-          local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-          midi.sendMidiNote("noteOff", p, 0, c)
-          eng.currentPitch = nil
-        end
-      end
-    end
-    eng.keysCurrentlyHeld[code] = true
-    eng.targetHeldNotes = eng.targetHeldNotes or {}
-    eng.targetHeldNotes[code] = pitch
-    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-      eng.heldNotes = {}
-      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
-      if not state.arpTimer then
-        startArpTimer()
-      end
-    end
-    return
-  end
-  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
-
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
+  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
   if state.arpLatchActive then
-    if numPhysicalHeld == 0 or not state.arpLatchClearedForNewChord then
-      state.arpTargetHeldNotes = {}
-      state.arpLatchClearedForNewChord = true
-      if state.arpCurrentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
-        local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-        local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+    if numPhysicalHeld == 0 or not eng.latchClearedForNewChord then
+      eng.targetHeldNotes = {}
+      eng.latchClearedForNewChord = true
+      if eng.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
+        local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+        local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
         midi.sendMidiNote("noteOff", p, 0, c)
-        state.arpCurrentPitch = nil
+        eng.currentPitch = nil
       end
     end
   end
-
-  state.arpKeysCurrentlyHeld[code] = true
-  state.arpTargetHeldNotes = state.arpTargetHeldNotes or {}
-  state.arpTargetHeldNotes[code] = pitch
-
+  eng.keysCurrentlyHeld[code] = true
+  eng.targetHeldNotes = eng.targetHeldNotes or {}
+  eng.targetHeldNotes[code] = pitch
   if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-    state.arpHeldNotes = {}
-    for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
+    eng.heldNotes = {}
+    for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
     if not state.arpTimer then
       startArpTimer()
     end
   end
+
+  if state.arpLinked then
+    state.arpHeldNotes = state.arpEngineLinked.heldNotes
+    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
+    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
+  end
 end
 
 local function arpRemoveNote(code)
-  if not state.arpLinked then
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    local noteKey = rawCode and config.getNoteKey(rawCode)
-    local isTop = noteKey and noteKey.isTop or false
-    local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-    eng.keysCurrentlyHeld[code] = nil
-    local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
-    if state.arpLatchActive or state.sustainActive then
-      if numPhysicalHeld == 0 then
-        eng.latchClearedForNewChord = false
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
+  eng.keysCurrentlyHeld[code] = nil
+  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
+  if state.arpLatchActive or state.sustainActive then
+    if numPhysicalHeld == 0 then
+      eng.latchClearedForNewChord = false
+    end
+  else
+    if eng.targetHeldNotes then
+      eng.targetHeldNotes[code] = nil
+    end
+  end
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    eng.heldNotes = {}
+    if eng.targetHeldNotes then
+      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
+    end
+    if state.arpLinked then
+      if countTableKeys(eng.heldNotes) == 0 then
+        stopEngineState(eng)
+        stopArpTimer()
+        updateHud()
       end
     else
-      if eng.targetHeldNotes then
-        eng.targetHeldNotes[code] = nil
-      end
-    end
-    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-      eng.heldNotes = {}
-      if eng.targetHeldNotes then
-        for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
-      end
       local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
       if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
         stopEngineState(eng)
-        local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
-        if countTableKeys(otherEng.heldNotes) == 0 then
-          stopArpTimer()
-          updateHud()
-        end
+        stopArpTimer()
+        updateHud()
       end
     end
-    return
-  end
-  state.arpKeysCurrentlyHeld[code] = nil
-
-  local numPhysicalHeld = countTableKeys(state.arpKeysCurrentlyHeld)
-
-  if state.arpLatchActive or state.sustainActive then
-    if numPhysicalHeld == 0 then
-      state.arpLatchClearedForNewChord = false
-    end
-  else
-    if state.arpTargetHeldNotes then
-      state.arpTargetHeldNotes[code] = nil
-    end
   end
 
-  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-    state.arpHeldNotes = {}
-    if state.arpTargetHeldNotes then
-      for k,v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
-    end
-    if countTableKeys(state.arpHeldNotes) == 0 then
-      stopArpTimer()
-      updateHud()
-    end
+  if state.arpLinked then
+    state.arpHeldNotes = state.arpEngineLinked.heldNotes
+    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
+    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
   end
 end
 
