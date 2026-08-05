@@ -233,6 +233,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isLatched = false
+    if k.isControl then isLatched = false else
     if state.arpEnabled and state.arpLatchActive then
       local codeStr = tostring(code)
       if state.arpLinked then
@@ -249,6 +250,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
             if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
           end
+    end
         end
       end
     end
@@ -262,7 +264,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       shiftAction = kData.shiftAction,
       typeClass = typeClass,
       pressed = isPressed,
-      latched = isLatched,
+      latched = (not k.isControl) and isLatched or false,
       arpHeld = arpActive and (arpHeldPitches[noteNum] == true),
       arpPlaying = arpActive and (currentArpPitches[noteNum] == true),
       outOfBounds = (noteNum < 0 or noteNum > 127)
@@ -6045,8 +6047,14 @@ local HTML_UI_CONTENT = [[
               el.dataset.baseClass = baseClass;
             }
 
-            const isLatched = !!k.latched || (data.arpHeldNotes && (!!data.arpHeldNotes[code] || !!data.arpHeldNotes[code + '_'] || Object.keys(data.arpHeldNotes).some(key => key.startsWith(code + '_'))));
-            el.classList.toggle('latched-key', isLatched);
+            const isLatchedNote = !k.isControl && (
+              !!k.latched || 
+              (data.arpHeldNotes && (
+                !!data.arpHeldNotes[code] || 
+                !!data.arpHeldNotes[code + "_"]
+              ))
+            );
+            el.classList.toggle('latched-key', !!isLatchedNote);
             el.classList.toggle('pressed', !!k.pressed);
             el.classList.toggle('sustain-active', !!k.sustainActive);
             el.classList.toggle('arp-held', !!k.arpHeld);
@@ -6121,17 +6129,17 @@ local HTML_UI_CONTENT = [[
 
 window.updateArpPitches = function(activeCodes, heldCodes) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => el.classList.remove('arp-playing'));
-  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
+  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held', 'latched-key'));
   if (Array.isArray(activeCodes)) {
     activeCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el) el.classList.add('arp-playing');
+      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-playing');
     });
   }
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el) el.classList.add('arp-held', 'latched-key');
+      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-held', 'latched-key');
     });
   }
 };

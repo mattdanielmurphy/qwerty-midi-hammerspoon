@@ -3527,8 +3527,14 @@
               el.dataset.baseClass = baseClass;
             }
 
-            const isLatched = !!k.latched || (data.arpHeldNotes && (!!data.arpHeldNotes[code] || !!data.arpHeldNotes[code + '_'] || Object.keys(data.arpHeldNotes).some(key => key.startsWith(code + '_'))));
-            el.classList.toggle('latched-key', isLatched);
+            const isLatchedNote = !k.isControl && (
+              !!k.latched || 
+              (data.arpHeldNotes && (
+                !!data.arpHeldNotes[code] || 
+                !!data.arpHeldNotes[code + "_"]
+              ))
+            );
+            el.classList.toggle('latched-key', !!isLatchedNote);
             el.classList.toggle('pressed', !!k.pressed);
             el.classList.toggle('sustain-active', !!k.sustainActive);
             el.classList.toggle('arp-held', !!k.arpHeld);
@@ -3603,17 +3609,17 @@
 
 window.updateArpPitches = function(activeCodes, heldCodes) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => el.classList.remove('arp-playing'));
-  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
+  document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held', 'latched-key'));
   if (Array.isArray(activeCodes)) {
     activeCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el) el.classList.add('arp-playing');
+      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-playing');
     });
   }
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
-      if (el) el.classList.add('arp-held', 'latched-key');
+      if (el && !el.classList.contains('control-pad')) el.classList.add('arp-held', 'latched-key');
     });
   }
 };

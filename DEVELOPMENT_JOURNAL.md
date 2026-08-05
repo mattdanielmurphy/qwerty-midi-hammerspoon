@@ -57,3 +57,5 @@
 - **Add Icons to Arp Notifications**: Updated `src/ui_html.lua` and `src/hud.lua`/`src/controls.lua` to support inline HTML in spotlight notification titles, and injected the `stacked-rows-icon` HTML for top/bottom row Arpeggiator toggle notifications for clearer visual feedback. Link: [2026-08-04_23-31_add-icons-arp-notifications.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-08-04_23-31_add-icons-arp-notifications.md)
 
 - **2026-08-05**: Fixed dual arpeggiator freeze issue by coalescing HUD webview IPC updates, adding `pcall` execution guards around arp tick engines, and adding latency telemetry for `arpTick` > 15ms.
+
+- **Fix Arp Key Flickering & Dual-Engine Instability:** Resolved Arp key strobe flickering caused by `renderHud` removing and re-adding `latched-key` on every frame during Arp playback. Implemented `window.updateArpPitches` JS handler. Fixed dual-engine Arp timer termination bug in `src/arpeggiator.lua` where Top row releasing notes prematurely stopped the shared timer while Bottom row was still held.
