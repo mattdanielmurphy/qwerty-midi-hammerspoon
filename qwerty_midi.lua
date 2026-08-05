@@ -233,7 +233,6 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isLatched = false
-    if k.isControl then isLatched = false else
     if state.arpEnabled and state.arpLatchActive then
       local codeStr = tostring(code)
       if state.arpLinked then
@@ -250,7 +249,6 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
             if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
           end
-    end
         end
       end
     end
@@ -264,7 +262,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       shiftAction = kData.shiftAction,
       typeClass = typeClass,
       pressed = isPressed,
-      latched = (not k.isControl) and isLatched or false,
+      latched = isLatched,
       arpHeld = arpActive and (arpHeldPitches[noteNum] == true),
       arpPlaying = arpActive and (currentArpPitches[noteNum] == true),
       outOfBounds = (noteNum < 0 or noteNum > 127)
