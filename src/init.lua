@@ -309,7 +309,7 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   end
 end)
 
-_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "alt" }, "M", function()
+_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
   _G.toggleMidiMode()
 end)
 
@@ -328,19 +328,7 @@ end
 profileLog("Before panicAllChannels")
 midi.panicAllChannels()
 
--- Auto-reopen window if it was open when the last reload occurred
-local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
-if wasOpen then
-  profileLog("Auto-reopening controller window (was open before reload)")
-  hs.timer.doAfter(0.3, function()
-    local ok, err = pcall(function()
-      _G.toggleMidiMode(true)
-    end)
-    if not ok then
-      print("QWERTY MIDI: auto-reopen failed: " .. tostring(err))
-    end
-  end)
-end
+
 
 _G.pingController = function() return hud.pingController() end
 _G.dumpMidiLogs = function() return hud.dumpMidiLogs() end
@@ -353,7 +341,26 @@ end
 
 profileLog("Init complete!")
 
-return {
+local M = {
+  id = "qwerty_midi",
+  name = "QWERTY MIDI Controller",
   toggleMidiMode = _G.toggleMidiMode,
-  toggleSettingsWindow = settings_ui.toggleSettingsWindow
+  toggleSettingsWindow = settings_ui.toggleSettingsWindow,
+  start = function(isAutoReload)
+    if isAutoReload then
+      local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
+      if wasOpen then
+        _G.toggleMidiMode(true)
+      end
+    else
+      _G.toggleMidiMode(true)
+    end
+  end,
+  stop = function()
+    _G.toggleMidiMode(false)
+  end,
+  isEnabled = function()
+    return state.midiActive == true
+  end
 }
+return M
