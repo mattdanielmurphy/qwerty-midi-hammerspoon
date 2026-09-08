@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "bundle": "bash bin/bundle_and_reload.sh",
-    "dev:hud": "bun --cwd packages/surface-hud run dev"
+    "dev:hud": "bun --cwd packages/surface-hud run dev",
+    "dualsynth:gui": "bun --cwd packages/dualsynth run gui",
+    "dualsynth:cli": "bun --cwd packages/dualsynth run cli"
   }
 }

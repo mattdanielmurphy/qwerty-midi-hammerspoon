@@ -14,6 +14,10 @@ let package = Package(
         .executable(
             name: "dualsynth-cli",
             targets: ["dualsynth-cli"]
+        ),
+        .executable(
+            name: "dualsynth-gui",
+            targets: ["dualsynth-gui"]
         )
     ],
     dependencies: [],
@@ -27,6 +31,11 @@ let package = Package(
             name: "dualsynth-cli",
             dependencies: ["DualSynthCore"],
             path: "Sources/dualsynth-cli"
+        ),
+        .executableTarget(
+            name: "dualsynth-gui",
+            dependencies: ["DualSynthCore"],
+            path: "Sources/dualsynth-gui"
         )
     ]
 )

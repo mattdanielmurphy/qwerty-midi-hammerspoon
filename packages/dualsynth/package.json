@@ -4,6 +4,8 @@
   "private": true,
   "description": "Handheld software-defined MIDI groovebox and 3D studio environment powered by PS5 DualSense and GameController.framework",
   "scripts": {
+    "gui": "cd macos && swift run dualsynth-gui",
+    "cli": "cd macos && swift run dualsynth-cli",
     "build:macos": "cd macos && swift build",
     "test:macos": "cd macos && swift test"
   }

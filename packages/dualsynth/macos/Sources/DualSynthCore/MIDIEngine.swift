@@ -59,9 +59,13 @@ public final class MIDIEngine {
     }
 
     private func sendPacket(_ bytes: [UInt8]) {
+        guard isConnected else { return }
         var packetList = MIDIPacketList()
-        let packet = MIDIPacketListInit(&packetList)
-        MIDIPacketListAdd(&packetList, 1024, packet, 0, bytes.count, bytes)
-        MIDISend(sourceEndpoint, sourceEndpoint, &packetList)
+        var curPacket = MIDIPacketListInit(&packetList)
+        curPacket = MIDIPacketListAdd(&packetList, MemoryLayout<MIDIPacketList>.size, curPacket, 0, bytes.count, bytes)
+        let status = MIDIReceived(sourceEndpoint, &packetList)
+        if status != noErr {
+            print("❌ CoreMIDI MIDIReceived failed: \(status)")
+        }
     }
 }

@@ -44,11 +44,8 @@ final class DualSynthCoordinator: DualSynthDelegate {
         midi.sendCC(controller: cc, value: value)
     }
 
-    func rawInputEvent(name: String, value: Float) {
-        // Echo input events that are not direct note triggers
-        if !name.contains("Degree") && !name.contains("✕") && !name.contains("□") && !name.contains("○") && !name.contains("△") {
-            print("🎮 [Input] \(name): \(String(format: "%.2f", value))")
-        }
+    func telemetryUpdated(_ telemetry: ControllerTelemetry) {
+        // Detailed telemetry for CLI runner
     }
 }
 
