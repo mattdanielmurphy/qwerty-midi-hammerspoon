@@ -10,13 +10,15 @@ final class DualSynthCoordinator: DualSynthDelegate {
     init() {
         controller.delegate = self
         print("🎮 DualSynth Phase 0 Daemon Started.")
-        print("📡 Listening for Sony DualSense connection via Bluetooth/USB...")
+        print("📡 Listening for Sony DualSense (Background event monitoring: ENABLED)")
         print("🎹 Virtual CoreMIDI Destination: 'DualSynth Virtual Out'")
+        print("💡 Lightbar confirms active layer: Green (Base), Blue (L1 Harmony), Amber (R1 Looper)")
         print("Press Ctrl+C to stop.\n")
     }
 
-    func controllerDidConnect(_ name: String) {
-        print("🟢 Controller Connected: \(name)")
+    func controllerDidConnect(_ name: String, isDualSense: Bool) {
+        print("🟢 Controller Connected: \(name) [DualSense: \(isDualSense)]")
+        print("   Ready for input! Press ✕, □, ○, △ or squeeze triggers.")
     }
 
     func controllerDidDisconnect() {
@@ -24,22 +26,29 @@ final class DualSynthCoordinator: DualSynthDelegate {
     }
 
     func layerDidChange(_ layer: ControlLayer) {
-        print("🔀 Layer Switched: [\(layer.rawValue)]")
+        print("🔀 Layer Switched -> [\(layer.rawValue)]")
     }
 
-    func noteTriggered(pitch: UInt8, velocity: UInt8) {
-        print("🎵 Note ON  -> Pitch: \(pitch), Vel: \(velocity)")
+    func noteTriggered(pitch: UInt8, velocity: UInt8, name: String) {
+        print("🎵 NOTE ON  -> \(name) | Pitch: \(pitch) | Velocity: \(velocity)")
         midi.sendNoteOn(pitch: pitch, velocity: velocity)
     }
 
-    func noteReleased(pitch: UInt8) {
-        print("🔇 Note OFF -> Pitch: \(pitch)")
+    func noteReleased(pitch: UInt8, name: String) {
+        print("🔇 NOTE OFF -> \(name) | Pitch: \(pitch)")
         midi.sendNoteOff(pitch: pitch)
     }
 
-    func continuousParamChanged(cc: UInt8, value: UInt8) {
-        print("🎛️ CC #\(cc) -> \(value)")
+    func continuousParamChanged(cc: UInt8, value: UInt8, name: String) {
+        print("🎛️ CC #\(cc) [\(name)] -> \(value)")
         midi.sendCC(controller: cc, value: value)
+    }
+
+    func rawInputEvent(name: String, value: Float) {
+        // Echo input events that are not direct note triggers
+        if !name.contains("Degree") && !name.contains("✕") && !name.contains("□") && !name.contains("○") && !name.contains("△") {
+            print("🎮 [Input] \(name): \(String(format: "%.2f", value))")
+        }
     }
 }
 
