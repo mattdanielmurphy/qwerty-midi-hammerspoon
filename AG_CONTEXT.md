@@ -8,6 +8,10 @@
 - `packages/surface-hud/`: Framework-agnostic Vite/WebKit HUD with 30fps coalescing and Web Audio anti-suspension sentinels.
 - `packages/studio-suite/`: Master multi-controller orchestrator (QWERTY Ch 1 + nanoKEY Ch 2).
 - `packages/dualsynth/`: Handheld software-defined MIDI groovebox & 3D studio environment using Sony PS5 DualSense (`GameController.framework`, virtual CoreMIDI endpoint, native SwiftUI HUD with light/dark appearance, 6-axis gyro tilt-to-ModWheel CC#1, CoreHaptics vibration, and built-in Chord/Latch/Arp engine).
+  - **DualSense Motion & Rest Angle**: Bluetooth motion on macOS streams only via `motion.acceleration` (not `gravity`). Table rest is $a_y \approx +0.174$; ceiling tilt decreases $a_y$ towards $-1.0$.
+  - **CoreHaptics Driver Invariant**: Rapid parallel `makeAdvancedPlayer` triggers cause error `-4810` and daemon teardown. Use discrete pulse grains (120ms) with `Date` throttling.
+  - **Logic Pro CC #11**: MIDI CC #11 (Expression) acts as a gain multiplier; idle value must default to 127 to avoid muting instruments.
+  - **Held-Chord Morphing**: Holding any chord face button allows D-Pad to dynamically alter, add on to (+8va, +Sub), or transpose harmonies in real time with automatic reversion upon release.
 
 ## Key Files
 - `packages/`: Monorepo packages directory.

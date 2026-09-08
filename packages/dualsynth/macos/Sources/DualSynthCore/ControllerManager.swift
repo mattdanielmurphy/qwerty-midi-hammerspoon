@@ -94,6 +94,7 @@ public struct ControllerTelemetry {
     public var currentArpStep: Int = 0
     public var activeChordNotes: [UInt8] = []
     public var activeChordName: String = "None"
+    public var isHoldingChord: Bool = false
 
     public init() {}
 }
@@ -123,7 +124,7 @@ public final class ControllerManager: ObservableObject {
     @Published public var octaveShift: Int = 0
     @Published public var lastEventDescription: String = "Ready"
 
-    // Musical Engine State (defaults: Chord Mode ON, Latch Mode ON)
+    // Musical Engine State
     @Published public var chordMode: Bool = true
     @Published public var chordType: ChordType = .triad
     @Published public var chordInversion: ChordInversion = .root
@@ -133,6 +134,12 @@ public final class ControllerManager: ObservableObject {
     @Published public var arpPattern: ArpPattern = .up
     @Published public var arpRate: ArpRate = .eighth
     @Published public var bpm: Double = 120.0
+
+    // Held-Chord Alteration & Morphing State
+    @Published public var heldFaceButtonIndex: Int? = nil
+    private var heldChordTemporaryTranspose: Int = 0
+    private var heldChordAddSubBass: Bool = false
+    private var heldChordAddHighOctave: Bool = false
 
     // Stick gesture tracking
     private var l3PressTime: Date?
@@ -156,8 +163,7 @@ public final class ControllerManager: ObservableObject {
 
     // CoreHaptics
     private var hapticEngine: CHHapticEngine?
-    private var continuousHapticPlayer: CHHapticAdvancedPatternPlayer?
-    private var isHapticRunning: Bool = false
+    private var lastHapticPulseTime: Date = Date.distantPast
 
     public init() {
         GCController.shouldMonitorBackgroundEvents = true
@@ -187,7 +193,7 @@ public final class ControllerManager: ObservableObject {
 
     deinit {
         stopArpeggiator()
-        stopHaptics()
+        hapticEngine?.stop()
     }
 
     private func syncTelemetryEngineState() {
@@ -210,7 +216,7 @@ public final class ControllerManager: ObservableObject {
     @objc private func handleControllerDidDisconnect(notification: Notification) {
         guard let controller = notification.object as? GCController,
               controller == activeController else { return }
-        stopHaptics()
+        hapticEngine?.stop()
         self.activeController = nil
         self.isConnected = false
         self.controllerName = "Disconnected"
@@ -313,7 +319,6 @@ public final class ControllerManager: ObservableObject {
             guard let self = self else { return }
             self.telemetry.leftTrigger = value
             let ccVal = UInt8(value * 127)
-            // Send both CC #74 (Brightness) AND CC #2 (Breath/Filter in Logic Pro) so Logic instruments respond immediately!
             self.delegate?.continuousParamChanged(cc: 74, value: ccVal, name: "L2 Brightness (CC74)")
             self.delegate?.continuousParamChanged(cc: 2, value: ccVal, name: "L2 Filter/Breath (CC2)")
             self.notifyTelemetry()
@@ -322,12 +327,11 @@ public final class ControllerManager: ObservableObject {
         gamepad.rightTrigger.valueChangedHandler = { [weak self] (_, value, _) in
             guard let self = self else { return }
             self.telemetry.rightTrigger = value
-            // Squeezing R2 modulates Expression and Res/Drive without cutting off volume when idle!
-            let exprVal: UInt8 = UInt8(90 + value * 37) // 90 to 127
+            let exprVal: UInt8 = UInt8(90 + value * 37) // 90 to 127, never 0!
             let resVal = UInt8(value * 127)
             self.delegate?.continuousParamChanged(cc: 11, value: exprVal, name: "R2 Expr (CC11)")
             if value > 0.05 {
-                self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "R2 Res/Drive (CC71)")
+                self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "R2 Res (CC71)")
             }
             self.notifyTelemetry()
         }
@@ -339,26 +343,18 @@ public final class ControllerManager: ObservableObject {
             self.telemetry.leftStickY = yVal
 
             if self.telemetry.l3 {
-                // Stick is being held down while moving!
-                if abs(xVal) > 0.6 || abs(yVal) > 0.6 {
+                if abs(xVal) > 0.6 {
                     self.l3Moved = true
-                    if abs(xVal) > 0.6 {
-                        if xVal > 0 {
-                            self.rootKey = min(84, self.rootKey + 1)
-                            self.lastEventDescription = "L3+Stick: Transpose +1 (\(self.noteNameForPitch(self.rootKey)))"
-                        } else {
-                            self.rootKey = max(36, self.rootKey - 1)
-                            self.lastEventDescription = "L3+Stick: Transpose -1 (\(self.noteNameForPitch(self.rootKey)))"
-                        }
-                        self.revoiceActiveChord()
+                    if xVal > 0 {
+                        self.rootKey = min(84, self.rootKey + 1)
+                        self.lastEventDescription = "L3+Stick: Transpose +1 (\(self.noteNameForPitch(self.rootKey)))"
+                    } else {
+                        self.rootKey = max(36, self.rootKey - 1)
+                        self.lastEventDescription = "L3+Stick: Transpose -1 (\(self.noteNameForPitch(self.rootKey)))"
                     }
+                    self.revoiceActiveChord()
                 }
             } else {
-                // Normal Stick tilt
-                if abs(xVal) > 0.05 {
-                    let pbVal = UInt16(clamp(Int((xVal + 1.0) / 2.0 * 16383.0), min: 0, max: 16383))
-                    // Send pitch bend or Pan
-                }
                 if abs(yVal) > 0.05 {
                     let modVal = UInt8(max(0, yVal) * 127)
                     self.delegate?.continuousParamChanged(cc: 1, value: modVal, name: "Left Stick Y (Mod)")
@@ -374,22 +370,18 @@ public final class ControllerManager: ObservableObject {
             self.telemetry.rightStickY = yVal
 
             if self.telemetry.r3 {
-                // Stick is being held down while moving!
                 if abs(xVal) > 0.6 {
                     self.r3Moved = true
                     if xVal > 0 {
                         self.bpm = min(240.0, self.bpm + 5.0)
-                        self.telemetry.bpm = self.bpm
-                        self.lastEventDescription = String(format: "R3+Stick: BPM %.0f", self.bpm)
                     } else {
                         self.bpm = max(40.0, self.bpm - 5.0)
-                        self.telemetry.bpm = self.bpm
-                        self.lastEventDescription = String(format: "R3+Stick: BPM %.0f", self.bpm)
                     }
+                    self.telemetry.bpm = self.bpm
+                    self.lastEventDescription = String(format: "R3+Stick: BPM %.0f", self.bpm)
                     if self.isArpActive { self.restartArpeggiator() }
                 }
             } else {
-                // Normal Stick tilt
                 if abs(xVal) > 0.08 {
                     let panVal = UInt8(clamp((xVal + 1.0) / 2.0 * 127, min: 0, max: 127))
                     self.delegate?.continuousParamChanged(cc: 10, value: panVal, name: "Right Stick X (Pan)")
@@ -402,7 +394,7 @@ public final class ControllerManager: ObservableObject {
             self.notifyTelemetry()
         }
 
-        // 7. Stick Clicks (L3 & R3 with Tap vs Hold vs Push-Move gestures)
+        // 7. Stick Clicks (L3 & R3)
         if let l3Btn = gamepad.leftThumbstickButton {
             l3Btn.valueChangedHandler = { [weak self] (_, _, pressed) in
                 guard let self = self else { return }
@@ -414,10 +406,8 @@ public final class ControllerManager: ObservableObject {
                     if !self.l3Moved {
                         let duration = Date().timeIntervalSince(self.l3PressTime ?? Date())
                         if duration < 0.35 {
-                            // Quick Tap action: Toggle Chord Mode
                             self.toggleChordMode()
                         } else {
-                            // Hold release
                             self.delegate?.continuousParamChanged(cc: 64, value: 0, name: "Sustain Off")
                         }
                     }
@@ -438,7 +428,6 @@ public final class ControllerManager: ObservableObject {
                     if !self.r3Moved {
                         let duration = Date().timeIntervalSince(self.r3PressTime ?? Date())
                         if duration < 0.35 {
-                            // Quick Tap action: Toggle Arpeggiator
                             self.toggleArpeggiator()
                         }
                     }
@@ -495,22 +484,23 @@ public final class ControllerManager: ObservableObject {
         }
     }
 
-    // MARK: - Motion Sensors (Accelerometer Tilt to Mod Wheel)
+    // MARK: - Motion Sensors (Corrected Tilt Direction: Flat = 0, Ceiling = 127)
     private func setupMotionSensors(_ controller: GCController) {
         guard let motion = controller.motion else { return }
         motion.sensorsActive = true
 
         motion.valueChangedHandler = { [weak self] m in
             guard let self = self else { return }
-            // Hardware acceleration vector:
-            // Resting flat on table: ax ≈ 0.0, ay ≈ 0.17, az ≈ -0.98 (resting pitch ~10°)
-            // Tilting back (top/jack to ceiling): ay rises towards 1.0, az approaches 0.0
-            let ay = m.acceleration.y
-            let az = m.acceleration.z
+            let ay = Double(m.acceleration.y)
+            let az = Double(m.acceleration.z)
 
-            let rawPitch = atan2(ay, -az) * 180.0 / .pi
-            // Calibrate resting zero offset at ~10°
-            let tiltDeg = max(0.0, min(80.0, Float((rawPitch - 10.0) * (80.0 / 68.0))))
+            // Resting flat on table: ay ≈ 0.174, az ≈ -0.985
+            // Tilting back (top/jack to ceiling): ay decreases from +0.174 down to -1.0
+            // delta = restAy - ay goes from 0.0 (flat) up to ~1.17 (ceiling)
+            let restAy = 0.174
+            let delta = restAy - ay
+            let angleRad = atan2(delta, max(0.01, -az))
+            let tiltDeg = Float(max(0.0, min(80.0, angleRad * 180.0 / .pi)))
 
             let normalized = min(1.0, max(0.0, tiltDeg / 75.0))
             let mwVal = UInt8(normalized * 127.0)
@@ -534,9 +524,45 @@ public final class ControllerManager: ObservableObject {
                 }
 
                 self.telemetry.hapticIntensity = intensity
-                self.updateHapticIntensity(intensity)
+                self.triggerHapticPulse(intensity: intensity)
                 self.notifyTelemetry()
             }
+        }
+    }
+
+    // MARK: - CoreHaptics Engine (Fixed: Grain Pulses with No -4810 Errors)
+    private func setupHaptics(_ controller: GCController) {
+        guard let haptics = controller.haptics else { return }
+        do {
+            hapticEngine = haptics.createEngine(withLocality: .default)
+            try hapticEngine?.start()
+            hapticEngine?.resetHandler = { [weak self] in
+                try? self?.hapticEngine?.start()
+            }
+        } catch {
+            print("⚠️ CoreHaptics init error: \(error)")
+        }
+    }
+
+    private func triggerHapticPulse(intensity: Float) {
+        guard intensity > 0.02, let engine = hapticEngine else { return }
+
+        // Throttle pulses to every 0.12 seconds to prevent player flooding
+        let now = Date()
+        guard now.timeIntervalSince(lastHapticPulseTime) >= 0.12 else { return }
+        lastHapticPulseTime = now
+
+        let intParam = CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity)
+        let shParam = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
+        let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [intParam, shParam], relativeTime: 0, duration: 0.12)
+
+        do {
+            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let player = try engine.makePlayer(with: pattern)
+            try player.start(atTime: 0)
+        } catch {
+            // Engine might need restart
+            try? engine.start()
         }
     }
 
@@ -547,60 +573,10 @@ public final class ControllerManager: ObservableObject {
         ds.rightTrigger.setModeWeaponWithStartPosition(0.1, endPosition: 0.8, resistiveStrength: 0.6)
     }
 
-    // MARK: - CoreHaptics Engine
-    private func setupHaptics(_ controller: GCController) {
-        guard let haptics = controller.haptics else { return }
-        do {
-            hapticEngine = haptics.createEngine(withLocality: .all) ?? haptics.createEngine(withLocality: .default)
-            try hapticEngine?.start()
-            hapticEngine?.stoppedHandler = { [weak self] reason in
-                self?.isHapticRunning = false
-            }
-            hapticEngine?.resetHandler = { [weak self] in
-                try? self?.hapticEngine?.start()
-            }
-        } catch {
-            print("⚠️ CoreHaptics init error: \(error)")
-        }
-    }
-
-    private func updateHapticIntensity(_ intensity: Float) {
-        guard let engine = hapticEngine else { return }
-
-        if intensity <= 0.01 {
-            stopHaptics()
-            return
-        }
-
-        if !isHapticRunning {
-            do {
-                let intensityParam = CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity)
-                let sharpnessParam = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.45)
-                let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [intensityParam, sharpnessParam], relativeTime: 0, duration: 100)
-                let pattern = try CHHapticPattern(events: [event], parameters: [])
-                continuousHapticPlayer = try engine.makeAdvancedPlayer(with: pattern)
-                try continuousHapticPlayer?.start(atTime: CHHapticTimeImmediate)
-                isHapticRunning = true
-            } catch {
-                print("⚠️ Haptic start error: \(error)")
-            }
-        } else {
-            let dynamicParam = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: intensity, relativeTime: 0)
-            try? continuousHapticPlayer?.sendParameters([dynamicParam], atTime: 0)
-        }
-    }
-
-    private func stopHaptics() {
-        if isHapticRunning {
-            try? continuousHapticPlayer?.stop(atTime: CHHapticTimeImmediate)
-            isHapticRunning = false
-        }
-    }
-
-    // MARK: - Shift Actions & Musical Engine
+    // MARK: - Shift Actions & Held-Chord Morphing
     private func handleFaceAction(buttonIndex: Int, pressed: Bool) {
         if isL1Held {
-            // L1 Harmony Layer: Face buttons select Inversion / Voicing!
+            // L1 Harmony Layer: Face buttons select Inversion
             if pressed {
                 let inversions: [ChordInversion] = [.root, .first, .second, .drop2]
                 chordInversion = inversions[buttonIndex % inversions.count]
@@ -609,7 +585,7 @@ public final class ControllerManager: ObservableObject {
                 revoiceActiveChord()
             }
         } else if isR1Held {
-            // R1 Arp Layer: Face buttons select Arp Pattern!
+            // R1 Arp Layer: Face buttons select Arp Pattern
             if pressed {
                 let patterns: [ArpPattern] = [.up, .down, .upDown, .random]
                 arpPattern = patterns[buttonIndex % patterns.count]
@@ -618,16 +594,68 @@ public final class ControllerManager: ObservableObject {
                 if isArpActive { restartArpeggiator() }
             }
         } else {
-            // Base Layer: Face buttons play Chords!
-            // 0: Cross (I), 1: Square (ii), 2: Circle (IV), 3: Triangle (vi)
+            // Base Layer: Press and Hold Morph Mode
             let degreeMap = [0, 1, 3, 5]
             let degree = degreeMap[buttonIndex % degreeMap.count]
-            handleFaceButton(degreeIndex: degree, buttonName: faceButtonName(buttonIndex), pressed: pressed)
+
+            if pressed {
+                if heldFaceButtonIndex == nil {
+                    // First button pressed: enter held chord state!
+                    heldFaceButtonIndex = buttonIndex
+                    heldChordTemporaryTranspose = 0
+                    heldChordAddSubBass = false
+                    heldChordAddHighOctave = false
+                    telemetry.isHoldingChord = true
+                    handleFaceButton(degreeIndex: degree, buttonName: faceButtonName(buttonIndex), pressed: true)
+                } else if heldFaceButtonIndex != buttonIndex {
+                    // SECOND button pressed while holding first: add extension!
+                    heldChordAddHighOctave.toggle()
+                    revoiceActiveChord()
+                    lastEventDescription = "Chord Extension Added!"
+                }
+            } else {
+                if heldFaceButtonIndex == buttonIndex {
+                    // Released the primary held chord button!
+                    heldFaceButtonIndex = nil
+                    heldChordTemporaryTranspose = 0
+                    heldChordAddSubBass = false
+                    heldChordAddHighOctave = false
+                    telemetry.isHoldingChord = false
+
+                    if !latchMode {
+                        releaseCurrentlySoundingNotes()
+                        lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
+                    } else {
+                        // Re-voice back to default un-morphed chord in latch mode
+                        revoiceActiveChord()
+                    }
+                }
+            }
         }
         notifyTelemetry()
     }
 
     private func handleDpadAction(direction: DpadDir) {
+        if let _ = heldFaceButtonIndex {
+            // HELD-CHORD MORPH MODE: Alter, add on to, or transpose the active chord!
+            switch direction {
+            case .up:
+                heldChordAddHighOctave.toggle()
+                lastEventDescription = heldChordAddHighOctave ? "Morph: +High Octave" : "Morph: High Octave Off"
+            case .down:
+                heldChordAddSubBass.toggle()
+                lastEventDescription = heldChordAddSubBass ? "Morph: +Sub-Bass" : "Morph: Sub-Bass Off"
+            case .left:
+                heldChordTemporaryTranspose -= 1
+                lastEventDescription = "Morph: Transpose \(heldChordTemporaryTranspose)"
+            case .right:
+                heldChordTemporaryTranspose += 1
+                lastEventDescription = "Morph: Transpose +\(heldChordTemporaryTranspose)"
+            }
+            revoiceActiveChord()
+            return
+        }
+
         if isL1Held {
             // L1 Layer: D-Pad changes Scale
             switch direction {
@@ -762,6 +790,11 @@ public final class ControllerManager: ObservableObject {
         stopArpeggiator()
         releaseCurrentlySoundingNotes()
         latchedPitches.removeAll()
+        heldFaceButtonIndex = nil
+        heldChordTemporaryTranspose = 0
+        heldChordAddSubBass = false
+        heldChordAddHighOctave = false
+        telemetry.isHoldingChord = false
         telemetry.activeChordNotes.removeAll()
         telemetry.activeChordName = "Muted"
         telemetry.micMuted = true
@@ -799,17 +832,12 @@ public final class ControllerManager: ObservableObject {
                 playBlockChord(pitches: pitches, name: chordLabel, velocity: velocity)
             }
             lastEventDescription = "\(chordLabel) (\(pitches.map { noteNameForPitch($0) }.joined(separator: "-")))"
-        } else {
-            if !latchMode {
-                releaseCurrentlySoundingNotes()
-                lastEventDescription = "Released: \(buttonName)"
-            }
         }
         notifyTelemetry()
     }
 
     private func computePitches(forDegree degree: Int) -> [UInt8] {
-        let basePitch = Int(rootKey) + octaveShift
+        let basePitch = Int(rootKey) + octaveShift + heldChordTemporaryTranspose
         if !chordMode {
             let diatonicOffsets = [0, 2, 4, 5, 7, 9, 11]
             let offset = diatonicOffsets[degree % diatonicOffsets.count]
@@ -855,10 +883,18 @@ public final class ControllerManager: ObservableObject {
             }
         case .drop2:
             if chordOffsets.count >= 4 {
-                // Drop the second voice from the top down an octave
                 chordOffsets[chordOffsets.count - 2] -= 12
                 chordOffsets.sort()
             }
+        }
+
+        // Apply Held-Chord Add-ons
+        if heldChordAddSubBass {
+            chordOffsets.insert(-12, at: 0)
+        }
+        if heldChordAddHighOctave {
+            let top = chordOffsets.last ?? 12
+            chordOffsets.append(top + 12)
         }
 
         return chordOffsets.map { offset in
@@ -870,7 +906,7 @@ public final class ControllerManager: ObservableObject {
         let noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
         let diatonicOffsets = [0, 2, 4, 5, 7, 9, 11]
         let rootOffset = diatonicOffsets[degree % diatonicOffsets.count]
-        let pitch = Int(rootKey) + rootOffset
+        let pitch = Int(rootKey) + rootOffset + heldChordTemporaryTranspose
         let rootNote = noteNames[pitch % 12]
 
         if !chordMode { return rootNote }
@@ -880,10 +916,14 @@ public final class ControllerManager: ObservableObject {
         switch chordType {
         case .triad: suffix = isMinor ? "m" : "Maj"
         case .seventh: suffix = isMinor ? "m7" : "Maj7"
-        case .sus4: suffix = "sus4"
+        case .sus4: suffix = "sus"
         case .add9: suffix = isMinor ? "m9" : "add9"
         }
-        return "\(rootNote)\(suffix)"
+
+        var name = "\(rootNote)\(suffix)"
+        if heldChordAddSubBass { name += " /Bass" }
+        if heldChordAddHighOctave { name += " +8va" }
+        return name
     }
 
     private func revoiceActiveChord() {
@@ -895,7 +935,7 @@ public final class ControllerManager: ObservableObject {
 
         if isArpActive {
             restartArpeggiator()
-        } else if latchMode {
+        } else {
             releaseCurrentlySoundingNotes()
             playBlockChord(pitches: newPitches, name: telemetry.activeChordName)
         }
