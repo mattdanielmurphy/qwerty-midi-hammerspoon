@@ -12,9 +12,43 @@ public enum ControlLayer: String, CaseIterable {
 public enum ChordType: String, CaseIterable {
     case triad = "Triad"
     case seventh = "7th"
+    case ninth = "9th"
     case sus4 = "Sus4"
-    case add9 = "Add9"
+    case power = "Power"
+
+    public var offsets: [Int] {
+        switch self {
+        case .triad: return [0, 2, 4]
+        case .seventh: return [0, 2, 4, 6]
+        case .ninth: return [0, 2, 4, 6, 8]
+        case .sus4: return [0, 3, 4]
+        case .power: return [0, 4]
+        }
+    }
 }
+
+public struct MusicalScale: Identifiable, Equatable {
+    public var id: String { name }
+    public let name: String
+    public let shortName: String
+    public let intervals: [Int]
+
+    public init(name: String, shortName: String, intervals: [Int]) {
+        self.name = name
+        self.shortName = shortName
+        self.intervals = intervals
+    }
+}
+
+public let availableScales: [MusicalScale] = [
+    MusicalScale(name: "Major", shortName: "Maj", intervals: [0, 2, 4, 5, 7, 9, 11]),
+    MusicalScale(name: "Minor", shortName: "Min", intervals: [0, 2, 3, 5, 7, 8, 10]),
+    MusicalScale(name: "Dorian", shortName: "Dor", intervals: [0, 2, 3, 5, 7, 9, 10]),
+    MusicalScale(name: "Mixolydian", shortName: "Mixo", intervals: [0, 2, 4, 5, 7, 9, 10]),
+    MusicalScale(name: "Lydian", shortName: "Lyd", intervals: [0, 2, 4, 6, 7, 9, 11]),
+    MusicalScale(name: "Phrygian", shortName: "Phryg", intervals: [0, 1, 3, 5, 7, 8, 10]),
+    MusicalScale(name: "Harmonic Min", shortName: "HarMin", intervals: [0, 2, 3, 5, 7, 8, 11])
+]
 
 public enum ChordInversion: String, CaseIterable {
     case root = "Root"
@@ -86,6 +120,7 @@ public struct ControllerTelemetry {
     public var chordType: ChordType = .triad
     public var chordInversion: ChordInversion = .root
     public var scaleName: String = "Major"
+    public var scaleDegreeShift: Int = 0
     public var latchMode: Bool = true
     public var isArpActive: Bool = false
     public var arpPattern: ArpPattern = .up
@@ -95,6 +130,12 @@ public struct ControllerTelemetry {
     public var activeChordNotes: [UInt8] = []
     public var activeChordName: String = "None"
     public var isHoldingChord: Bool = false
+    public var heldFaceButtonIndex: Int? = nil
+    public var heldChordAdd7th: Bool = false
+    public var heldChordAdd9th: Bool = false
+    public var heldChordAddSubBass: Bool = false
+    public var heldChordAddHighOctave: Bool = false
+    public var heldChordTemporaryStepShift: Int = 0
 
     public init() {}
 }
@@ -129,7 +170,19 @@ public final class ControllerManager: ObservableObject {
     @Published public var chordMode: Bool = true
     @Published public var chordType: ChordType = .triad
     @Published public var chordInversion: ChordInversion = .root
+    @Published public var scaleIndex: Int = 0
     @Published public var scaleName: String = "Major"
+    @Published public var scaleDegreeShift: Int = 0 // Diatonic scale steps
+
+    public var currentScale: MusicalScale {
+        if scaleIndex >= 0 && scaleIndex < availableScales.count {
+            return availableScales[scaleIndex]
+        }
+        if let found = availableScales.first(where: { $0.name == scaleName }) {
+            return found
+        }
+        return availableScales[0]
+    }
     @Published public var latchMode: Bool = true
     @Published public var isArpActive: Bool = false
     @Published public var arpPattern: ArpPattern = .up
@@ -138,9 +191,11 @@ public final class ControllerManager: ObservableObject {
 
     // Held-Chord Alteration & Morphing State
     @Published public var heldFaceButtonIndex: Int? = nil
-    private var heldChordTemporaryTranspose: Int = 0
-    private var heldChordAddSubBass: Bool = false
-    private var heldChordAddHighOctave: Bool = false
+    @Published public var heldChordTemporaryStepShift: Int = 0
+    @Published public var heldChordAdd7th: Bool = false
+    @Published public var heldChordAdd9th: Bool = false
+    @Published public var heldChordAddSubBass: Bool = false
+    @Published public var heldChordAddHighOctave: Bool = false
 
     // Stick gesture tracking
     private var l3PressTime: Date?
@@ -210,12 +265,19 @@ public final class ControllerManager: ObservableObject {
         telemetry.chordMode = chordMode
         telemetry.chordType = chordType
         telemetry.chordInversion = chordInversion
-        telemetry.scaleName = scaleName
+        telemetry.scaleName = availableScales[scaleIndex % availableScales.count].name
+        telemetry.scaleDegreeShift = scaleDegreeShift
         telemetry.latchMode = latchMode
         telemetry.isArpActive = isArpActive
         telemetry.arpPattern = arpPattern
         telemetry.arpRate = arpRate
         telemetry.bpm = bpm
+        telemetry.heldFaceButtonIndex = heldFaceButtonIndex
+        telemetry.heldChordTemporaryStepShift = heldChordTemporaryStepShift
+        telemetry.heldChordAdd7th = heldChordAdd7th
+        telemetry.heldChordAdd9th = heldChordAdd9th
+        telemetry.heldChordAddSubBass = heldChordAddSubBass
+        telemetry.heldChordAddHighOctave = heldChordAddHighOctave
     }
 
     @objc private func handleControllerDidConnect(notification: Notification) {
@@ -404,72 +466,47 @@ public final class ControllerManager: ObservableObject {
             self.telemetry.rightStickX = xVal
             self.telemetry.rightStickY = yVal
 
-            if self.telemetry.r3 {
-                if abs(xVal) > 0.6 {
-                    self.r3Moved = true
-                    if xVal > 0 {
-                        self.bpm = min(240.0, self.bpm + 5.0)
-                    } else {
-                        self.bpm = max(40.0, self.bpm - 5.0)
-                    }
-                    self.telemetry.bpm = self.bpm
-                    self.lastEventDescription = String(format: "R3+Stick: BPM %.0f", self.bpm)
-                    if self.isArpActive { self.restartArpeggiator() }
-                }
-            } else {
-                // Right Stick X: Stereo Pan (CC #10, Center = 64)
-                if abs(xVal) >= 0.05 {
-                    self.lastRightStickActive = true
-                    let panVal = UInt8(clamp((Double(xVal) + 1.0) / 2.0 * 127.0, min: 0, max: 127))
-                    self.delegate?.continuousParamChanged(cc: 10, value: panVal, name: "RS Pan (CC10)")
-                } else if self.lastRightStickActive && abs(yVal) < 0.05 {
-                    self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
-                }
+            // Right Stick X: Stereo Pan (CC #10, Center = 64)
+            if abs(xVal) >= 0.05 {
+                self.lastRightStickActive = true
+                let panVal = UInt8(clamp((Double(xVal) + 1.0) / 2.0 * 127.0, min: 0, max: 127))
+                self.delegate?.continuousParamChanged(cc: 10, value: panVal, name: "RS Pan (CC10)")
+            } else if self.lastRightStickActive && abs(yVal) < 0.05 {
+                self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
+            }
 
-                // Right Stick Y:
-                // Push UP (> 0.05): Resonance (CC71) + Expression Boost (CC11) + Brightness (CC74)
-                // Pull DOWN (< -0.05): Dynamics Dip (CC11) 127 -> 20 + Cutoff Dip (CC74)
-                if yVal > 0.05 {
-                    self.lastRightStickActive = true
-                    let resVal = UInt8(yVal * 127)
-                    let brightVal = UInt8(clamp(64 + Double(yVal) * 63.0, min: 64, max: 127))
-                    self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "RS Res (CC71)")
-                    self.delegate?.continuousParamChanged(cc: 74, value: brightVal, name: "RS Brightness (CC74)")
-                } else if yVal < -0.05 {
-                    self.lastRightStickActive = true
-                    let dipVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 107.0), min: 20, max: 127))
-                    let cutoffVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 110.0), min: 10, max: 127))
-                    self.delegate?.continuousParamChanged(cc: 11, value: dipVal, name: "RS Expr Dip (CC11)")
-                    self.delegate?.continuousParamChanged(cc: 74, value: cutoffVal, name: "RS Cutoff Dip (CC74)")
-                } else if self.lastRightStickActive && abs(xVal) < 0.05 {
-                    self.lastRightStickActive = false
-                    self.delegate?.continuousParamChanged(cc: 71, value: 0, name: "RS Res Reset")
-                    self.delegate?.continuousParamChanged(cc: 74, value: 127, name: "RS Cutoff Reset")
-                    self.delegate?.continuousParamChanged(cc: 11, value: 127, name: "RS Expr Reset")
-                    self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
-                }
+            // Right Stick Y:
+            // Push UP (> 0.05): Resonance (CC71) + Expression Boost (CC11) + Brightness (CC74)
+            // Pull DOWN (< -0.05): Dynamics Dip (CC11) 127 -> 20 + Cutoff Dip (CC74)
+            if yVal > 0.05 {
+                self.lastRightStickActive = true
+                let resVal = UInt8(yVal * 127)
+                let brightVal = UInt8(clamp(64 + Double(yVal) * 63.0, min: 64, max: 127))
+                self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "RS Res (CC71)")
+                self.delegate?.continuousParamChanged(cc: 74, value: brightVal, name: "RS Brightness (CC74)")
+            } else if yVal < -0.05 {
+                self.lastRightStickActive = true
+                let dipVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 107.0), min: 20, max: 127))
+                let cutoffVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 110.0), min: 10, max: 127))
+                self.delegate?.continuousParamChanged(cc: 11, value: dipVal, name: "RS Expr Dip (CC11)")
+                self.delegate?.continuousParamChanged(cc: 74, value: cutoffVal, name: "RS Cutoff Dip (CC74)")
+            } else if self.lastRightStickActive && abs(xVal) < 0.05 {
+                self.lastRightStickActive = false
+                self.delegate?.continuousParamChanged(cc: 71, value: 0, name: "RS Res Reset")
+                self.delegate?.continuousParamChanged(cc: 74, value: 127, name: "RS Cutoff Reset")
+                self.delegate?.continuousParamChanged(cc: 11, value: 127, name: "RS Expr Reset")
+                self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
             }
             self.notifyTelemetry()
         }
 
-        // 7. Stick Clicks (L3 & R3)
+        // 7. Stick Clicks (L3 & R3) - Direct Toggles
         if let l3Btn = gamepad.leftThumbstickButton {
             l3Btn.valueChangedHandler = { [weak self] (_, _, pressed) in
                 guard let self = self else { return }
                 self.telemetry.l3 = pressed
                 if pressed {
-                    self.l3PressTime = Date()
-                    self.l3Moved = false
-                } else {
-                    if !self.l3Moved {
-                        let duration = Date().timeIntervalSince(self.l3PressTime ?? Date())
-                        if duration < 0.35 {
-                            self.toggleChordMode()
-                        } else {
-                            self.delegate?.continuousParamChanged(cc: 64, value: 0, name: "Sustain Off")
-                        }
-                    }
-                    self.l3PressTime = nil
+                    self.toggleChordMode()
                 }
                 self.notifyTelemetry()
             }
@@ -480,16 +517,7 @@ public final class ControllerManager: ObservableObject {
                 guard let self = self else { return }
                 self.telemetry.r3 = pressed
                 if pressed {
-                    self.r3PressTime = Date()
-                    self.r3Moved = false
-                } else {
-                    if !self.r3Moved {
-                        let duration = Date().timeIntervalSince(self.r3PressTime ?? Date())
-                        if duration < 0.35 {
-                            self.toggleArpeggiator()
-                        }
-                    }
-                    self.r3PressTime = nil
+                    self.toggleArpeggiator()
                 }
                 self.notifyTelemetry()
             }
@@ -677,10 +705,35 @@ public final class ControllerManager: ObservableObject {
         ds.rightTrigger.setModeWeaponWithStartPosition(0.1, endPosition: 0.8, resistiveStrength: 0.6)
     }
 
+    public func scaleDegreeForButton(index: Int) -> Int {
+        // 0: Cross -> I, 1: Square -> ii, 2: Circle -> IV, 3: Triangle -> V
+        let baseDegrees = [0, 1, 3, 4]
+        return baseDegrees[index % baseDegrees.count]
+    }
+
+    public func degreeName(_ step: Int) -> String {
+        let numerals = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
+        let count = numerals.count
+        let idx = ((step % count) + count) % count
+        return numerals[idx]
+    }
+
+    public func cycleChordInversion(forward: Bool = true) {
+        let all = ChordInversion.allCases
+        if let idx = all.firstIndex(of: chordInversion) {
+            let nextIdx = forward ? (idx + 1) % all.count : (idx - 1 + all.count) % all.count
+            chordInversion = all[nextIdx]
+            telemetry.chordInversion = chordInversion
+            lastEventDescription = "Inversion: \(chordInversion.rawValue)"
+            revoiceActiveChord()
+            notifyTelemetry()
+        }
+    }
+
     // MARK: - Shift Actions & Held-Chord Morphing
     private func handleFaceAction(buttonIndex: Int, pressed: Bool) {
         if isL1Held {
-            // L1 Harmony Layer: Face buttons select Inversion
+            // L1 Harmony Layer: Face buttons select Inversion directly
             if pressed {
                 let inversions: [ChordInversion] = [.root, .first, .second, .drop2]
                 chordInversion = inversions[buttonIndex % inversions.count]
@@ -689,7 +742,7 @@ public final class ControllerManager: ObservableObject {
                 revoiceActiveChord()
             }
         } else if isR1Held {
-            // R1 Arp Layer: Face buttons select Arp Pattern
+            // R1 Arp Layer: Face buttons select Arp Pattern directly
             if pressed {
                 let patterns: [ArpPattern] = [.up, .down, .upDown, .random]
                 arpPattern = patterns[buttonIndex % patterns.count]
@@ -698,18 +751,38 @@ public final class ControllerManager: ObservableObject {
                 if isArpActive { restartArpeggiator() }
             }
         } else {
-            // Base Layer: Multi-Button Press & Arp Pooling + Held-Chord Morphing
-            let degreeMap = [0, 1, 3, 5]
-            let degree = degreeMap[buttonIndex % degreeMap.count]
+            let degree = scaleDegreeForButton(index: buttonIndex)
 
             if pressed {
+                // If a chord is already held, pressing another face button in block chord mode ALTERS / EXTENDS that chord!
+                if let heldIdx = heldFaceButtonIndex, heldIdx != buttonIndex, !isArpActive {
+                    switch buttonIndex {
+                    case 1: // Square: toggle 7th
+                        heldChordAdd7th.toggle()
+                        lastEventDescription = heldChordAdd7th ? "Morph: +7th Extension" : "Morph: 7th Off"
+                    case 2: // Circle: toggle 9th
+                        heldChordAdd9th.toggle()
+                        lastEventDescription = heldChordAdd9th ? "Morph: +9th Extension" : "Morph: 9th Off"
+                    case 3: // Triangle: cycle inversion
+                        cycleChordInversion()
+                    default: // Cross (if another button held): toggle sub-bass
+                        heldChordAddSubBass.toggle()
+                        lastEventDescription = heldChordAddSubBass ? "Morph: +Sub-Bass" : "Morph: Sub Off"
+                    }
+                    revoiceActiveChord()
+                    notifyTelemetry()
+                    return
+                }
+
                 if activeFaceButtons.isEmpty {
-                    heldChordTemporaryTranspose = 0
+                    heldChordTemporaryStepShift = 0
+                    heldChordAdd7th = false
+                    heldChordAdd9th = false
                     heldChordAddSubBass = false
                     heldChordAddHighOctave = false
                 }
                 activeFaceButtons.insert(buttonIndex)
-                heldFaceButtonIndex = activeFaceButtons.first
+                heldFaceButtonIndex = buttonIndex
                 telemetry.isHoldingChord = true
                 lastFaceDegree = degree
 
@@ -739,7 +812,7 @@ public final class ControllerManager: ObservableObject {
                 activeFacePitches.removeValue(forKey: buttonIndex)
 
                 if !activeFaceButtons.isEmpty {
-                    // Other button(s) are still held! Keep arpeggiating or voicing remaining notes
+                    // Other button(s) still held down
                     heldFaceButtonIndex = activeFaceButtons.first
                     let remaining = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
                     latchedPitches = remaining
@@ -755,9 +828,11 @@ public final class ControllerManager: ObservableObject {
                         playBlockChord(pitches: remaining, name: "Held Harmony", velocity: velocity)
                     }
                 } else {
-                    // ALL face buttons released
+                    // All face buttons released
                     heldFaceButtonIndex = nil
-                    heldChordTemporaryTranspose = 0
+                    heldChordTemporaryStepShift = 0
+                    heldChordAdd7th = false
+                    heldChordAdd9th = false
                     heldChordAddSubBass = false
                     heldChordAddHighOctave = false
                     telemetry.isHoldingChord = false
@@ -772,7 +847,9 @@ public final class ControllerManager: ObservableObject {
                         telemetry.activeChordNotes.removeAll()
                         lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
                     } else {
-                        revoiceActiveChord()
+                        // In latch mode, the notes are already playing smoothly!
+                        // Do NOT call revoiceActiveChord() or send Note-On on key-up!
+                        lastEventDescription = "Latched: \(telemetry.activeChordName)"
                     }
                 }
             }
@@ -781,74 +858,89 @@ public final class ControllerManager: ObservableObject {
     }
 
     private func handleDpadAction(direction: DpadDir) {
-        if let _ = heldFaceButtonIndex {
-            // HELD-CHORD MORPH MODE: Alter, add on to, or transpose the active chord!
+        if heldFaceButtonIndex != nil {
+            // HELD-CHORD MORPH MODE: Transpose held chord diatonically or add extensions!
             switch direction {
             case .up:
-                heldChordAddHighOctave.toggle()
-                lastEventDescription = heldChordAddHighOctave ? "Morph: +High Octave" : "Morph: High Octave Off"
+                heldChordTemporaryStepShift += 1
+                lastEventDescription = "Held Chord: Step +\(heldChordTemporaryStepShift)"
             case .down:
-                heldChordAddSubBass.toggle()
-                lastEventDescription = heldChordAddSubBass ? "Morph: +Sub-Bass" : "Morph: Sub-Bass Off"
+                heldChordTemporaryStepShift -= 1
+                lastEventDescription = "Held Chord: Step \(heldChordTemporaryStepShift)"
             case .left:
-                heldChordTemporaryTranspose -= 1
-                lastEventDescription = "Morph: Transpose \(heldChordTemporaryTranspose)"
+                heldChordAddSubBass.toggle()
+                lastEventDescription = heldChordAddSubBass ? "Held: +Sub-Bass" : "Held: Sub-Bass Off"
             case .right:
-                heldChordTemporaryTranspose += 1
-                lastEventDescription = "Morph: Transpose +\(heldChordTemporaryTranspose)"
+                heldChordAddHighOctave.toggle()
+                lastEventDescription = heldChordAddHighOctave ? "Held: +8va High" : "Held: 8va Off"
             }
             revoiceActiveChord()
+            notifyTelemetry()
             return
         }
 
         if isL1Held {
-            // L1 Layer: D-Pad changes Scale
-            switch direction {
-            case .up: scaleName = "Major"
-            case .down: scaleName = "Minor"
-            case .left: scaleName = "Dorian"
-            case .right: scaleName = "Mixolydian"
-            }
-            telemetry.scaleName = scaleName
-            lastEventDescription = "Scale: \(scaleName)"
-            revoiceActiveChord()
-        } else if isR1Held {
-            // R1 Layer: D-Pad changes Arp Rate & BPM
-            switch direction {
-            case .up: cycleArpRate(forward: true)
-            case .down: cycleArpRate(forward: false)
-            case .left:
-                bpm = max(40.0, bpm - 5.0)
-                telemetry.bpm = bpm
-                lastEventDescription = String(format: "BPM: %.0f", bpm)
-                if isArpActive { restartArpeggiator() }
-            case .right:
-                bpm = min(240.0, bpm + 5.0)
-                telemetry.bpm = bpm
-                lastEventDescription = String(format: "BPM: %.0f", bpm)
-                if isArpActive { restartArpeggiator() }
-            }
-        } else {
-            // Base Layer: D-Pad changes Octave & Root
+            // L1 Layer: Root/Octave & Direct Tonic Reset
             switch direction {
             case .up:
                 octaveShift = min(36, octaveShift + 12)
                 lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
-                revoiceActiveChord()
             case .down:
                 octaveShift = max(-36, octaveShift - 12)
                 lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
-                revoiceActiveChord()
             case .left:
-                rootKey = max(36, rootKey - 1)
-                lastEventDescription = "Root: \(noteNameForPitch(rootKey))"
-                revoiceActiveChord()
+                // Direct Tonic Reset (Step = 0)!
+                scaleDegreeShift = 0
+                lastEventDescription = "Diatonic: Reset to Tonic (0)"
             case .right:
-                rootKey = min(84, rootKey + 1)
-                lastEventDescription = "Root: \(noteNameForPitch(rootKey))"
-                revoiceActiveChord()
+                // Chromatic Semitone +1
+                rootKey = (rootKey >= 84) ? 48 : rootKey + 1
+                lastEventDescription = "Root Key: \(noteNameForPitch(rootKey))"
             }
+            revoiceActiveChord()
+            notifyTelemetry()
+            return
         }
+
+        if isR1Held {
+            // R1 Layer: Arp Tempo & Rate Controls
+            switch direction {
+            case .up:
+                bpm = min(240.0, bpm + 5.0)
+                telemetry.bpm = bpm
+                lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
+                if isArpActive { restartArpeggiator() }
+            case .down:
+                bpm = max(40.0, bpm - 5.0)
+                telemetry.bpm = bpm
+                lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
+                if isArpActive { restartArpeggiator() }
+            case .left:
+                cycleArpRate(forward: false)
+            case .right:
+                cycleArpRate(forward: true)
+            }
+            notifyTelemetry()
+            return
+        }
+
+        // Base Layer: Diatonic Scale Degree Transposition!
+        switch direction {
+        case .up:
+            scaleDegreeShift += 1
+            lastEventDescription = "Scale Transpose: +1 Step (Degree \(degreeName(scaleDegreeShift)))"
+        case .down:
+            scaleDegreeShift -= 1
+            lastEventDescription = "Scale Transpose: -1 Step (Degree \(degreeName(scaleDegreeShift)))"
+        case .left:
+            scaleDegreeShift -= 3 // Quick jump down 3 steps (e.g. IV -> I)
+            lastEventDescription = "Scale Transpose: -3 Steps (Degree \(degreeName(scaleDegreeShift)))"
+        case .right:
+            scaleDegreeShift += 3 // Quick jump up 3 steps (e.g. I -> IV)
+            lastEventDescription = "Scale Transpose: +3 Steps (Degree \(degreeName(scaleDegreeShift)))"
+        }
+        revoiceActiveChord()
+        notifyTelemetry()
     }
 
     private enum DpadDir { case up, down, left, right }
@@ -893,14 +985,12 @@ public final class ControllerManager: ObservableObject {
     }
 
     public func cycleScale() {
-        let scales = ["Major", "Minor", "Dorian", "Mixolydian"]
-        if let idx = scales.firstIndex(of: scaleName) {
-            scaleName = scales[(idx + 1) % scales.count]
-            telemetry.scaleName = scaleName
-            lastEventDescription = "Scale: \(scaleName)"
-            revoiceActiveChord()
-            notifyTelemetry()
-        }
+        scaleIndex = (scaleIndex + 1) % availableScales.count
+        scaleName = availableScales[scaleIndex].name
+        telemetry.scaleName = scaleName
+        lastEventDescription = "Scale: \(scaleName)"
+        revoiceActiveChord()
+        notifyTelemetry()
     }
 
     public func toggleArpeggiator() {
@@ -938,7 +1028,9 @@ public final class ControllerManager: ObservableObject {
         activeFaceButtons.removeAll()
         activeFacePitches.removeAll()
         heldFaceButtonIndex = nil
-        heldChordTemporaryTranspose = 0
+        heldChordTemporaryStepShift = 0
+        heldChordAdd7th = false
+        heldChordAdd9th = false
         heldChordAddSubBass = false
         heldChordAddHighOctave = false
         telemetry.isHoldingChord = false
@@ -955,62 +1047,32 @@ public final class ControllerManager: ObservableObject {
         }
     }
 
-    private func handleFaceButton(degreeIndex: Int, buttonName: String, pressed: Bool) {
-        if pressed {
-            lastFaceDegree = degreeIndex
-            let pitches = computePitches(forDegree: degreeIndex)
-            let chordLabel = chordNameForDegree(degreeIndex)
+    public func computePitches(forDegree degree: Int) -> [UInt8] {
+        let totalDegree = degree + scaleDegreeShift + heldChordTemporaryStepShift
+        let intervals = currentScale.intervals
+        let numIntervals = intervals.count
 
-            telemetry.activeChordNotes = pitches
-            telemetry.activeChordName = chordLabel
-
-            let triggerVal = telemetry.rightTrigger
-            let velocity: UInt8 = triggerVal > 0.05 ? UInt8(60 + triggerVal * 67) : 100
-
-            if latchMode {
-                latchedPitches = pitches
-                if isArpActive {
-                    restartArpeggiator()
-                } else {
-                    releaseCurrentlySoundingNotes()
-                    playBlockChord(pitches: pitches, name: chordLabel, velocity: velocity)
-                }
-            } else {
-                playBlockChord(pitches: pitches, name: chordLabel, velocity: velocity)
-            }
-            lastEventDescription = "\(chordLabel) (\(pitches.map { noteNameForPitch($0) }.joined(separator: "-")))"
-        }
-        notifyTelemetry()
-    }
-
-    private func computePitches(forDegree degree: Int) -> [UInt8] {
-        let basePitch = Int(rootKey) + octaveShift + heldChordTemporaryTranspose
         if !chordMode {
-            let diatonicOffsets = [0, 2, 4, 5, 7, 9, 11]
-            let offset = diatonicOffsets[degree % diatonicOffsets.count]
-            return [UInt8(clamp(basePitch + offset, min: 0, max: 127))]
+            let octaveOffset = Int(floor(Double(totalDegree) / Double(numIntervals)))
+            let idxInScale = ((totalDegree % numIntervals) + numIntervals) % numIntervals
+            let pitch = Int(rootKey) + octaveShift + (octaveOffset * 12) + intervals[idxInScale]
+            return [UInt8(clamp(pitch, min: 0, max: 127))]
         }
 
-        var rootOffset: Int
-        var isMinor: Bool
-        switch degree {
-        case 0: rootOffset = 0; isMinor = (scaleName == "Minor")
-        case 1: rootOffset = 2; isMinor = true
-        case 3: rootOffset = 5; isMinor = false
-        case 5: rootOffset = 9; isMinor = (scaleName == "Major")
-        default: rootOffset = 0; isMinor = false
+        var chordOffsets = chordType.offsets
+        if heldChordAdd7th && !chordOffsets.contains(6) {
+            chordOffsets.append(6)
         }
+        if heldChordAdd9th && !chordOffsets.contains(8) {
+            chordOffsets.append(8)
+        }
+        chordOffsets.sort()
 
-        var chordOffsets: [Int]
-        switch chordType {
-        case .triad:
-            chordOffsets = isMinor ? [0, 3, 7] : [0, 4, 7]
-        case .seventh:
-            chordOffsets = isMinor ? [0, 3, 7, 10] : [0, 4, 7, 11]
-        case .sus4:
-            chordOffsets = [0, 5, 7]
-        case .add9:
-            chordOffsets = isMinor ? [0, 3, 7, 14] : [0, 4, 7, 14]
+        var notePitches: [Int] = chordOffsets.map { off in
+            let stepIndex = totalDegree + off
+            let octaveOffset = Int(floor(Double(stepIndex) / Double(numIntervals)))
+            let idxInScale = ((stepIndex % numIntervals) + numIntervals) % numIntervals
+            return Int(rootKey) + octaveShift + (octaveOffset * 12) + intervals[idxInScale]
         }
 
         // Apply Inversion / Voicing
@@ -1018,66 +1080,159 @@ public final class ControllerManager: ObservableObject {
         case .root:
             break
         case .first:
-            if chordOffsets.count > 1 {
-                chordOffsets[0] += 12
-                chordOffsets.sort()
+            if notePitches.count > 1 {
+                notePitches[0] += 12
+                notePitches.sort()
             }
         case .second:
-            if chordOffsets.count > 2 {
-                chordOffsets[0] += 12
-                chordOffsets[1] += 12
-                chordOffsets.sort()
+            if notePitches.count > 2 {
+                notePitches[0] += 12
+                notePitches[1] += 12
+                notePitches.sort()
             }
         case .drop2:
-            if chordOffsets.count >= 4 {
-                chordOffsets[chordOffsets.count - 2] -= 12
-                chordOffsets.sort()
+            if notePitches.count >= 4 {
+                notePitches[notePitches.count - 2] -= 12
+                notePitches.sort()
             }
         }
 
         // Apply Held-Chord Add-ons
         if heldChordAddSubBass {
-            chordOffsets.insert(-12, at: 0)
+            let lowest = notePitches.first ?? (Int(rootKey) + octaveShift)
+            notePitches.insert(lowest - 12, at: 0)
         }
         if heldChordAddHighOctave {
-            let top = chordOffsets.last ?? 12
-            chordOffsets.append(top + 12)
+            let highest = notePitches.last ?? (Int(rootKey) + octaveShift + 12)
+            notePitches.append(highest + 12)
         }
 
-        return chordOffsets.map { offset in
-            UInt8(clamp(basePitch + rootOffset + offset, min: 0, max: 127))
-        }
+        return notePitches.map { UInt8(clamp($0, min: 0, max: 127)) }
     }
 
-    private func chordNameForDegree(_ degree: Int) -> String {
+    public func chordNameForDegree(_ degree: Int) -> String {
         let noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        let diatonicOffsets = [0, 2, 4, 5, 7, 9, 11]
-        let rootOffset = diatonicOffsets[degree % diatonicOffsets.count]
-        let pitch = Int(rootKey) + rootOffset + heldChordTemporaryTranspose
-        let rootNote = noteNames[pitch % 12]
+        let totalDegree = degree + scaleDegreeShift + heldChordTemporaryStepShift
+        let intervals = currentScale.intervals
+        let numIntervals = intervals.count
+
+        let rootStep = totalDegree
+        let rootOctaveOffset = Int(floor(Double(rootStep) / Double(numIntervals)))
+        let rootIdx = ((rootStep % numIntervals) + numIntervals) % numIntervals
+        let rootPitch = Int(rootKey) + (rootOctaveOffset * 12) + intervals[rootIdx]
+        let rootNote = noteNames[((rootPitch % 12) + 12) % 12]
 
         if !chordMode { return rootNote }
 
-        let isMinor = (degree == 1 || (degree == 5 && scaleName == "Major") || (degree == 0 && scaleName == "Minor"))
+        let thirdStep = totalDegree + 2
+        let thirdOctaveOffset = Int(floor(Double(thirdStep) / Double(numIntervals)))
+        let thirdIdx = ((thirdStep % numIntervals) + numIntervals) % numIntervals
+        let thirdPitch = Int(rootKey) + (thirdOctaveOffset * 12) + intervals[thirdIdx]
+        let thirdDiff = thirdPitch - rootPitch
+
+        let fifthStep = totalDegree + 4
+        let fifthOctaveOffset = Int(floor(Double(fifthStep) / Double(numIntervals)))
+        let fifthIdx = ((fifthStep % numIntervals) + numIntervals) % numIntervals
+        let fifthPitch = Int(rootKey) + (fifthOctaveOffset * 12) + intervals[fifthIdx]
+        let fifthDiff = fifthPitch - rootPitch
+
+        let seventhStep = totalDegree + 6
+        let seventhOctaveOffset = Int(floor(Double(seventhStep) / Double(numIntervals)))
+        let seventhIdx = ((seventhStep % numIntervals) + numIntervals) % numIntervals
+        let seventhPitch = Int(rootKey) + (seventhOctaveOffset * 12) + intervals[seventhIdx]
+        let seventhDiff = seventhPitch - rootPitch
+
         let suffix: String
         switch chordType {
-        case .triad: suffix = isMinor ? "m" : "Maj"
-        case .seventh: suffix = isMinor ? "m7" : "Maj7"
-        case .sus4: suffix = "sus"
-        case .add9: suffix = isMinor ? "m9" : "add9"
+        case .triad:
+            if thirdDiff == 3 && fifthDiff == 6 {
+                suffix = "dim"
+            } else if thirdDiff == 3 {
+                suffix = "m"
+            } else if thirdDiff == 4 && fifthDiff == 8 {
+                suffix = "aug"
+            } else {
+                suffix = "Maj"
+            }
+        case .seventh:
+            if thirdDiff == 4 && seventhDiff == 11 {
+                suffix = "Maj7"
+            } else if thirdDiff == 4 && seventhDiff == 10 {
+                suffix = "7"
+            } else if thirdDiff == 3 && seventhDiff == 10 && fifthDiff == 6 {
+                suffix = "m7♭5"
+            } else if thirdDiff == 3 && seventhDiff == 10 {
+                suffix = "m7"
+            } else if thirdDiff == 3 && seventhDiff == 9 && fifthDiff == 6 {
+                suffix = "dim7"
+            } else {
+                suffix = "7"
+            }
+        case .ninth:
+            if thirdDiff == 4 && seventhDiff == 11 {
+                suffix = "Maj9"
+            } else if thirdDiff == 4 {
+                suffix = "9"
+            } else if thirdDiff == 3 {
+                suffix = "m9"
+            } else {
+                suffix = "9"
+            }
+        case .sus4:
+            suffix = "sus4"
+        case .power:
+            suffix = "5"
         }
 
         var name = "\(rootNote)\(suffix)"
+        if heldChordAdd7th && chordType == .triad { name += " (+7)" }
+        if heldChordAdd9th && (chordType == .triad || chordType == .seventh) { name += " (+9)" }
         if heldChordAddSubBass { name += " /Bass" }
         if heldChordAddHighOctave { name += " +8va" }
         return name
     }
 
+    public func romanNumeral(forDegree degree: Int) -> String {
+        let totalDegree = degree + scaleDegreeShift + heldChordTemporaryStepShift
+        let intervals = currentScale.intervals
+        let numIntervals = intervals.count
+
+        let rootStep = totalDegree
+        let rootOctaveOffset = Int(floor(Double(rootStep) / Double(numIntervals)))
+        let rootIdx = ((rootStep % numIntervals) + numIntervals) % numIntervals
+        let rootPitch = Int(rootKey) + (rootOctaveOffset * 12) + intervals[rootIdx]
+
+        let thirdStep = totalDegree + 2
+        let thirdOctaveOffset = Int(floor(Double(thirdStep) / Double(numIntervals)))
+        let thirdIdx = ((thirdStep % numIntervals) + numIntervals) % numIntervals
+        let thirdPitch = Int(rootKey) + (thirdOctaveOffset * 12) + intervals[thirdIdx]
+        let thirdDiff = thirdPitch - rootPitch
+
+        let fifthStep = totalDegree + 4
+        let fifthOctaveOffset = Int(floor(Double(fifthStep) / Double(numIntervals)))
+        let fifthIdx = ((fifthStep % numIntervals) + numIntervals) % numIntervals
+        let fifthPitch = Int(rootKey) + (fifthOctaveOffset * 12) + intervals[fifthIdx]
+        let fifthDiff = fifthPitch - rootPitch
+
+        let degInScale = ((totalDegree % numIntervals) + numIntervals) % numIntervals
+        let majorNumerals = ["I", "II", "III", "IV", "V", "VI", "VII"]
+        let minorNumerals = ["i", "ii", "iii", "iv", "v", "vi", "vii"]
+
+        if thirdDiff == 3 && fifthDiff == 6 {
+            return "\(minorNumerals[degInScale])°"
+        } else if thirdDiff == 3 {
+            return minorNumerals[degInScale]
+        } else if thirdDiff == 4 && fifthDiff == 8 {
+            return "\(majorNumerals[degInScale])+"
+        } else {
+            return majorNumerals[degInScale]
+        }
+    }
+
     private func revoiceActiveChord() {
         if !activeFaceButtons.isEmpty {
-            let degreeMap = [0, 1, 3, 5]
             for btn in activeFaceButtons {
-                let deg = degreeMap[btn % degreeMap.count]
+                let deg = scaleDegreeForButton(index: btn)
                 activeFacePitches[btn] = computePitches(forDegree: deg)
             }
             let combined = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()

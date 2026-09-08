@@ -70,3 +70,7 @@
 - **2026-08-05**: Fixed dual arpeggiator freeze issue by coalescing HUD webview IPC updates, adding `pcall` execution guards around arp tick engines, and adding latency telemetry for `arpTick` > 15ms.
 
 - **Fix Arp Key Flickering & Dual-Engine Instability:** Resolved Arp key strobe flickering caused by `renderHud` removing and re-adding `latched-key` on every frame during Arp playback. Implemented `window.updateArpPitches` JS handler. Fixed dual-engine Arp timer termination bug in `src/arpeggiator.lua` where Top row releasing notes prematurely stopped the shared timer while Bottom row was still held.
+
+## 2026-09-08
+- **DualSynth Diatonic Engine, Held-Chord Morphing & Button State Visibility:** Replaced fixed semitones with true diatonic interval harmonization (`scaleDegreeShift`) matching `packages/music-engine/harmony.lua` (+/-1 and +/-3 steps, tonic reset). Implemented real-time held-chord morphing (+7th, +9th, Inversion, Sub-Bass) without note-on retriggering on release. Redesigned Create, Options, PS, Panic, D-Pad, and Face buttons with full on-button state indicators and Roman numerals. Link: [2026-09-08_15-15_diatonic-transposition-held-chord-morphing-button-state-ui.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-09-08_15-15_diatonic-transposition-held-chord-morphing-button-state-ui.md)
+

@@ -496,10 +496,10 @@ public struct DualSenseHUDView: View {
                             .frame(width: 108, height: 108)
                             .overlay(Circle().stroke(theme.wellBorder, lineWidth: 1.2))
 
-                        faceButton(symbol: "△", actionText: faceActionText(index: 3), active: controller.telemetry.triangle, color: .green, offset: CGSize(width: 0, height: -32))
-                        faceButton(symbol: "○", actionText: faceActionText(index: 2), active: controller.telemetry.circle, color: .red, offset: CGSize(width: 32, height: 0))
-                        faceButton(symbol: "✕", actionText: faceActionText(index: 0), active: controller.telemetry.cross, color: .blue, offset: CGSize(width: 0, height: 32))
-                        faceButton(symbol: "□", actionText: faceActionText(index: 1), active: controller.telemetry.square, color: .pink, offset: CGSize(width: -32, height: 0))
+                        faceButton(symbol: "△", actionText: faceActionText(index: 3), active: controller.telemetry.triangle, isHeld: controller.heldFaceButtonIndex == 3, color: .green, offset: CGSize(width: 0, height: -32))
+                        faceButton(symbol: "○", actionText: faceActionText(index: 2), active: controller.telemetry.circle, isHeld: controller.heldFaceButtonIndex == 2, color: .red, offset: CGSize(width: 32, height: 0))
+                        faceButton(symbol: "✕", actionText: faceActionText(index: 0), active: controller.telemetry.cross, isHeld: controller.heldFaceButtonIndex == 0, color: .blue, offset: CGSize(width: 0, height: 32))
+                        faceButton(symbol: "□", actionText: faceActionText(index: 1), active: controller.telemetry.square, isHeld: controller.heldFaceButtonIndex == 1, color: .pink, offset: CGSize(width: -32, height: 0))
                     }
                     .frame(width: 108, height: 108)
                 }
@@ -549,84 +549,118 @@ public struct DualSenseHUDView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Create Button (Pure Iconic ||| Glyph, No Tiny Text)
+    // MARK: - Create Button (Shows ||| Glyph & Live Chord Type)
     private var createButtonView: some View {
         Button(action: { controller.cycleChordType() }) {
-            HStack(spacing: 2.5) {
-                ForEach(0..<3) { _ in
-                    Capsule()
-                        .fill(controller.telemetry.create ? Color.cyan : theme.textSecondary)
-                        .frame(width: 2, height: 12)
+            VStack(spacing: 2) {
+                HStack(spacing: 3) {
+                    ForEach(0..<3) { _ in
+                        Capsule()
+                            .fill(controller.telemetry.create ? Color.cyan : theme.textSecondary)
+                            .frame(width: 2, height: 8)
+                    }
+                    Text("CHORD")
+                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .foregroundColor(controller.telemetry.create ? .cyan : theme.textSecondary)
                 }
+                Text(controller.chordType.rawValue.uppercased())
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .foregroundColor(controller.telemetry.create ? .white : .cyan)
+                    .lineLimit(1)
             }
-            .frame(width: 34, height: 28)
-            .background(controller.telemetry.create ? Color.cyan.opacity(0.25) : theme.buttonBg)
-            .overlay(Capsule().stroke(controller.telemetry.create ? Color.cyan : theme.buttonBorder, lineWidth: 1.2))
-            .clipShape(Capsule())
+            .frame(width: 64, height: 32)
+            .background(controller.telemetry.create ? Color.cyan.opacity(0.3) : theme.buttonBg)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.telemetry.create ? Color.cyan : theme.buttonBorder, lineWidth: 1.2))
+            .cornerRadius(6)
         }
         .buttonStyle(.plain)
-        .help("Create: Cycle Chord Types")
+        .help("Create: Cycle Chord Types (Triad, 7th, 9th, Sus4, Power)")
+        .fixedSize()
     }
 
-    // MARK: - Options Button (Pure Iconic ☰ Glyph, No Tiny Text)
+    // MARK: - Options Button (Shows ☰ Glyph & Live Scale Name)
     private var optionsButtonView: some View {
         Button(action: { controller.cycleScale() }) {
-            VStack(spacing: 2.5) {
-                ForEach(0..<3) { _ in
-                    Capsule()
-                        .fill(controller.telemetry.options ? Color.orange : theme.textSecondary)
-                        .frame(width: 12, height: 2)
+            VStack(spacing: 2) {
+                HStack(spacing: 3) {
+                    VStack(spacing: 1.5) {
+                        ForEach(0..<3) { _ in
+                            Capsule()
+                                .fill(controller.telemetry.options ? Color.orange : theme.textSecondary)
+                                .frame(width: 8, height: 1.5)
+                        }
+                    }
+                    Text("SCALE")
+                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .foregroundColor(controller.telemetry.options ? .orange : theme.textSecondary)
                 }
+                Text(controller.scaleName.uppercased())
+                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .foregroundColor(controller.telemetry.options ? .white : .orange)
+                    .lineLimit(1)
             }
-            .frame(width: 34, height: 28)
-            .background(controller.telemetry.options ? Color.orange.opacity(0.25) : theme.buttonBg)
-            .overlay(Capsule().stroke(controller.telemetry.options ? Color.orange : theme.buttonBorder, lineWidth: 1.2))
-            .clipShape(Capsule())
+            .frame(width: 64, height: 32)
+            .background(controller.telemetry.options ? Color.orange.opacity(0.3) : theme.buttonBg)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.telemetry.options ? Color.orange : theme.buttonBorder, lineWidth: 1.2))
+            .cornerRadius(6)
         }
         .buttonStyle(.plain)
-        .help("Options: Cycle Scale")
+        .help("Options: Cycle Musical Scale (Major, Minor, Dorian, etc.)")
+        .fixedSize()
     }
 
-    // MARK: - PS Button
+    // MARK: - PS Button (Shows PS & Live Latch State)
     private var psButtonView: some View {
         Button(action: { controller.toggleLatchMode() }) {
-            ZStack {
-                Circle()
-                    .fill(controller.telemetry.home ? Color.blue : theme.buttonBg)
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().stroke(controller.telemetry.home ? Color.blue : theme.buttonBorder, lineWidth: 1.5))
-                    .shadow(color: controller.telemetry.home ? .blue : .clear, radius: 6)
-
-                Text("PS")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .foregroundColor(controller.telemetry.home ? .white : theme.textPrimary)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Mic Mute Button
-    private var micMuteButtonView: some View {
-        Button(action: { controller.triggerPanic() }) {
-            VStack(spacing: 1) {
+            VStack(spacing: 2) {
                 ZStack {
-                    Capsule()
-                        .fill(controller.telemetry.micMuted ? Color.orange.opacity(0.4) : theme.buttonBg)
-                        .frame(width: 30, height: 12)
-                        .overlay(Capsule().stroke(controller.telemetry.micMuted ? Color.orange : theme.buttonBorder, lineWidth: 1))
-
                     Circle()
-                        .fill(controller.telemetry.micMuted ? Color.orange : Color.orange.opacity(0.4))
-                        .frame(width: 4, height: 4)
-                        .shadow(color: controller.telemetry.micMuted ? .orange : .clear, radius: 4)
+                        .fill(controller.telemetry.home ? Color.blue : theme.buttonBg)
+                        .frame(width: 32, height: 32)
+                        .overlay(Circle().stroke(controller.telemetry.home ? Color.blue : (controller.latchMode ? Color.cyan : theme.buttonBorder), lineWidth: 1.5))
+                        .shadow(color: controller.telemetry.home ? .blue : (controller.latchMode ? Color.cyan.opacity(0.4) : .clear), radius: 5)
+
+                    Text("PS")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundColor(controller.telemetry.home ? .white : (controller.latchMode ? .cyan : theme.textPrimary))
                 }
 
-                Text("MUTE")
-                    .font(.system(size: 7, weight: .black, design: .monospaced))
-                    .foregroundColor(controller.telemetry.micMuted ? .orange : theme.textTertiary)
+                Text(controller.latchMode ? "LATCH 🔒" : "MOMENT")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundColor(controller.latchMode ? .cyan : theme.textTertiary)
+                    .lineLimit(1)
             }
         }
         .buttonStyle(.plain)
+        .help("PS Button: Toggle Latch Mode")
+        .fixedSize()
+    }
+
+    // MARK: - Mic Mute Button (Shows Panic & Mute State)
+    private var micMuteButtonView: some View {
+        Button(action: { controller.triggerPanic() }) {
+            VStack(spacing: 2) {
+                ZStack {
+                    Capsule()
+                        .fill(controller.telemetry.micMuted ? Color.red.opacity(0.4) : theme.buttonBg)
+                        .frame(width: 32, height: 14)
+                        .overlay(Capsule().stroke(controller.telemetry.micMuted ? Color.red : theme.buttonBorder, lineWidth: 1))
+
+                    Circle()
+                        .fill(controller.telemetry.micMuted ? Color.red : Color.orange.opacity(0.5))
+                        .frame(width: 5, height: 5)
+                        .shadow(color: controller.telemetry.micMuted ? .red : .clear, radius: 4)
+                }
+
+                Text("PANIC")
+                    .font(.system(size: 7, weight: .black, design: .monospaced))
+                    .foregroundColor(controller.telemetry.micMuted ? .red : theme.textTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Mute Button: MIDI Panic (All Notes Off)")
+        .fixedSize()
     }
 
     // MARK: - Performance & Telemetry Deck
@@ -786,10 +820,10 @@ public struct DualSenseHUDView: View {
     }
 
     private var dpadHeaderTitle: String {
-        if controller.heldFaceButtonIndex != nil { return "MORPH (HELD)" }
-        if controller.isL1Held { return "SCALES (L1)" }
-        if controller.isR1Held { return "RATE/BPM (R1)" }
-        return "D-PAD (OCT/ROOT)"
+        if controller.heldFaceButtonIndex != nil { return "HELD MORPH" }
+        if controller.isL1Held { return "OCT / TONIC (L1)" }
+        if controller.isR1Held { return "TEMPO / RATE (R1)" }
+        return "DEGREE: \(controller.degreeName(controller.scaleDegreeShift))"
     }
 
     private var faceHeaderTitle: String {
@@ -804,37 +838,51 @@ public struct DualSenseHUDView: View {
     private func dpadLabel(for pos: DpadPos) -> String {
         if controller.heldFaceButtonIndex != nil {
             switch pos {
-            case .up: return "+8va"
-            case .down: return "+Sub"
-            case .left: return "Semi-"
-            case .right: return "Semi+"
+            case .up: return "+1 St"
+            case .down: return "-1 St"
+            case .left: return "+Sub"
+            case .right: return "+8va"
             }
         } else if controller.isL1Held {
             switch pos {
-            case .up: return "Maj"
-            case .down: return "Min"
-            case .left: return "Dor"
-            case .right: return "Mixo"
+            case .up: return "Oct+"
+            case .down: return "Oct-"
+            case .left: return "Tonic"
+            case .right: return "Semi+"
             }
         } else if controller.isR1Held {
             switch pos {
-            case .up: return "Rate▲"
-            case .down: return "Rate▼"
-            case .left: return "BPM-"
-            case .right: return "BPM+"
+            case .up: return "+5 BPM"
+            case .down: return "-5 BPM"
+            case .left: return "Rate-"
+            case .right: return "Rate+"
             }
         } else {
             switch pos {
-            case .up: return "▲"
-            case .down: return "▼"
-            case .left: return "◀"
-            case .right: return "▶"
+            case .up: return "+1 St"
+            case .down: return "-1 St"
+            case .left: return "-3 St"
+            case .right: return "+3 St"
             }
         }
     }
 
     private func faceActionText(index: Int) -> String {
-        if controller.isL1Held {
+        if controller.heldFaceButtonIndex != nil {
+            if controller.heldFaceButtonIndex == index {
+                return "HELD 🔒"
+            }
+            switch index {
+            case 1: // Square
+                return controller.heldChordAdd7th ? "+7th ON" : "+7th"
+            case 2: // Circle
+                return controller.heldChordAdd9th ? "+9th ON" : "+9th"
+            case 3: // Triangle
+                return "Inv+"
+            default: // Cross (0)
+                return controller.heldChordAddSubBass ? "+Bass ON" : "+Bass"
+            }
+        } else if controller.isL1Held {
             switch index {
             case 0: return "Root"
             case 1: return "1st Inv"
@@ -851,37 +899,18 @@ public struct DualSenseHUDView: View {
             default: return ""
             }
         } else {
-            let degreeMap = [0, 1, 3, 5]
-            let degree = degreeMap[index % degreeMap.count]
-            return chordLabel(degree: degree)
+            let degree = controller.scaleDegreeForButton(index: index)
+            let numeral = controller.romanNumeral(forDegree: degree)
+            let chord = controller.chordNameForDegree(degree)
+            return "\(numeral):\(chord)"
         }
-    }
-
-    private func chordLabel(degree: Int) -> String {
-        let noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-        let diatonicOffsets = [0, 2, 4, 5, 7, 9, 11]
-        let rootOffset = diatonicOffsets[degree % diatonicOffsets.count]
-        let pitch = Int(controller.rootKey) + rootOffset
-        let rootNote = noteNames[pitch % 12]
-
-        if !controller.chordMode { return rootNote }
-
-        let isMinor = (degree == 1 || (degree == 5 && controller.scaleName == "Major") || (degree == 0 && controller.scaleName == "Minor"))
-        let suffix: String
-        switch controller.chordType {
-        case .triad: suffix = isMinor ? "m" : "Maj"
-        case .seventh: suffix = isMinor ? "m7" : "M7"
-        case .sus4: suffix = "sus"
-        case .add9: suffix = isMinor ? "m9" : "9"
-        }
-        return "\(rootNote)\(suffix)"
     }
 
     private func dpadButton(label: String, active: Bool, offset: CGSize) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(active ? Color.cyan : theme.buttonBg)
-                .frame(width: 28, height: 28)
+                .frame(width: 32, height: 26)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(active ? Color.cyan : theme.buttonBorder, lineWidth: 1)
@@ -889,7 +918,7 @@ public struct DualSenseHUDView: View {
                 .shadow(color: active ? .cyan : .clear, radius: 6)
 
             Text(label)
-                .font(.system(size: label.count > 2 ? 8.5 : 12, weight: .black))
+                .font(.system(size: label.count > 4 ? 7 : (label.count > 2 ? 8 : 11), weight: .black, design: .monospaced))
                 .foregroundColor(active ? .black : theme.textPrimary)
                 .lineLimit(1)
         }
@@ -897,23 +926,23 @@ public struct DualSenseHUDView: View {
         .fixedSize()
     }
 
-    private func faceButton(symbol: String, actionText: String, active: Bool, color: Color, offset: CGSize) -> some View {
+    private func faceButton(symbol: String, actionText: String, active: Bool, isHeld: Bool, color: Color, offset: CGSize) -> some View {
         ZStack {
             Circle()
-                .fill(active ? color : theme.buttonBg)
-                .frame(width: 32, height: 32)
+                .fill(active ? color : (isHeld ? color.opacity(0.35) : theme.buttonBg))
+                .frame(width: 36, height: 36)
                 .overlay(
-                    Circle().stroke(active ? color : theme.buttonBorder, lineWidth: 1.2)
+                    Circle().stroke(active || isHeld ? color : theme.buttonBorder, lineWidth: active || isHeld ? 2 : 1.2)
                 )
-                .shadow(color: active ? color : .clear, radius: 8)
+                .shadow(color: active || isHeld ? color.opacity(0.6) : .clear, radius: 8)
 
             VStack(spacing: 0) {
                 Text(symbol)
-                    .font(.system(size: 11, weight: .black))
+                    .font(.system(size: 10, weight: .black))
                     .foregroundColor(active ? .white : color)
                     .lineLimit(1)
                 Text(actionText)
-                    .font(.system(size: actionText.count > 4 ? 7.5 : 9, weight: .black, design: .monospaced))
+                    .font(.system(size: actionText.count > 6 ? 7 : (actionText.count > 4 ? 7.5 : 8.5), weight: .black, design: .monospaced))
                     .foregroundColor(active ? .white : theme.textPrimary)
                     .lineLimit(1)
             }
