@@ -1,6 +1,8 @@
 import Foundation
 import DualSynthCore
 
+setbuf(stdout, nil)
+
 final class DualSynthCoordinator: DualSynthDelegate {
     let midi = MIDIEngine(clientName: "DualSynth Daemon", endpointName: "DualSynth Virtual Out")
     let controller = ControllerManager()
