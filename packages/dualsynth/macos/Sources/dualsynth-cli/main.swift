@@ -44,6 +44,11 @@ final class DualSynthCoordinator: DualSynthDelegate {
         midi.sendCC(controller: cc, value: value)
     }
 
+    func pitchBendChanged(value: UInt16) {
+        print("〰️ PITCH BEND -> \(value)")
+        midi.sendPitchBend(value: value)
+    }
+
     func panicTriggered() {
         print("🚨 PANIC -> All Notes Off")
         midi.allNotesOff()

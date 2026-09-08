@@ -461,7 +461,7 @@ public struct DualSenseHUDView: View {
                     x: controller.telemetry.leftStickX,
                     y: controller.telemetry.leftStickY,
                     isClicked: controller.telemetry.l3,
-                    subtitle: controller.isL1Held ? "Pitch Bend" : "Pitch Bend / Mod",
+                    subtitle: controller.isL1Held ? "Pitch Bend" : "X:Bend | Y:Mod/Cut",
                     theme: theme
                 )
 
@@ -479,7 +479,7 @@ public struct DualSenseHUDView: View {
                     x: controller.telemetry.rightStickX,
                     y: controller.telemetry.rightStickY,
                     isClicked: controller.telemetry.r3,
-                    subtitle: controller.isL1Held ? "Width / Chorus" : "Pan / Res (CC71)",
+                    subtitle: controller.isL1Held ? "Width / Chorus" : "X:Pan | Y:Dyn/Res",
                     theme: theme
                 )
 
@@ -676,13 +676,14 @@ public struct DualSenseHUDView: View {
 
                     Spacer()
 
-                    Text("VIBRATION:")
+                    Text("HAPTIC PULSE:")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
-                    Text(String(format: "%.0f%%", controller.telemetry.hapticIntensity * 100))
+                    let stage = Int(round(controller.telemetry.hapticIntensity * 5.0))
+                    Text(stage == 0 ? "OFF" : "STAGE \(stage)/5")
                         .font(.system(size: 11, weight: .black, design: .monospaced))
-                        .foregroundColor(controller.telemetry.hapticIntensity > 0.05 ? .orange : theme.textTertiary)
-                    if controller.telemetry.hapticIntensity > 0.05 {
+                        .foregroundColor(stage > 0 ? .orange : theme.textTertiary)
+                    if stage > 0 {
                         Image(systemName: "waveform.path")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundColor(.orange)

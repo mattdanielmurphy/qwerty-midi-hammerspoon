@@ -106,6 +106,7 @@ public protocol DualSynthDelegate: AnyObject {
     func notesTriggered(pitches: [UInt8], velocity: UInt8, name: String)
     func notesReleased(pitches: [UInt8], name: String)
     func continuousParamChanged(cc: UInt8, value: UInt8, name: String)
+    func pitchBendChanged(value: UInt16)
     func telemetryUpdated(_ telemetry: ControllerTelemetry)
     func panicTriggered()
 }
@@ -147,7 +148,9 @@ public final class ControllerManager: ObservableObject {
     private var r3PressTime: Date?
     private var r3Moved: Bool = false
 
-    // Internal active note sets
+    // Internal active note sets & multi-button arpeggiation
+    private var activeFaceButtons = Set<Int>()
+    private var activeFacePitches: [Int: [UInt8]] = [:]
     private var latchedPitches: [UInt8] = []
     private var currentlySoundingPitches: [UInt8] = []
     private var lastFaceDegree: Int = 0
@@ -161,9 +164,16 @@ public final class ControllerManager: ObservableObject {
     public var isL1Held: Bool = false
     public var isR1Held: Bool = false
 
-    // CoreHaptics
+    // CoreHaptics & Motion Smoothing
     private var hapticEngine: CHHapticEngine?
-    private var lastHapticPulseTime: Date = Date.distantPast
+    private var smoothedTiltDeg: Float = 0.0
+    private var currentHapticStage: Int = 0
+    private var lastHapticStageTime: Date = Date.distantPast
+
+    // Stick state tracking
+    private var lastPitchBendValue: UInt16 = 8192
+    private var lastLeftStickYActive: Bool = false
+    private var lastRightStickActive: Bool = false
 
     public init() {
         GCController.shouldMonitorBackgroundEvents = true
@@ -336,7 +346,7 @@ public final class ControllerManager: ObservableObject {
             self.notifyTelemetry()
         }
 
-        // 5. Left Thumbstick
+        // 5. Left Thumbstick: X = Pitch Bend (0..16383, 8192 center), Y = Mod (>0) / Filter Cutoff (<0)
         gamepad.leftThumbstick.valueChangedHandler = { [weak self] (_, xVal, yVal) in
             guard let self = self else { return }
             self.telemetry.leftStickX = xVal
@@ -355,15 +365,40 @@ public final class ControllerManager: ObservableObject {
                     self.revoiceActiveChord()
                 }
             } else {
-                if abs(yVal) > 0.05 {
-                    let modVal = UInt8(max(0, yVal) * 127)
-                    self.delegate?.continuousParamChanged(cc: 1, value: modVal, name: "Left Stick Y (Mod)")
+                // Pitch Bend on Left Stick X (Center = 8192, Range = 0..16383)
+                if abs(xVal) >= 0.04 {
+                    let norm = (Double(xVal) + 1.0) / 2.0
+                    let bendVal = UInt16(clamp(norm * 16383.0, min: 0, max: 16383))
+                    self.lastPitchBendValue = bendVal
+                    self.delegate?.pitchBendChanged(value: bendVal)
+                } else if self.lastPitchBendValue != 8192 {
+                    self.lastPitchBendValue = 8192
+                    self.delegate?.pitchBendChanged(value: 8192)
+                }
+
+                // Left Stick Y:
+                // Push UP (> 0.05): Modulation (CC #1) 0 -> 127
+                // Pull DOWN (< -0.05): Filter Cutoff (CC #74) sweep 127 -> 0 & Filter Breath (CC #2)
+                if yVal > 0.05 {
+                    self.lastLeftStickYActive = true
+                    let modVal = UInt8(yVal * 127)
+                    self.delegate?.continuousParamChanged(cc: 1, value: modVal, name: "LS Up (Mod CC1)")
+                } else if yVal < -0.05 {
+                    self.lastLeftStickYActive = true
+                    let filterVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 127.0), min: 0, max: 127))
+                    self.delegate?.continuousParamChanged(cc: 74, value: filterVal, name: "LS Down (Cutoff CC74)")
+                    self.delegate?.continuousParamChanged(cc: 2, value: filterVal, name: "LS Down (Filter CC2)")
+                } else if self.lastLeftStickYActive {
+                    self.lastLeftStickYActive = false
+                    self.delegate?.continuousParamChanged(cc: 1, value: 0, name: "LS Mod Reset")
+                    self.delegate?.continuousParamChanged(cc: 74, value: 127, name: "LS Filter Reset")
+                    self.delegate?.continuousParamChanged(cc: 2, value: 127, name: "LS Filter Reset")
                 }
             }
             self.notifyTelemetry()
         }
 
-        // 6. Right Thumbstick
+        // 6. Right Thumbstick: X = Stereo Pan (CC10), Y = Dynamics (CC11) / Resonance (CC71) / Brightness (CC74)
         gamepad.rightThumbstick.valueChangedHandler = { [weak self] (_, xVal, yVal) in
             guard let self = self else { return }
             self.telemetry.rightStickX = xVal
@@ -382,13 +417,36 @@ public final class ControllerManager: ObservableObject {
                     if self.isArpActive { self.restartArpeggiator() }
                 }
             } else {
-                if abs(xVal) > 0.08 {
-                    let panVal = UInt8(clamp((xVal + 1.0) / 2.0 * 127, min: 0, max: 127))
-                    self.delegate?.continuousParamChanged(cc: 10, value: panVal, name: "Right Stick X (Pan)")
+                // Right Stick X: Stereo Pan (CC #10, Center = 64)
+                if abs(xVal) >= 0.05 {
+                    self.lastRightStickActive = true
+                    let panVal = UInt8(clamp((Double(xVal) + 1.0) / 2.0 * 127.0, min: 0, max: 127))
+                    self.delegate?.continuousParamChanged(cc: 10, value: panVal, name: "RS Pan (CC10)")
+                } else if self.lastRightStickActive && abs(yVal) < 0.05 {
+                    self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
                 }
-                if abs(yVal) > 0.08 {
-                    let resVal = UInt8(max(0, yVal) * 127)
-                    self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "Right Stick Y (Res)")
+
+                // Right Stick Y:
+                // Push UP (> 0.05): Resonance (CC71) + Expression Boost (CC11) + Brightness (CC74)
+                // Pull DOWN (< -0.05): Dynamics Dip (CC11) 127 -> 20 + Cutoff Dip (CC74)
+                if yVal > 0.05 {
+                    self.lastRightStickActive = true
+                    let resVal = UInt8(yVal * 127)
+                    let brightVal = UInt8(clamp(64 + Double(yVal) * 63.0, min: 64, max: 127))
+                    self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "RS Res (CC71)")
+                    self.delegate?.continuousParamChanged(cc: 74, value: brightVal, name: "RS Brightness (CC74)")
+                } else if yVal < -0.05 {
+                    self.lastRightStickActive = true
+                    let dipVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 107.0), min: 20, max: 127))
+                    let cutoffVal = UInt8(clamp(127.0 - (Double(abs(yVal)) * 110.0), min: 10, max: 127))
+                    self.delegate?.continuousParamChanged(cc: 11, value: dipVal, name: "RS Expr Dip (CC11)")
+                    self.delegate?.continuousParamChanged(cc: 74, value: cutoffVal, name: "RS Cutoff Dip (CC74)")
+                } else if self.lastRightStickActive && abs(xVal) < 0.05 {
+                    self.lastRightStickActive = false
+                    self.delegate?.continuousParamChanged(cc: 71, value: 0, name: "RS Res Reset")
+                    self.delegate?.continuousParamChanged(cc: 74, value: 127, name: "RS Cutoff Reset")
+                    self.delegate?.continuousParamChanged(cc: 11, value: 127, name: "RS Expr Reset")
+                    self.delegate?.continuousParamChanged(cc: 10, value: 64, name: "RS Pan Center")
                 }
             }
             self.notifyTelemetry()
@@ -484,7 +542,7 @@ public final class ControllerManager: ObservableObject {
         }
     }
 
-    // MARK: - Motion Sensors (Corrected Tilt Direction: Flat = 0, Ceiling = 127)
+    // MARK: - Motion Sensors (Heavy EMA Smoothing, Rest Deadband & 5-Stage Haptic Pulses)
     private func setupMotionSensors(_ controller: GCController) {
         guard let motion = controller.motion else { return }
         motion.sensorsActive = true
@@ -495,42 +553,67 @@ public final class ControllerManager: ObservableObject {
             let az = Double(m.acceleration.z)
 
             // Resting flat on table: ay ≈ 0.174, az ≈ -0.985
-            // Tilting back (top/jack to ceiling): ay decreases from +0.174 down to -1.0
-            // delta = restAy - ay goes from 0.0 (flat) up to ~1.17 (ceiling)
+            // Tilting back (top/jack to ceiling): ay decreases from +0.174 down towards -1.0
             let restAy = 0.174
             let delta = restAy - ay
-            let angleRad = atan2(delta, max(0.01, -az))
-            let tiltDeg = Float(max(0.0, min(80.0, angleRad * 180.0 / .pi)))
+            let rawAngleRad = atan2(max(0.0, delta), max(0.01, -az))
+            let rawTiltDeg = Float(rawAngleRad * 180.0 / .pi)
 
-            let normalized = min(1.0, max(0.0, tiltDeg / 75.0))
+            // 1. Heavy Low-Pass / Exponential Moving Average Filter (alpha = 0.08)
+            let alpha: Float = 0.08
+            self.smoothedTiltDeg = (alpha * rawTiltDeg) + ((1.0 - alpha) * self.smoothedTiltDeg)
+
+            // 2. Solid Table-Rest Deadband: Any tilt under 4.5° is locked strictly to 0.0°
+            let filteredDeg: Float
+            if self.smoothedTiltDeg < 4.5 {
+                filteredDeg = 0.0
+            } else {
+                let scaled = (self.smoothedTiltDeg - 4.5) / (72.0 - 4.5)
+                filteredDeg = max(0.0, min(80.0, scaled * 80.0))
+            }
+
+            let normalized = min(1.0, max(0.0, filteredDeg / 75.0))
             let mwVal = UInt8(normalized * 127.0)
 
-            if mwVal != self.telemetry.modWheel || abs(tiltDeg - self.telemetry.pitchAngle) > 0.5 {
-                self.telemetry.pitchAngle = tiltDeg
+            if mwVal != self.telemetry.modWheel || abs(filteredDeg - self.telemetry.pitchAngle) > 0.5 {
+                self.telemetry.pitchAngle = filteredDeg
                 self.telemetry.modWheel = mwVal
                 self.delegate?.continuousParamChanged(cc: 1, value: mwVal, name: "Gyro Mod Wheel (CC1)")
 
-                // Vibration scaling:
-                // MW = 0 -> 0.0
-                // MW = 50 -> 0.20 (20%)
-                // MW = 127 -> 0.40 (40%)
-                let intensity: Float
-                if mwVal == 0 {
-                    intensity = 0.0
-                } else if mwVal <= 50 {
-                    intensity = (Float(mwVal) / 50.0) * 0.20
-                } else {
-                    intensity = 0.20 + ((Float(mwVal) - 50.0) / 77.0) * 0.20
+                // 3. Discrete 5-Stage Haptic Feedback (NO constant vibration!)
+                // Stage 0: 0 (Resting flat, silent)
+                // Stage 1: 1 ... 25   -> 1 subtle pulse
+                // Stage 2: 26 ... 50  -> 1 solid pulse
+                // Stage 3: 51 ... 75  -> 2 pulses
+                // Stage 4: 76 ... 101 -> 2 strong pulses
+                // Stage 5: 102 ... 127 -> 3 maximum strength pulses!
+                let newStage: Int
+                switch mwVal {
+                case 0: newStage = 0
+                case 1...25: newStage = 1
+                case 26...50: newStage = 2
+                case 51...75: newStage = 3
+                case 76...101: newStage = 4
+                default: newStage = 5
                 }
 
-                self.telemetry.hapticIntensity = intensity
-                self.triggerHapticPulse(intensity: intensity)
+                if newStage != self.currentHapticStage {
+                    let oldStage = self.currentHapticStage
+                    self.currentHapticStage = newStage
+                    self.telemetry.hapticIntensity = Float(newStage) / 5.0
+
+                    // Trigger pulse burst when entering higher stages or coming out of rest
+                    if newStage > oldStage || (newStage > 0 && oldStage == 0) {
+                        self.triggerStageHapticBurst(stage: newStage)
+                    }
+                }
+
                 self.notifyTelemetry()
             }
         }
     }
 
-    // MARK: - CoreHaptics Engine (Fixed: Grain Pulses with No -4810 Errors)
+    // MARK: - CoreHaptics Engine (5-Stage Discrete Pulse Bursts)
     private func setupHaptics(_ controller: GCController) {
         guard let haptics = controller.haptics else { return }
         do {
@@ -544,24 +627,45 @@ public final class ControllerManager: ObservableObject {
         }
     }
 
-    private func triggerHapticPulse(intensity: Float) {
-        guard intensity > 0.02, let engine = hapticEngine else { return }
+    private func triggerStageHapticBurst(stage: Int) {
+        guard stage > 0, let engine = hapticEngine else { return }
 
-        // Throttle pulses to every 0.12 seconds to prevent player flooding
         let now = Date()
-        guard now.timeIntervalSince(lastHapticPulseTime) >= 0.12 else { return }
-        lastHapticPulseTime = now
+        guard now.timeIntervalSince(lastHapticStageTime) >= 0.15 else { return }
+        lastHapticStageTime = now
 
-        let intParam = CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity)
-        let shParam = CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.5)
-        let event = CHHapticEvent(eventType: .hapticContinuous, parameters: [intParam, shParam], relativeTime: 0, duration: 0.12)
+        let count: Int
+        let intensity: Float
+        let sharpness: Float
+
+        switch stage {
+        case 1:
+            count = 1; intensity = 0.25; sharpness = 0.3
+        case 2:
+            count = 1; intensity = 0.40; sharpness = 0.5
+        case 3:
+            count = 2; intensity = 0.55; sharpness = 0.6
+        case 4:
+            count = 2; intensity = 0.70; sharpness = 0.75
+        case 5:
+            count = 3; intensity = 0.85; sharpness = 0.9
+        default:
+            return
+        }
+
+        var events: [CHHapticEvent] = []
+        for i in 0..<count {
+            let relativeTime = Double(i) * 0.08
+            let intParam = CHHapticEventParameter(parameterID: .hapticIntensity, value: intensity)
+            let shParam = CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness)
+            events.append(CHHapticEvent(eventType: .hapticTransient, parameters: [intParam, shParam], relativeTime: relativeTime))
+        }
 
         do {
-            let pattern = try CHHapticPattern(events: [event], parameters: [])
+            let pattern = try CHHapticPattern(events: events, parameters: [])
             let player = try engine.makePlayer(with: pattern)
             try player.start(atTime: 0)
         } catch {
-            // Engine might need restart
             try? engine.start()
         }
     }
@@ -594,28 +698,64 @@ public final class ControllerManager: ObservableObject {
                 if isArpActive { restartArpeggiator() }
             }
         } else {
-            // Base Layer: Press and Hold Morph Mode
+            // Base Layer: Multi-Button Press & Arp Pooling + Held-Chord Morphing
             let degreeMap = [0, 1, 3, 5]
             let degree = degreeMap[buttonIndex % degreeMap.count]
 
             if pressed {
-                if heldFaceButtonIndex == nil {
-                    // First button pressed: enter held chord state!
-                    heldFaceButtonIndex = buttonIndex
+                if activeFaceButtons.isEmpty {
                     heldChordTemporaryTranspose = 0
                     heldChordAddSubBass = false
                     heldChordAddHighOctave = false
-                    telemetry.isHoldingChord = true
-                    handleFaceButton(degreeIndex: degree, buttonName: faceButtonName(buttonIndex), pressed: true)
-                } else if heldFaceButtonIndex != buttonIndex {
-                    // SECOND button pressed while holding first: add extension!
-                    heldChordAddHighOctave.toggle()
-                    revoiceActiveChord()
-                    lastEventDescription = "Chord Extension Added!"
+                }
+                activeFaceButtons.insert(buttonIndex)
+                heldFaceButtonIndex = activeFaceButtons.first
+                telemetry.isHoldingChord = true
+                lastFaceDegree = degree
+
+                let pitches = computePitches(forDegree: degree)
+                activeFacePitches[buttonIndex] = pitches
+
+                let combinedPitches = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
+                latchedPitches = combinedPitches
+                telemetry.activeChordNotes = combinedPitches
+
+                let chordLabel = chordNameForDegree(degree)
+                telemetry.activeChordName = activeFaceButtons.count > 1 ? "\(chordLabel)+ (\(combinedPitches.count) notes)" : chordLabel
+
+                let triggerVal = telemetry.rightTrigger
+                let velocity: UInt8 = triggerVal > 0.05 ? UInt8(60 + triggerVal * 67) : 100
+
+                if isArpActive {
+                    restartArpeggiator()
+                    lastEventDescription = "Arp (\(combinedPitches.count) notes): \(combinedPitches.map { noteNameForPitch($0) }.joined(separator: " "))"
+                } else {
+                    releaseCurrentlySoundingNotes()
+                    playBlockChord(pitches: combinedPitches, name: telemetry.activeChordName, velocity: velocity)
+                    lastEventDescription = "\(telemetry.activeChordName) (\(combinedPitches.map { noteNameForPitch($0) }.joined(separator: "-")))"
                 }
             } else {
-                if heldFaceButtonIndex == buttonIndex {
-                    // Released the primary held chord button!
+                activeFaceButtons.remove(buttonIndex)
+                activeFacePitches.removeValue(forKey: buttonIndex)
+
+                if !activeFaceButtons.isEmpty {
+                    // Other button(s) are still held! Keep arpeggiating or voicing remaining notes
+                    heldFaceButtonIndex = activeFaceButtons.first
+                    let remaining = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
+                    latchedPitches = remaining
+                    telemetry.activeChordNotes = remaining
+
+                    if isArpActive {
+                        restartArpeggiator()
+                        lastEventDescription = "Arp: \(remaining.map { noteNameForPitch($0) }.joined(separator: " "))"
+                    } else {
+                        releaseCurrentlySoundingNotes()
+                        let triggerVal = telemetry.rightTrigger
+                        let velocity: UInt8 = triggerVal > 0.05 ? UInt8(60 + triggerVal * 67) : 100
+                        playBlockChord(pitches: remaining, name: "Held Harmony", velocity: velocity)
+                    }
+                } else {
+                    // ALL face buttons released
                     heldFaceButtonIndex = nil
                     heldChordTemporaryTranspose = 0
                     heldChordAddSubBass = false
@@ -623,10 +763,15 @@ public final class ControllerManager: ObservableObject {
                     telemetry.isHoldingChord = false
 
                     if !latchMode {
-                        releaseCurrentlySoundingNotes()
+                        if isArpActive {
+                            stopArpeggiator()
+                        } else {
+                            releaseCurrentlySoundingNotes()
+                        }
+                        latchedPitches.removeAll()
+                        telemetry.activeChordNotes.removeAll()
                         lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
                     } else {
-                        // Re-voice back to default un-morphed chord in latch mode
                         revoiceActiveChord()
                     }
                 }
@@ -790,6 +935,8 @@ public final class ControllerManager: ObservableObject {
         stopArpeggiator()
         releaseCurrentlySoundingNotes()
         latchedPitches.removeAll()
+        activeFaceButtons.removeAll()
+        activeFacePitches.removeAll()
         heldFaceButtonIndex = nil
         heldChordTemporaryTranspose = 0
         heldChordAddSubBass = false
@@ -927,17 +1074,29 @@ public final class ControllerManager: ObservableObject {
     }
 
     private func revoiceActiveChord() {
-        guard !latchedPitches.isEmpty else { return }
-        let newPitches = computePitches(forDegree: lastFaceDegree)
-        latchedPitches = newPitches
-        telemetry.activeChordNotes = newPitches
-        telemetry.activeChordName = chordNameForDegree(lastFaceDegree)
+        if !activeFaceButtons.isEmpty {
+            let degreeMap = [0, 1, 3, 5]
+            for btn in activeFaceButtons {
+                let deg = degreeMap[btn % degreeMap.count]
+                activeFacePitches[btn] = computePitches(forDegree: deg)
+            }
+            let combined = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
+            latchedPitches = combined
+            telemetry.activeChordNotes = combined
+            let chordLabel = chordNameForDegree(lastFaceDegree)
+            telemetry.activeChordName = activeFaceButtons.count > 1 ? "\(chordLabel)+ (\(combined.count) notes)" : chordLabel
+        } else if !latchedPitches.isEmpty {
+            let newPitches = computePitches(forDegree: lastFaceDegree)
+            latchedPitches = newPitches
+            telemetry.activeChordNotes = newPitches
+            telemetry.activeChordName = chordNameForDegree(lastFaceDegree)
+        }
 
         if isArpActive {
             restartArpeggiator()
-        } else {
+        } else if !currentlySoundingPitches.isEmpty || latchMode {
             releaseCurrentlySoundingNotes()
-            playBlockChord(pitches: newPitches, name: telemetry.activeChordName)
+            playBlockChord(pitches: latchedPitches, name: telemetry.activeChordName)
         }
     }
 

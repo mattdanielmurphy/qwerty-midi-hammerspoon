@@ -58,6 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
         midi.sendCC(controller: cc, value: value)
     }
 
+    func pitchBendChanged(value: UInt16) {
+        midi.sendPitchBend(value: value)
+    }
+
     func panicTriggered() {
         midi.allNotesOff()
     }
