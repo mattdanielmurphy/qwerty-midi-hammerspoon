@@ -58,6 +58,25 @@ public final class MIDIEngine {
         sendPacket(packet)
     }
 
+    public func sendNotesOn(pitches: [UInt8], velocity: UInt8, channel: UInt8 = 0) {
+        for pitch in pitches {
+            sendNoteOn(pitch: pitch, velocity: velocity, channel: channel)
+        }
+    }
+
+    public func sendNotesOff(pitches: [UInt8], channel: UInt8 = 0) {
+        for pitch in pitches {
+            sendNoteOff(pitch: pitch, velocity: 0, channel: channel)
+        }
+    }
+
+    public func allNotesOff(channel: UInt8 = 0) {
+        // MIDI CC 123 is All Notes Off
+        sendCC(controller: 123, value: 0, channel: channel)
+        // MIDI CC 120 is All Sound Off
+        sendCC(controller: 120, value: 0, channel: channel)
+    }
+
     private func sendPacket(_ bytes: [UInt8]) {
         guard isConnected else { return }
         var packetList = MIDIPacketList()

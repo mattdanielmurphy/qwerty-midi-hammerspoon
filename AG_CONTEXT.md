@@ -7,7 +7,7 @@
 - `packages/music-engine/`: Core musical intelligence (harmony, scale quantizer, chord voicings, master clock, arpeggiator).
 - `packages/surface-hud/`: Framework-agnostic Vite/WebKit HUD with 30fps coalescing and Web Audio anti-suspension sentinels.
 - `packages/studio-suite/`: Master multi-controller orchestrator (QWERTY Ch 1 + nanoKEY Ch 2).
-- `packages/dualsynth/`: Handheld software-defined MIDI groovebox & 3D studio environment using Sony PS5 DualSense (`GameController.framework`, virtual CoreMIDI endpoint, spatial D-pad/diamond HUD scaffolding).
+- `packages/dualsynth/`: Handheld software-defined MIDI groovebox & 3D studio environment using Sony PS5 DualSense (`GameController.framework`, virtual CoreMIDI endpoint, native SwiftUI HUD with light/dark appearance, 6-axis gyro tilt-to-ModWheel CC#1, CoreHaptics vibration, and built-in Chord/Latch/Arp engine).
 
 ## Key Files
 - `packages/`: Monorepo packages directory.

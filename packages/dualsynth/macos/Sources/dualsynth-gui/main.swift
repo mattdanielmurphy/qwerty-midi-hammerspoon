@@ -13,13 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
         let contentView = DualSenseHUDView(controller: controller, midi: midi)
 
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 500),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.center()
-        window.title = "DualSynth Controller HUD"
+        window.minSize = NSSize(width: 760, height: 540)
+        window.title = "DualSynth Studio HUD"
         window.contentView = NSHostingView(rootView: contentView)
         window.level = .floating // Keep on top so user can see it while playing in Logic Pro!
         window.isReleasedWhenClosed = false
@@ -45,16 +46,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
         // UI automatically updates via @ObservedObject controller
     }
 
-    func noteTriggered(pitch: UInt8, velocity: UInt8, name: String) {
-        midi.sendNoteOn(pitch: pitch, velocity: velocity)
+    func notesTriggered(pitches: [UInt8], velocity: UInt8, name: String) {
+        midi.sendNotesOn(pitches: pitches, velocity: velocity)
     }
 
-    func noteReleased(pitch: UInt8, name: String) {
-        midi.sendNoteOff(pitch: pitch)
+    func notesReleased(pitches: [UInt8], name: String) {
+        midi.sendNotesOff(pitches: pitches)
     }
 
     func continuousParamChanged(cc: UInt8, value: UInt8, name: String) {
         midi.sendCC(controller: cc, value: value)
+    }
+
+    func panicTriggered() {
+        midi.allNotesOff()
     }
 
     func telemetryUpdated(_ telemetry: ControllerTelemetry) {

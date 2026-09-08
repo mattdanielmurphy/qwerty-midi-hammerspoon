@@ -29,19 +29,24 @@ final class DualSynthCoordinator: DualSynthDelegate {
         print("🔀 Layer Switched -> [\(layer.rawValue)]")
     }
 
-    func noteTriggered(pitch: UInt8, velocity: UInt8, name: String) {
-        print("🎵 NOTE ON  -> \(name) | Pitch: \(pitch) | Velocity: \(velocity)")
-        midi.sendNoteOn(pitch: pitch, velocity: velocity)
+    func notesTriggered(pitches: [UInt8], velocity: UInt8, name: String) {
+        print("🎵 NOTES ON  -> \(name) | Pitches: \(pitches) | Velocity: \(velocity)")
+        midi.sendNotesOn(pitches: pitches, velocity: velocity)
     }
 
-    func noteReleased(pitch: UInt8, name: String) {
-        print("🔇 NOTE OFF -> \(name) | Pitch: \(pitch)")
-        midi.sendNoteOff(pitch: pitch)
+    func notesReleased(pitches: [UInt8], name: String) {
+        print("🔇 NOTES OFF -> \(name) | Pitches: \(pitches)")
+        midi.sendNotesOff(pitches: pitches)
     }
 
     func continuousParamChanged(cc: UInt8, value: UInt8, name: String) {
         print("🎛️ CC #\(cc) [\(name)] -> \(value)")
         midi.sendCC(controller: cc, value: value)
+    }
+
+    func panicTriggered() {
+        print("🚨 PANIC -> All Notes Off")
+        midi.allNotesOff()
     }
 
     func telemetryUpdated(_ telemetry: ControllerTelemetry) {
