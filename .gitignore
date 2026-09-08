@@ -2,12 +2,16 @@
 node_modules/
 /node_modules
 
-# Build & Rust outputs
+# Build, Swift & Rust outputs
 dist/
 /dist
 target/
 **/target/
 src-tauri/target/
+.build/
+**/.build/
+.swiftpm/
+**/.swiftpm/
 
 # System / OS
 .DS_Store
