@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/master.swiftdeps"
+  },
+  "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/dualsynth-cli/main.swift": {
+    "dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.d",
+    "object": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.swift.o",
+    "swiftmodule": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.swiftdeps",
+    "diagnostics": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.dia"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "dualsense_default",
+  "name": "Sony PS5 DualSense - DualSynth Controller",
+  "type": "gamepad_surface",
+  "description": "Spatial D-Pad Cross & Face Diamond layout with momentary L1 (Harmony) and R1 (Looper) shift layers.",
+  "dimensions": {
+    "width": 800,
+    "height": 520
+  },
+  "lightbar": {
+    "base": "#10B981",
+    "harmony": "#3B82F6",
+    "looper": "#F59E0B",
+    "fx": "#EC4899"
+  },
+  "sections": {
+    "dpad_cross": [
+      { "id": "dpad_up", "name": "Up", "default": { "action": "octaveUp", "label": "Oct +" }, "harmony": { "action": "invUp", "label": "Inv +" }, "looper": { "action": "trackUp", "label": "Trk +" } },
+      { "id": "dpad_down", "name": "Down", "default": { "action": "octaveDown", "label": "Oct -" }, "harmony": { "action": "invDown", "label": "Inv -" }, "looper": { "action": "trackDown", "label": "Trk -" } },
+      { "id": "dpad_left", "name": "Left", "default": { "action": "rootDown", "label": "Root -" }, "harmony": { "action": "voicingCycle", "label": "Voicing" }, "looper": { "action": "undoLoop", "label": "Undo" } },
+      { "id": "dpad_right", "name": "Right", "default": { "action": "rootUp", "label": "Root +" }, "harmony": { "action": "spreadCycle", "label": "Spread" }, "looper": { "action": "clearTrack", "label": "Clear" } }
+    ],
+    "face_diamond": [
+      { "id": "button_triangle", "name": "Triangle (△)", "default": { "action": "scaleDegree4", "label": "IV", "noteOffset": 5 }, "harmony": { "action": "chordMaj7", "label": "Maj7" }, "looper": { "action": "track4Mute", "label": "Trk 4 Mute" } },
+      { "id": "button_circle", "name": "Circle (○)", "default": { "action": "scaleDegree3", "label": "III", "noteOffset": 4 }, "harmony": { "action": "chordDom7", "label": "Dom7" }, "looper": { "action": "track3Mute", "label": "Trk 3 Mute" } },
+      { "id": "button_cross", "name": "Cross (✕)", "default": { "action": "scaleDegree1", "label": "I (Root)", "noteOffset": 0 }, "harmony": { "action": "chordTriad", "label": "Triad" }, "looper": { "action": "recordOverdub", "label": "Rec/Dub" } },
+      { "id": "button_square", "name": "Square (□)", "default": { "action": "scaleDegree2", "label": "II", "noteOffset": 2 }, "harmony": { "action": "chordMin7", "label": "Min7" }, "looper": { "action": "playStop", "label": "Play/Stop" } }
+    ],
+    "shoulder_bumpers": [
+      { "id": "bumper_l1", "name": "L1", "type": "momentary_modifier", "layer": "harmony", "label": "HOLD: HARMONY / CHORD", "lightbarColor": "#3B82F6" },
+      { "id": "bumper_r1", "name": "R1", "type": "momentary_modifier", "layer": "looper", "label": "HOLD: TRACK / LOOPER", "lightbarColor": "#F59E0B" }
+    ],
+    "analog_triggers": [
+      { "id": "trigger_l2", "name": "L2 Trigger", "axis": "continuous_analog", "range": [0.0, 1.0], "mapping": "CC #74 (Filter Cutoff)", "adaptiveDetent": "stepped_4_zone" },
+      { "id": "trigger_r2", "name": "R2 Trigger", "axis": "continuous_analog", "range": [0.0, 1.0], "mapping": "Dynamic Velocity & Gate", "adaptiveDetent": "click_bottom" }
+    ],
+    "thumbsticks": [
+      { "id": "stick_left", "name": "Left Thumbstick", "axes": { "x": "Pitch Bend", "y": "Modulation (CC #1)" }, "click": { "id": "l3", "name": "L3 Click", "action": "arpLatchToggle", "label": "Arp Latch" } },
+      { "id": "stick_right", "name": "Right Thumbstick", "axes": { "x": "Pan (CC #10)", "y": "Resonance (CC #71)" }, "click": { "id": "r3", "name": "R3 Click", "action": "tapTempo", "label": "Tap Tempo" } }
+    ],
+    "center_controls": [
+      { "id": "btn_create", "name": "Create / Share", "action": "panicReset", "label": "Panic / Reset" },
+      { "id": "btn_options", "name": "Options", "action": "toggleHUD", "label": "HUD View" },
+      { "id": "btn_touchpad", "name": "Touchpad Click", "action": "xyKaossToggle", "label": "Touch Surface" },
+      { "id": "btn_ps", "name": "PS Home", "action": "masterMute", "label": "Master Mute" }
+    ]
+  }
+}

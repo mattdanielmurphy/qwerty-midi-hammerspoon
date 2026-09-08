@@ -1,0 +1,470 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.DualSynthCore-arm64-apple-macosx15.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/sources",
+      "importPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/ControllerManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/MIDIEngine.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "DualSynthCore",
+      "moduleOutputPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules/DualSynthCore.swiftmodule",
+      "objects" : [
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.swift.o",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j12",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/include/DualSynthCore-Swift.h",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "macos"
+      ],
+      "outputFileMapPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules/DualSynthCore.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/ControllerManager.swift",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/MIDIEngine.swift"
+      ],
+      "tempsPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.dualsynth-cli-arm64-apple-macosx15.0-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/sources",
+      "importPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/dualsynth-cli/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules/DualSynthCore.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "dualsynth_cli",
+      "moduleOutputPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules/dualsynth_cli.swiftmodule",
+      "objects" : [
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j12",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-Xfrontend",
+        "-entry-point-function-name",
+        "-Xfrontend",
+        "dualsynth_cli_main",
+        "-swift-version",
+        "5",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "macos"
+      ],
+      "outputFileMapPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules/dualsynth_cli.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/dualsynth-cli/main.swift"
+      ],
+      "tempsPath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "DualSynthCore" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "DualSynthCore",
+      "-package-name",
+      "macos",
+      "-c",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/ControllerManager.swift",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/MIDIEngine.swift",
+      "-I",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j12",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/include/DualSynthCore-Swift.h",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "macos",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "dualsynth_cli" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "dualsynth_cli",
+      "-package-name",
+      "macos",
+      "-c",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/dualsynth-cli/main.swift",
+      "-I",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j12",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-Xfrontend",
+      "-entry-point-function-name",
+      "-Xfrontend",
+      "dualsynth_cli_main",
+      "-swift-version",
+      "5",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "macos",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "DualSynthCore" : [
+
+    ],
+    "dualsynth_cli" : [
+      "DualSynthCore"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/ControllerManager.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/MIDIEngine.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/sources"
+    },
+    "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth-cli-entitlement.plist" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<entitlement-plist>"
+        },
+        {
+          "kind" : "virtual",
+          "name" : "<com.apple.security.get-task-allow>"
+        }
+      ],
+      "outputFilePath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth-cli-entitlement.plist"
+    },
+    "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth-cli.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth-cli.product/Objects.LinkFileList"
+    },
+    "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/dualsynth-cli/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/dualsynth_cli.build/sources"
+    },
+    "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

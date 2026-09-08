@@ -1,0 +1,19 @@
+{
+  "": {
+    "swift-dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/master.swiftdeps"
+  },
+  "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/ControllerManager.swift": {
+    "dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.d",
+    "object": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.swift.o",
+    "swiftmodule": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.swiftdeps",
+    "diagnostics": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/ControllerManager.dia"
+  },
+  "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/Sources/DualSynthCore/MIDIEngine.swift": {
+    "dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.d",
+    "object": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.swift.o",
+    "swiftmodule": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine~partial.swiftmodule",
+    "swift-dependencies": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.swiftdeps",
+    "diagnostics": "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/MIDIEngine.dia"
+  }
+}

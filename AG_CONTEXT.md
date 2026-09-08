@@ -1,11 +1,18 @@
 # Repository Context & Domain Knowledge
 
-## Project Overview
-`qwerty-midi-hammerspoon` is a standalone Hammerspoon automation project providing a modal, key-swallowing MIDI controller with a real-time canvas dashboard.
+## Project Overview & Monorepo Structure
+`surface-studio-suite` (formerly `qwerty-midi-hammerspoon`) is a Bun workspace monorepo (`packages/*`) unifying multimodal MIDI performance surfaces with a shared music engine and spatial HUD:
+- `packages/qwerty-midi/`: Modular QWERTY keyboard MIDI controller for Hammerspoon.
+- `packages/nanokey-studio/`: Korg nanoKEY Studio hardware driver with CC=54 sustain macro layer.
+- `packages/music-engine/`: Core musical intelligence (harmony, scale quantizer, chord voicings, master clock, arpeggiator).
+- `packages/surface-hud/`: Framework-agnostic Vite/WebKit HUD with 30fps coalescing and Web Audio anti-suspension sentinels.
+- `packages/studio-suite/`: Master multi-controller orchestrator (QWERTY Ch 1 + nanoKEY Ch 2).
+- `packages/dualsynth/`: Handheld software-defined MIDI groovebox & 3D studio environment using Sony PS5 DualSense (`GameController.framework`, virtual CoreMIDI endpoint, spatial D-pad/diamond HUD scaffolding).
 
 ## Key Files
-- `src/`: Modular Lua code directory (`config.lua`, `midi.lua`, `transposer.lua`, `arpeggiator.lua`, `hud.lua`, `controls.lua`, `ui_html.lua`).
-- `bin/hs-bundler`: Generic Lua bundler for Hammerspoon projects that packs `src/` modules into a single standalone output file.
+- `packages/`: Monorepo packages directory.
+- `src/`: Legacy/active QWERTY Lua source (`config.lua`, `midi.lua`, `transposer.lua`, `arpeggiator.lua`, `hud.lua`, `controls.lua`, `ui_html.lua`).
+- `bin/hs-bundler`: Multi-target Lua bundler supporting presets (`qwerty-midi`, `studio-suite`, `surface-hud`, `nanokey-studio`).
 - `bin/bundle_and_reload.sh`: Trigger script executed by the Launch Agent watcher (`com.matt.agent.qwerty-midi-bundler`).
 - `qwerty_midi.lua`: Auto-generated bundled file created by `bin/hs-bundler`.
 - `install.sh`: Symlinks `qwerty_midi.lua` into `~/.hammerspoon/modules/qwerty_midi.lua`.

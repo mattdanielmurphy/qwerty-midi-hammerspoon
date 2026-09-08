@@ -1,0 +1,10 @@
+{
+  "name": "@surface-studio/dualsynth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Handheld software-defined MIDI groovebox and 3D studio environment powered by PS5 DualSense and GameController.framework",
+  "scripts": {
+    "build:macos": "cd macos && swift build",
+    "test:macos": "cd macos && swift test"
+  }
+}

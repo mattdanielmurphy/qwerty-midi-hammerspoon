@@ -1,0 +1,3 @@
+module DualSynthCore {
+    header "/Users/matt/projects/qwerty-midi-hammerspoon/packages/dualsynth/macos/.build/arm64-apple-macosx/debug/DualSynthCore.build/include/DualSynthCore-Swift.h"
+}
