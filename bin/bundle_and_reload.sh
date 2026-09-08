@@ -7,7 +7,7 @@ PROJECT_DIR="/Users/matt/projects/qwerty-midi-hammerspoon"
 cd "$PROJECT_DIR" || exit 1
 
 echo "📦 Bundling Hammerspoon modules..."
-python3 "$PROJECT_DIR/bin/hs-bundler" --src "$PROJECT_DIR/src" --entry "init.lua" --output "$PROJECT_DIR/qwerty_midi.lua"
+python3 "$PROJECT_DIR/bin/hs-bundler" --target qwerty-midi
 
 if [ $? -eq 0 ]; then
   echo "⚡ Reloading Hammerspoon via AppleScript..."

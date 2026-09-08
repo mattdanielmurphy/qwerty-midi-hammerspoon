@@ -1,0 +1,13 @@
+{
+  "name": "surface-studio-suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modular Surface HUD & Multi-Controller MIDI Macro Suite for Hammerspoon",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "bundle": "bash bin/bundle_and_reload.sh",
+    "dev:hud": "bun --cwd packages/surface-hud run dev"
+  }
+}

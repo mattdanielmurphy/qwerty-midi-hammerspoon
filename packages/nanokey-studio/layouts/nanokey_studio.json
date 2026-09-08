@@ -1,0 +1,78 @@
+{
+  "id": "nanokey_studio",
+  "name": "Korg nanoKEY Studio",
+  "type": "hardware_surface",
+  "description": "25 velocity keys, 8 rotary knobs, 8 trigger pads, and Kaoss touchpad with CC=54 Sustain macro layer.",
+  "dimensions": {
+    "width": 980,
+    "height": 380
+  },
+  "sections": {
+    "knobs": [
+      { "id": "knob_1", "index": 1, "cc": 14, "name": "Knob 1", "macro": "Master Vol", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_2", "index": 2, "cc": 15, "name": "Knob 2", "macro": "Filter Cutoff", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_3", "index": 3, "cc": 16, "name": "Knob 3", "macro": "Resonance", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_4", "index": 4, "cc": 17, "name": "Knob 4", "macro": "Release Time", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_5", "index": 5, "cc": 18, "name": "Knob 5", "macro": "BPM Tempo", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_6", "index": 6, "cc": 19, "name": "Knob 6", "macro": "Arp Gate", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_7", "index": 7, "cc": 20, "name": "Knob 7", "macro": "Reverb Send", "min": 0, "max": 127, "default": 64 },
+      { "id": "knob_8", "index": 8, "cc": 21, "name": "Knob 8", "macro": "Delay Send", "min": 0, "max": 127, "default": 64 }
+    ],
+    "pads": [
+      { "id": "pad_1", "index": 1, "note": 36, "name": "Kick", "chord": "I (Tonic)", "macro": "Play/Pause", "typeClass": "pad-trigger" },
+      { "id": "pad_2", "index": 2, "note": 37, "name": "Snare", "chord": "ii (Supertonic)", "macro": "Record", "typeClass": "pad-trigger" },
+      { "id": "pad_3", "index": 3, "note": 38, "name": "Clap", "chord": "iii (Mediant)", "macro": "Rewind", "typeClass": "pad-trigger" },
+      { "id": "pad_4", "index": 4, "note": 39, "name": "Hat Cl", "chord": "IV (Subdom)", "macro": "Forward", "typeClass": "pad-trigger" },
+      { "id": "pad_5", "index": 5, "note": 40, "name": "Hat Op", "chord": "V (Dominant)", "macro": "Left Half", "typeClass": "pad-trigger" },
+      { "id": "pad_6", "index": 6, "note": 41, "name": "Tom L", "chord": "vi (Submed)", "macro": "Right Half", "typeClass": "pad-trigger" },
+      { "id": "pad_7", "index": 7, "note": 42, "name": "Tom M", "chord": "vii° (Dim)", "macro": "Maximize", "typeClass": "pad-trigger" },
+      { "id": "pad_8", "index": 8, "note": 43, "name": "Crash", "chord": "Octave", "macro": "Restore Win", "typeClass": "pad-trigger" }
+    ],
+    "touchpad": {
+      "id": "touchpad_xy",
+      "name": "KAOSS Touch Pad",
+      "x_cc": 1,
+      "y_cc": 2,
+      "macro_x": "Track Scrub",
+      "macro_y": "Track Zoom"
+    },
+    "buttons": [
+      { "id": "btn_oct_down", "name": "Oct -", "macro": "Prev Workspace" },
+      { "id": "btn_oct_up", "name": "Oct +", "macro": "Next Workspace" },
+      { "id": "btn_sustain", "cc": 54, "name": "Sustain", "isModifier": true, "layer": "macro", "macro": "HOLD: MACRO LAYER" },
+      { "id": "btn_touch_scale", "name": "Touch Scale", "macro": "Scale Cycle" },
+      { "id": "btn_xy", "name": "X-Y", "macro": "Focus DAW" },
+      { "id": "btn_pitch_mod", "name": "Pitch/Mod", "macro": "Mute All" },
+      { "id": "btn_scene", "name": "Scene", "macro": "App Switcher" },
+      { "id": "btn_shift", "name": "Shift", "isModifier": true, "macro": "Hardware Shift" },
+      { "id": "btn_arp", "name": "Arp", "macro": "Arp Toggle" }
+    ],
+    "piano_keys": [
+      { "id": "key_c3",  "pitch": 48, "label": "C",  "isBlack": false, "macro": "Preset 1" },
+      { "id": "key_cs3", "pitch": 49, "label": "C#", "isBlack": true,  "macro": "Preset 2" },
+      { "id": "key_d3",  "pitch": 50, "label": "D",  "isBlack": false, "macro": "Preset 3" },
+      { "id": "key_ds3", "pitch": 51, "label": "D#", "isBlack": true,  "macro": "Preset 4" },
+      { "id": "key_e3",  "pitch": 52, "label": "E",  "isBlack": false, "macro": "Preset 5" },
+      { "id": "key_f3",  "pitch": 53, "label": "F",  "isBlack": false, "macro": "Preset 6" },
+      { "id": "key_fs3", "pitch": 54, "label": "F#", "isBlack": true,  "macro": "Preset 7" },
+      { "id": "key_g3",  "pitch": 55, "label": "G",  "isBlack": false, "macro": "Preset 8" },
+      { "id": "key_gs3", "pitch": 56, "label": "G#", "isBlack": true,  "macro": "Browser" },
+      { "id": "key_a3",  "pitch": 57, "label": "A",  "isBlack": false, "macro": "Terminal" },
+      { "id": "key_as3", "pitch": 58, "label": "A#", "isBlack": true,  "macro": "Editor" },
+      { "id": "key_b3",  "pitch": 59, "label": "B",  "isBlack": false, "macro": "Logic Pro" },
+      { "id": "key_c4",  "pitch": 60, "label": "C",  "isBlack": false, "macro": "Mute Mic" },
+      { "id": "key_cs4", "pitch": 61, "label": "C#", "isBlack": true,  "macro": "Screenshot" },
+      { "id": "key_d4",  "pitch": 62, "label": "D",  "isBlack": false, "macro": "Volume -" },
+      { "id": "key_ds4", "pitch": 63, "label": "D#", "isBlack": true,  "macro": "Volume +" },
+      { "id": "key_e4",  "pitch": 64, "label": "E",  "isBlack": false, "macro": "Center Win" },
+      { "id": "key_f4",  "pitch": 65, "label": "F",  "isBlack": false, "macro": "Prev Track" },
+      { "id": "key_fs4", "pitch": 66, "label": "F#", "isBlack": true,  "macro": "Next Track" },
+      { "id": "key_g4",  "pitch": 67, "label": "G",  "isBlack": false, "macro": "Undo" },
+      { "id": "key_gs4", "pitch": 68, "label": "G#", "isBlack": true,  "macro": "Redo" },
+      { "id": "key_a4",  "pitch": 69, "label": "A",  "isBlack": false, "macro": "Save Project" },
+      { "id": "key_as4", "pitch": 70, "label": "A#", "isBlack": true,  "macro": "Export Audio" },
+      { "id": "key_b4",  "pitch": 71, "label": "B",  "isBlack": false, "macro": "Metronome" },
+      { "id": "key_c5",  "pitch": 72, "label": "C",  "isBlack": false, "macro": "Panic All" }
+    ]
+  }
+}

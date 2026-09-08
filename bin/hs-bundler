@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-hs-bundler — Generic Lua bundler for Hammerspoon projects.
-Bundles modular Lua source files in `src/` (e.g. src/init.lua and dependencies)
-into a single standalone release file (e.g. `qwerty_midi.lua`).
+hs-bundler — Multi-Package Lua bundler for Hammerspoon projects.
+Supports bundling single or multi-package workspaces into standalone release files.
 """
 
 import os
@@ -10,42 +9,118 @@ import sys
 import re
 import argparse
 
-def sync_ui_html(src_dir):
-    web_index = os.path.join(src_dir, "web", "index.html")
-    ui_html_lua = os.path.join(src_dir, "ui_html.lua")
-    if os.path.exists(web_index):
+TARGET_PRESETS = {
+    "qwerty-midi": {
+        "src_dirs": ["packages/music-engine", "src"],
+        "entry": "init.lua",
+        "output": "qwerty_midi.lua",
+        "web_index": "src/web/index.html",
+        "ui_lua": "src/ui_html.lua",
+    },
+    "studio-suite": {
+        "src_dirs": [
+            "packages/music-engine",
+            "packages/nanokey-studio",
+            "src",
+            "packages/studio-suite",
+        ],
+        "entry": "packages/studio-suite/init.lua",
+        "output": "dist/studio_suite.lua",
+        "web_index": "src/web/index.html",
+        "ui_lua": "src/ui_html.lua",
+    },
+    "surface-hud": {
+        "src_dirs": ["packages/surface-hud/lua"],
+        "entry": "surface_hud.lua",
+        "output": "dist/surface_hud.lua",
+        "web_index": "packages/surface-hud/src/web/index.html",
+        "ui_lua": "packages/surface-hud/lua/ui_html.lua",
+    },
+    "nanokey-studio": {
+        "src_dirs": [
+            "packages/music-engine",
+            "packages/surface-hud/lua",
+            "packages/nanokey-studio",
+        ],
+        "entry": "init.lua",
+        "output": "dist/nanokey_studio.lua",
+        "web_index": "packages/surface-hud/src/web/index.html",
+        "ui_lua": "packages/surface-hud/lua/ui_html.lua",
+    }
+}
+
+def sync_ui_html(web_index, ui_html_lua):
+    if web_index and ui_html_lua and os.path.exists(web_index):
         with open(web_index, "r", encoding="utf-8") as f:
             html_content = f.read()
         lua_module_content = f'local HTML_UI_CONTENT = [[\n{html_content}\n]]\n\nreturn HTML_UI_CONTENT\n'
+        os.makedirs(os.path.dirname(os.path.abspath(ui_html_lua)), exist_ok=True)
         with open(ui_html_lua, "w", encoding="utf-8") as f:
             f.write(lua_module_content)
         print(f"🎨 Synced web UI into {ui_html_lua}")
 
-def bundle_lua(src_dir, entry_file, output_file):
-    sync_ui_html(src_dir)
-    abs_src_dir = os.path.abspath(src_dir)
-    abs_entry = os.path.abspath(os.path.join(src_dir, entry_file))
-
-    if not os.path.exists(abs_entry):
-        print(f"Error: Entry file not found at {abs_entry}", file=sys.stderr)
-        sys.exit(1)
+def bundle_lua(src_dirs, entry_file, output_file, web_index=None, ui_lua=None):
+    if web_index and ui_lua:
+        sync_ui_html(web_index, ui_lua)
 
     modules = {}
 
-    for root, _, files in os.walk(abs_src_dir):
-        for file in files:
-            if file.endswith(".lua"):
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, abs_src_dir)
-                mod_name = os.path.splitext(rel_path)[0].replace(os.sep, ".")
-                
-                with open(full_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                modules[mod_name] = content
+    for src_spec in src_dirs:
+        # Support "dir_path:prefix" or just "dir_path"
+        if ":" in src_spec:
+            src_dir, prefix = src_spec.split(":", 1)
+        else:
+            src_dir, prefix = src_spec, None
+
+        abs_src_dir = os.path.abspath(src_dir)
+        if not os.path.exists(abs_src_dir):
+            continue
+
+        # Check for web/index.html auto-sync if not explicitly provided
+        if not web_index:
+            candidate_web = os.path.join(abs_src_dir, "web", "index.html")
+            candidate_ui = os.path.join(abs_src_dir, "ui_html.lua")
+            if os.path.exists(candidate_web):
+                sync_ui_html(candidate_web, candidate_ui)
+
+        for root, _, files in os.walk(abs_src_dir):
+            for file in files:
+                if file.endswith(".lua"):
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, abs_src_dir)
+                    mod_name = os.path.splitext(rel_path)[0].replace(os.sep, ".")
+
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+
+                    modules[mod_name] = content
+                    if prefix:
+                        prefixed_name = f"{prefix}.{mod_name}"
+                        modules[prefixed_name] = content
+
+    # Find entry file across all src_dirs
+    entry_mod = None
+    found_entry = False
+    for src_spec in src_dirs:
+        src_dir = src_spec.split(":", 1)[0]
+        abs_entry = os.path.abspath(os.path.join(src_dir, entry_file))
+        if os.path.exists(abs_entry):
+            entry_mod = os.path.splitext(entry_file)[0].replace(os.sep, ".")
+            found_entry = True
+            break
+
+    if not found_entry:
+        # Check if entry_file is already an absolute or relative path that exists
+        if os.path.exists(entry_file):
+            entry_mod = os.path.splitext(os.path.basename(entry_file))[0]
+            found_entry = True
+        else:
+            print(f"Error: Entry file '{entry_file}' not found in any src directory: {src_dirs}", file=sys.stderr)
+            sys.exit(1)
 
     bundle_parts = [
         "-- AUTO-GENERATED BY hs-bundler. DO NOT EDIT DIRECTLY.",
-        "-- Edit source modules under src/ instead.\n",
+        "-- Edit source modules under src/ or packages/ instead.\n",
         "local __modules = {}",
         "local __cached = {}\n",
         "local function __require(modname)",
@@ -60,7 +135,6 @@ def bundle_lua(src_dir, entry_file, output_file):
     ]
 
     for mod_name, code in modules.items():
-        # Replace require("...") with __require("...") for local src modules
         def req_replacer(match):
             req_name = match.group(1)
             if req_name in modules:
@@ -74,7 +148,6 @@ def bundle_lua(src_dir, entry_file, output_file):
         bundle_parts.append(processed_code)
         bundle_parts.append('end\n')
 
-    entry_mod = os.path.splitext(entry_file)[0].replace(os.sep, ".")
     bundle_parts.append(f'return __require("{entry_mod}")\n')
 
     final_bundle = "\n".join(bundle_parts)
@@ -86,13 +159,31 @@ def bundle_lua(src_dir, entry_file, output_file):
     print(f"✅ Bundled {len(modules)} Lua modules into {output_file}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Hammerspoon Lua Project Bundler")
-    parser.add_argument("--src", default="src", help="Source directory containing Lua modules (default: src)")
-    parser.add_argument("--entry", default="init.lua", help="Entry module inside src (default: init.lua)")
-    parser.add_argument("--output", default="qwerty_midi.lua", help="Output bundled file path (default: qwerty_midi.lua)")
+    parser = argparse.ArgumentParser(description="Hammerspoon Multi-Package Lua Project Bundler")
+    parser.add_argument("--target", choices=list(TARGET_PRESETS.keys()), help="Bundle using a predefined target preset")
+    parser.add_argument("--src", action="append", help="Source directory containing Lua modules (can be repeated)")
+    parser.add_argument("--entry", default=None, help="Entry module inside src (default: init.lua)")
+    parser.add_argument("--output", default=None, help="Output bundled file path (default: qwerty_midi.lua)")
+    parser.add_argument("--web-index", default=None, help="Path to web index.html to sync into ui_html.lua")
+    parser.add_argument("--ui-lua", default=None, help="Output path for synced ui_html.lua")
 
     args = parser.parse_args()
-    bundle_lua(args.src, args.entry, args.output)
+
+    if args.target:
+        preset = TARGET_PRESETS[args.target]
+        src_dirs = args.src or preset["src_dirs"]
+        entry = args.entry or preset["entry"]
+        output = args.output or preset["output"]
+        web_index = args.web_index or preset.get("web_index")
+        ui_lua = args.ui_lua or preset.get("ui_lua")
+    else:
+        src_dirs = args.src or ["src"]
+        entry = args.entry or "init.lua"
+        output = args.output or "qwerty_midi.lua"
+        web_index = args.web_index
+        ui_lua = args.ui_lua
+
+    bundle_lua(src_dirs, entry, output, web_index=web_index, ui_lua=ui_lua)
 
 if __name__ == "__main__":
     main()

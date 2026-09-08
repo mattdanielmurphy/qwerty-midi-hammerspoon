@@ -1,0 +1,45 @@
+{
+  "id": "default",
+  "name": "Default Dual-Row",
+  "description": "Standard dual-row QWERTY MIDI: Upper row (QWERTY) = Upper Octave (C4+), Lower row (ZXCV) = Lower Octave (C3+), Home row = Controls.",
+  "upper_row": [
+    { "code": 12, "label": "Q", "baseNote": 72 },
+    { "code": 13, "label": "W", "baseNote": 74 },
+    { "code": 14, "label": "E", "baseNote": 76 },
+    { "code": 15, "label": "R", "baseNote": 77 },
+    { "code": 17, "label": "T", "baseNote": 79 },
+    { "code": 16, "label": "Y", "baseNote": 81 },
+    { "code": 32, "label": "U", "baseNote": 83 },
+    { "code": 34, "label": "I", "baseNote": 84 },
+    { "code": 31, "label": "O", "baseNote": 86 },
+    { "code": 35, "label": "P", "baseNote": 88 },
+    { "code": 33, "label": "[", "baseNote": 89 },
+    { "code": 30, "label": "]", "baseNote": 91 }
+  ],
+  "lower_row": [
+    { "code": 6,  "label": "Z", "baseNote": 60 },
+    { "code": 7,  "label": "X", "baseNote": 62 },
+    { "code": 8,  "label": "C", "baseNote": 64 },
+    { "code": 9,  "label": "V", "baseNote": 65 },
+    { "code": 11, "label": "B", "baseNote": 67 },
+    { "code": 45, "label": "N", "baseNote": 69 },
+    { "code": 46, "label": "M", "baseNote": 71 },
+    { "code": 43, "label": ",", "baseNote": 72 },
+    { "code": 47, "label": ".", "baseNote": 74 },
+    { "code": 44, "label": "/", "baseNote": 76 },
+    { "code": 39, "label": "'", "baseNote": 77 }
+  ],
+  "home_row_controls": [
+    { "code": 48, "label": "Tab", "name": "Sustain", "action": "sustain",     "shiftAction": "resetAll",   "shiftName": "Reset", "width": 85 },
+    { "code": 0,  "label": "A",   "name": "Arp",     "action": "arpToggle",   "shiftAction": "resetAll",   "shiftName": "Reset" },
+    { "code": 1,  "label": "S",   "name": "Random",  "action": "randomScale", "shiftAction": "panic",      "shiftName": "Panic!" },
+    { "code": 2,  "label": "D",   "name": "Oct -",   "action": "octaveDown",  "shiftAction": "topOctDown", "shiftName": "TopOct -" },
+    { "code": 3,  "label": "F",   "name": "Oct +",   "action": "octaveUp",    "shiftAction": "topOctUp",   "shiftName": "TopOct +" },
+    { "code": 5,  "label": "G",   "name": "Mode -",  "action": "modeDown",    "shiftAction": "modWheelDown", "shiftName": "Mod -" },
+    { "code": 4,  "label": "H",   "name": "Root -",  "action": "rootDown",    "shiftAction": "topOctDown", "shiftName": "TopOct -" },
+    { "code": 38, "label": "J",   "name": "Trnsp -", "action": "trnspDown",   "shiftAction": "volDown",    "shiftName": "Vol -" },
+    { "code": 40, "label": "K",   "name": "Trnsp +", "action": "trnspUp",     "shiftAction": "volUp",      "shiftName": "Vol +" },
+    { "code": 37, "label": "L",   "name": "Root +",  "action": "rootUp",      "shiftAction": "topOctUp",   "shiftName": "TopOct -" },
+    { "code": 41, "label": ";",   "name": "Mode +",  "action": "modeUp",      "shiftAction": "modWheelUp", "shiftName": "Mod +" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@surface-studio/surface-hud",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone, framework-agnostic Surface HUD for Hammerspoon",
+  "scripts": {
+    "dev": "bun x vite",
+    "build": "bun x vite build"
+  }
+}

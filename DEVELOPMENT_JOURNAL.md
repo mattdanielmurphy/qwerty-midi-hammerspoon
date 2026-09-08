@@ -1,3 +1,8 @@
+## 2026-09-08
+- **Surface Studio Suite Monorepo Transformation:** Transformed repo into a Bun workspace monorepo (`packages/surface-hud`, `packages/music-engine`, `packages/nanokey-studio`, `packages/studio-suite`). Created restore branch `original-working-qwerty`. Upgraded `bin/hs-bundler` for multi-package presets (`qwerty-midi`, `surface-hud`, `nanokey-studio`, `studio-suite`).
+- **Korg nanoKEY Studio Driver & CC=54 Sustain Layer:** Implemented `hs.midi` hardware driver, layout model (25 mini-keys, 8 pads, 8 knobs, XY pad), macro dispatcher, and diagnostic `probe.lua` for inspecting raw incoming MIDI/SysEx messages.
+- **Shared Music Engine & Surface HUD:** Extracted `harmony.lua` and `clock.lua` into `packages/music-engine/` with zero-drift state synchronization. Decoupled `packages/surface-hud` as a pure, standalone UI framework with WebKit anti-suspension sentinels.
+
 ## 2026-08-05
 - **HUD Key Flickering Fix:** Fixed key flickering in HUD webview by caching base class in dataset (`el.dataset.baseClass`) and using atomic `classList.toggle` for status classes, preventing class list thrashing during rapid updates.
 - **Modular JSON Layouts & Action Catalog:** Refactored action catalog to `actions/actions.json` and layout definitions to `layouts/*.json`. Removed edit mode UI and drawer from webview; added header `<select id="layout-select">` dropdown to switch between available JSON layouts.
