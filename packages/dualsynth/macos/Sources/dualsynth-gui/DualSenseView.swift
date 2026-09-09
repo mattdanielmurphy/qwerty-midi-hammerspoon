@@ -204,7 +204,7 @@ public struct DualSenseHUDView: View {
     public var body: some View {
         GeometryReader { geometry in
             let baseWidth: CGFloat = 760
-            let baseHeight: CGFloat = 550
+            let baseHeight: CGFloat = 650
             let margin: CGFloat = 16
             let scaleX = (geometry.size.width - margin * 2) / baseWidth
             let scaleY = (geometry.size.height - margin * 2) / baseHeight
@@ -219,6 +219,7 @@ public struct DualSenseHUDView: View {
                     headerBar(s: s)
                     controllerChassisView(s: s)
                     performanceDeckView(s: s)
+                    keyboardView(s: s)
                     statusConsoleView(s: s)
                 }
                 .frame(width: s.d(baseWidth))
@@ -801,6 +802,212 @@ public struct DualSenseHUDView: View {
             .cornerRadius(s.d(12))
             .overlay(RoundedRectangle(cornerRadius: s.d(12)).stroke(theme.cardBorder, lineWidth: 1))
         }
+    }
+
+    // MARK: - Live Piano Keyboard Monitor
+    private func keyboardView(s: UIScale) -> some View {
+        let center = Int(controller.rootKey) + controller.octaveShift
+        let octaveNum = center / 12
+        let startOctave = max(2, min(6, octaveNum - 1))
+        let startPitch = UInt8(startOctave * 12)
+
+        let totalWhiteKeys = 22
+        let cardPadding = s.d(10)
+        let totalWidth = s.d(760) - (cardPadding * 2)
+        let wkw = totalWidth / CGFloat(totalWhiteKeys)
+        let wkh = s.d(52)
+        let bkw = wkw * 0.62
+        let bkh = s.d(32)
+
+        return VStack(spacing: s.d(6)) {
+            // Header with Title & Legend
+            HStack {
+                HStack(spacing: s.d(5)) {
+                    Image(systemName: "pianokeys")
+                        .font(.system(size: s.f(11), weight: .bold))
+                        .foregroundColor(.cyan)
+                    Text("LIVE KEYBOARD MONITOR")
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
+                        .foregroundColor(theme.textPrimary)
+                }
+
+                Spacer()
+
+                HStack(spacing: s.d(6)) {
+                    keyboardLegendBadge(label: "ROOT", color: .blue, s: s)
+                    keyboardLegendBadge(label: "CHORD", color: .cyan, s: s)
+                    keyboardLegendBadge(label: "ARP ⚡", color: .orange, s: s)
+                }
+            }
+
+            // Keyboard Surface
+            ZStack(alignment: .topLeading) {
+                // White Keys
+                HStack(spacing: 0) {
+                    ForEach(0..<totalWhiteKeys, id: \.self) { i in
+                        let oct = i / 7
+                        let noteIdx = i % 7
+                        let whiteOffsets: [UInt8] = [0, 2, 4, 5, 7, 9, 11]
+                        let pitch = startPitch + UInt8(oct * 12) + whiteOffsets[noteIdx]
+                        let isC = (noteIdx == 0)
+                        let octaveLabel = "C\(startOctave - 1 + oct)"
+                        whiteKeyView(pitch: pitch, isC: isC, octaveLabel: octaveLabel, width: wkw, height: wkh, s: s)
+                    }
+                }
+
+                // Black Keys
+                ForEach(0..<3, id: \.self) { oct in
+                    let blackOffsets: [(offset: UInt8, whiteBoundary: Int)] = [
+                        (1, 1),
+                        (3, 2),
+                        (6, 4),
+                        (8, 5),
+                        (10, 6)
+                    ]
+                    ForEach(0..<blackOffsets.count, id: \.self) { bIdx in
+                        let item = blackOffsets[bIdx]
+                        let pitch = startPitch + UInt8(oct * 12) + item.offset
+                        let whiteIdx = oct * 7 + item.whiteBoundary
+                        let xPos = CGFloat(whiteIdx) * wkw - (bkw / 2)
+                        blackKeyView(pitch: pitch, width: bkw, height: bkh, s: s)
+                            .offset(x: xPos, y: 0)
+                    }
+                }
+            }
+            .frame(width: totalWidth, height: wkh)
+        }
+        .padding(cardPadding)
+        .background(theme.cardBg)
+        .cornerRadius(s.d(12))
+        .overlay(RoundedRectangle(cornerRadius: s.d(12)).stroke(theme.cardBorder, lineWidth: 1))
+    }
+
+    private func whiteKeyView(pitch: UInt8, isC: Bool, octaveLabel: String, width: CGFloat, height: CGFloat, s: UIScale) -> some View {
+        let isArp = (controller.telemetry.activeArpPitch == pitch)
+        let isRoot = controller.telemetry.playedRootPitches.contains(pitch)
+        let isChord = controller.telemetry.activeChordNotes.contains(pitch)
+
+        return ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: s.d(3.5))
+                .fill(
+                    isArp ? Color.orange :
+                    (isRoot ? Color.blue :
+                    (isChord ? Color.cyan.opacity(0.35) :
+                    (theme.isDark ? Color(white: 0.17) : Color.white)))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: s.d(3.5))
+                        .stroke(
+                            isArp ? Color.orange :
+                            (isRoot ? Color.cyan :
+                            (isChord ? Color.cyan : theme.wellBorder)),
+                            lineWidth: (isArp || isRoot || isChord) ? 1.5 : 1
+                        )
+                )
+                .shadow(
+                    color: isArp ? .orange : (isRoot ? .blue.opacity(0.6) : .clear),
+                    radius: isArp ? s.d(6) : (isRoot ? s.d(4) : 0)
+                )
+
+            VStack(spacing: s.d(1)) {
+                if isArp {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: s.f(7), weight: .black))
+                        .foregroundColor(.white)
+                    Text(controller.noteNameForPitch(pitch))
+                        .font(.system(size: s.f(7), weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                } else if isRoot {
+                    Text("ROOT")
+                        .font(.system(size: s.f(6), weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, s.d(2))
+                        .background(Color.blue.opacity(0.9))
+                        .cornerRadius(s.d(2))
+                    Text(controller.noteNameForPitch(pitch))
+                        .font(.system(size: s.f(7.5), weight: .black, design: .monospaced))
+                        .foregroundColor(.white)
+                } else if isChord {
+                    Circle()
+                        .fill(Color.cyan)
+                        .frame(width: s.d(4), height: s.d(4))
+                    Text(controller.noteNameForPitch(pitch))
+                        .font(.system(size: s.f(7), weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyan)
+                } else if isC {
+                    Text(octaveLabel)
+                        .font(.system(size: s.f(7.5), weight: .bold, design: .monospaced))
+                        .foregroundColor(theme.textTertiary)
+                }
+            }
+            .padding(.bottom, s.d(3))
+        }
+        .frame(width: width, height: height)
+    }
+
+    private func blackKeyView(pitch: UInt8, width: CGFloat, height: CGFloat, s: UIScale) -> some View {
+        let isArp = (controller.telemetry.activeArpPitch == pitch)
+        let isRoot = controller.telemetry.playedRootPitches.contains(pitch)
+        let isChord = controller.telemetry.activeChordNotes.contains(pitch)
+
+        return ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: s.d(2.5))
+                .fill(
+                    isArp ? Color.orange :
+                    (isRoot ? Color.blue :
+                    (isChord ? Color.cyan.opacity(0.85) :
+                    (theme.isDark ? Color(white: 0.07) : Color(white: 0.22))))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: s.d(2.5))
+                        .stroke(
+                            isArp ? Color.orange :
+                            (isRoot ? Color.white :
+                            (isChord ? Color.white.opacity(0.7) :
+                            (theme.isDark ? Color(white: 0.16) : Color(white: 0.35)))),
+                            lineWidth: (isArp || isRoot || isChord) ? 1.5 : 1
+                        )
+                )
+                .shadow(
+                    color: isArp ? .orange : (isRoot ? .blue.opacity(0.7) : .clear),
+                    radius: isArp ? s.d(5) : (isRoot ? s.d(4) : 0)
+                )
+
+            VStack(spacing: s.d(1)) {
+                if isArp {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: s.f(6), weight: .black))
+                        .foregroundColor(.white)
+                } else if isRoot {
+                    Text("★")
+                        .font(.system(size: s.f(7), weight: .black))
+                        .foregroundColor(.white)
+                } else if isChord {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: s.d(3.5), height: s.d(3.5))
+                }
+            }
+            .padding(.bottom, s.d(3))
+        }
+        .frame(width: width, height: height)
+    }
+
+    private func keyboardLegendBadge(label: String, color: Color, s: UIScale) -> some View {
+        HStack(spacing: s.d(4)) {
+            Circle()
+                .fill(color)
+                .frame(width: s.d(6), height: s.d(6))
+                .shadow(color: color.opacity(0.5), radius: s.d(2))
+            Text(label)
+                .font(.system(size: s.f(8), weight: .black, design: .monospaced))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, s.d(6))
+        .padding(.vertical, s.d(2.5))
+        .background(color.opacity(0.15))
+        .cornerRadius(s.d(4))
+        .overlay(RoundedRectangle(cornerRadius: s.d(4)).stroke(color.opacity(0.3), lineWidth: 1))
     }
 
     // MARK: - Status Console View

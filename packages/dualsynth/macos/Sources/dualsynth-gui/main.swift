@@ -16,13 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
         let contentView = DualSenseHUDView(controller: controller, midi: midi)
 
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 860, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 740),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.center()
-        window.minSize = NSSize(width: 760, height: 540)
+        window.minSize = NSSize(width: 760, height: 600)
         window.title = "DualSynth Studio HUD"
         window.contentView = NSHostingView(rootView: contentView)
         window.level = .normal // Normal window level (does NOT float over other apps)

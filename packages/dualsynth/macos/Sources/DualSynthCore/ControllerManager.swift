@@ -127,7 +127,9 @@ public struct ControllerTelemetry {
     public var arpRate: ArpRate = .eighth
     public var bpm: Double = 120.0
     public var currentArpStep: Int = 0
+    public var activeArpPitch: UInt8? = nil
     public var activeChordNotes: [UInt8] = []
+    public var playedRootPitches: [UInt8] = []
     public var activeChordName: String = "None"
     public var isHoldingChord: Bool = false
     public var heldFaceButtonIndex: Int? = nil
@@ -206,7 +208,9 @@ public final class ControllerManager: ObservableObject {
     // Internal active note sets & multi-button arpeggiation
     private var activeFaceButtons = Set<Int>()
     private var activeFacePitches: [Int: [UInt8]] = [:]
+    private var activeFaceRoots: [Int: UInt8] = [:]
     private var latchedPitches: [UInt8] = []
+    private var latchedRoots: [UInt8] = []
     private var currentlySoundingPitches: [UInt8] = []
     private var lastFaceDegree: Int = 0
 
@@ -786,8 +790,14 @@ public final class ControllerManager: ObservableObject {
                 telemetry.isHoldingChord = true
                 lastFaceDegree = degree
 
+                let rootPitch = computeRootPitch(forDegree: degree)
+                activeFaceRoots[buttonIndex] = rootPitch
                 let pitches = computePitches(forDegree: degree)
                 activeFacePitches[buttonIndex] = pitches
+
+                let combinedRoots = Array(Set(activeFaceRoots.values)).sorted()
+                latchedRoots = combinedRoots
+                telemetry.playedRootPitches = combinedRoots
 
                 let combinedPitches = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
                 latchedPitches = combinedPitches
@@ -810,10 +820,15 @@ public final class ControllerManager: ObservableObject {
             } else {
                 activeFaceButtons.remove(buttonIndex)
                 activeFacePitches.removeValue(forKey: buttonIndex)
+                activeFaceRoots.removeValue(forKey: buttonIndex)
 
                 if !activeFaceButtons.isEmpty {
                     // Other button(s) still held down
                     heldFaceButtonIndex = activeFaceButtons.first
+                    let remainingRoots = Array(Set(activeFaceRoots.values)).sorted()
+                    latchedRoots = remainingRoots
+                    telemetry.playedRootPitches = remainingRoots
+
                     let remaining = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
                     latchedPitches = remaining
                     telemetry.activeChordNotes = remaining
@@ -844,7 +859,9 @@ public final class ControllerManager: ObservableObject {
                             releaseCurrentlySoundingNotes()
                         }
                         latchedPitches.removeAll()
+                        latchedRoots.removeAll()
                         telemetry.activeChordNotes.removeAll()
+                        telemetry.playedRootPitches.removeAll()
                         lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
                     } else {
                         // In latch mode, the notes are already playing smoothly!
@@ -1025,8 +1042,10 @@ public final class ControllerManager: ObservableObject {
         stopArpeggiator()
         releaseCurrentlySoundingNotes()
         latchedPitches.removeAll()
+        latchedRoots.removeAll()
         activeFaceButtons.removeAll()
         activeFacePitches.removeAll()
+        activeFaceRoots.removeAll()
         heldFaceButtonIndex = nil
         heldChordTemporaryStepShift = 0
         heldChordAdd7th = false
@@ -1035,6 +1054,8 @@ public final class ControllerManager: ObservableObject {
         heldChordAddHighOctave = false
         telemetry.isHoldingChord = false
         telemetry.activeChordNotes.removeAll()
+        telemetry.playedRootPitches.removeAll()
+        telemetry.activeArpPitch = nil
         telemetry.activeChordName = "Muted"
         telemetry.micMuted = true
         lastEventDescription = "PANIC / ALL NOTES OFF"
@@ -1045,6 +1066,16 @@ public final class ControllerManager: ObservableObject {
             self.telemetry.micMuted = false
             self.notifyTelemetry()
         }
+    }
+
+    public func computeRootPitch(forDegree degree: Int) -> UInt8 {
+        let totalDegree = degree + scaleDegreeShift + heldChordTemporaryStepShift
+        let intervals = currentScale.intervals
+        let numIntervals = intervals.count
+        let octaveOffset = Int(floor(Double(totalDegree) / Double(numIntervals)))
+        let idxInScale = ((totalDegree % numIntervals) + numIntervals) % numIntervals
+        let pitch = Int(rootKey) + octaveShift + (octaveOffset * 12) + intervals[idxInScale]
+        return UInt8(clamp(pitch, min: 0, max: 127))
     }
 
     public func computePitches(forDegree degree: Int) -> [UInt8] {
@@ -1234,13 +1265,22 @@ public final class ControllerManager: ObservableObject {
             for btn in activeFaceButtons {
                 let deg = scaleDegreeForButton(index: btn)
                 activeFacePitches[btn] = computePitches(forDegree: deg)
+                activeFaceRoots[btn] = computeRootPitch(forDegree: deg)
             }
+            let combinedRoots = Array(Set(activeFaceRoots.values)).sorted()
+            latchedRoots = combinedRoots
+            telemetry.playedRootPitches = combinedRoots
+
             let combined = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
             latchedPitches = combined
             telemetry.activeChordNotes = combined
             let chordLabel = chordNameForDegree(lastFaceDegree)
             telemetry.activeChordName = activeFaceButtons.count > 1 ? "\(chordLabel)+ (\(combined.count) notes)" : chordLabel
         } else if !latchedPitches.isEmpty {
+            let root = computeRootPitch(forDegree: lastFaceDegree)
+            latchedRoots = [root]
+            telemetry.playedRootPitches = [root]
+
             let newPitches = computePitches(forDegree: lastFaceDegree)
             latchedPitches = newPitches
             telemetry.activeChordNotes = newPitches
@@ -1297,6 +1337,8 @@ public final class ControllerManager: ObservableObject {
             lastArpPitch = nil
         }
         telemetry.currentArpStep = 0
+        telemetry.activeArpPitch = nil
+        notifyTelemetry()
     }
 
     private func restartArpeggiator() {
@@ -1342,6 +1384,7 @@ public final class ControllerManager: ObservableObject {
 
         lastArpPitch = pitch
         telemetry.currentArpStep = arpStepIndex
+        telemetry.activeArpPitch = pitch
         delegate?.notesTriggered(pitches: [pitch], velocity: velocity, name: "Arp: \(noteNameForPitch(pitch))")
         notifyTelemetry()
 
@@ -1351,6 +1394,8 @@ public final class ControllerManager: ObservableObject {
             guard let self = self, let current = self.lastArpPitch, current == pitch else { return }
             self.delegate?.notesReleased(pitches: [pitch], name: "Arp Gate Off")
             self.lastArpPitch = nil
+            self.telemetry.activeArpPitch = nil
+            self.notifyTelemetry()
         }
     }
 
