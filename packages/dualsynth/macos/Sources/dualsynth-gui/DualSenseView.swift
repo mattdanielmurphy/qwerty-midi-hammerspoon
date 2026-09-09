@@ -223,6 +223,11 @@ public struct DualSenseHUDView: View {
                     statusConsoleView(s: s)
                 }
                 .frame(width: s.d(baseWidth))
+
+                if controller.telemetry.isMenuSelectorOpen {
+                    menuSelectorOverlayView(s: s)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -248,21 +253,50 @@ public struct DualSenseHUDView: View {
 
             Spacer()
 
-            // Active Layer Badge
+            // Operating Mode Badge & Selector
+            Menu {
+                ForEach(OperatingMode.allCases, id: \.self) { mode in
+                    Button(action: { controller.setOperatingMode(mode) }) {
+                        HStack {
+                            Text(mode.rawValue)
+                            if controller.operatingMode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: s.d(5)) {
+                    Image(systemName: controller.operatingMode.icon)
+                        .foregroundColor(.cyan)
+                    Text(controller.operatingMode.shortBadge)
+                        .font(.system(size: s.f(11), weight: .black, design: .monospaced))
+                        .foregroundColor(.cyan)
+                }
+                .padding(.horizontal, s.d(10))
+                .padding(.vertical, s.d(5))
+                .background(Color.cyan.opacity(0.18))
+                .overlay(Capsule().stroke(Color.cyan, lineWidth: 1.2))
+                .clipShape(Capsule())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            // QWERTY Sync Indicator
             HStack(spacing: s.d(5)) {
                 Circle()
-                    .fill(layerColor)
-                    .frame(width: s.d(7), height: s.d(7))
-                Text(controller.currentLayer.rawValue.uppercased())
-                    .font(.system(size: s.f(11), weight: .black, design: .monospaced))
-                    .foregroundColor(layerColor)
+                    .fill(controller.telemetry.isSyncedWithQwerty ? Color.green : Color.gray.opacity(0.4))
+                    .frame(width: s.d(6), height: s.d(6))
+                Text(controller.telemetry.isSyncedWithQwerty ? "🔗 QWERTY SYNC" : "STANDALONE")
+                    .font(.system(size: s.f(9), weight: .bold, design: .monospaced))
+                    .foregroundColor(controller.telemetry.isSyncedWithQwerty ? .green : theme.textTertiary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, s.d(12))
-            .padding(.vertical, s.d(5))
-            .background(layerColor.opacity(0.18))
-            .overlay(Capsule().stroke(layerColor, lineWidth: 1.2))
-            .clipShape(Capsule())
+            .padding(.horizontal, s.d(7))
+            .padding(.vertical, s.d(4))
+            .background(theme.wellBg)
+            .cornerRadius(s.d(6))
+            .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(theme.wellBorder, lineWidth: 1))
             .fixedSize()
 
             // Musical Mode Badges (Fixed horizontal size so text NEVER wraps)
@@ -358,8 +392,8 @@ public struct DualSenseHUDView: View {
                     TriggerGaugeView(
                         title: "L2 TRIGGER",
                         value: controller.telemetry.leftTrigger,
-                        subtitle: "CC74 Cutoff",
-                        activeColor: .purple,
+                        subtitle: "Vel: \(controller.telemetry.currentVelocityVal)",
+                        activeColor: .green,
                         theme: theme,
                         s: s
                     )
@@ -374,8 +408,8 @@ public struct DualSenseHUDView: View {
                             .fill(controller.telemetry.l1 ? Color.blue : theme.buttonBg)
                             .frame(width: s.d(76), height: s.d(34))
                             .overlay(
-                                Text("HARMONY")
-                                    .font(.system(size: s.f(9), weight: .black))
+                                Text(controller.operatingMode == .melodic ? "OCT -1" : (controller.operatingMode == .companion ? "SHIFT" : "HARMONY"))
+                                    .font(.system(size: s.f(8), weight: .black))
                                     .foregroundColor(controller.telemetry.l1 ? .white : theme.textSecondary)
                             )
                             .overlay(
@@ -412,7 +446,7 @@ public struct DualSenseHUDView: View {
                             .fill(controller.telemetry.r1 ? Color.orange : theme.buttonBg)
                             .frame(width: s.d(76), height: s.d(34))
                             .overlay(
-                                Text("ARP / RHYTHM")
+                                Text(controller.operatingMode == .melodic ? "OCT +1" : (controller.operatingMode == .companion ? "CTRL" : "ARP / RHYTHM"))
                                     .font(.system(size: s.f(8), weight: .black))
                                     .foregroundColor(controller.telemetry.r1 ? .white : theme.textSecondary)
                             )
@@ -428,8 +462,8 @@ public struct DualSenseHUDView: View {
                     TriggerGaugeView(
                         title: "R2 TRIGGER",
                         value: controller.telemetry.rightTrigger,
-                        subtitle: "Expr / Vel",
-                        activeColor: .green,
+                        subtitle: controller.telemetry.isMenuSelectorOpen ? "MENU ACTIVE" : "Hold for Menu",
+                        activeColor: controller.telemetry.isMenuSelectorOpen ? .orange : .cyan,
                         theme: theme,
                         s: s
                     )
@@ -1048,89 +1082,288 @@ public struct DualSenseHUDView: View {
     }
 
     private var dpadHeaderTitle: String {
-        if controller.heldFaceButtonIndex != nil { return "HELD MORPH" }
-        if controller.isL1Held { return "OCT / TONIC (L1)" }
-        if controller.isR1Held { return "TEMPO / RATE (R1)" }
-        return "DEGREE: \(controller.degreeName(controller.scaleDegreeShift))"
+        switch controller.operatingMode {
+        case .melodic:
+            return "MELODIC (1 - 4)"
+        case .drums:
+            return "DRUM PADS (LOW)"
+        case .companion:
+            return "TRANSPOSE & OCT"
+        case .chords:
+            if controller.heldFaceButtonIndex != nil { return "HELD MORPH" }
+            if controller.isL1Held { return "OCT / TONIC (L1)" }
+            if controller.isR1Held { return "TEMPO / RATE (R1)" }
+            return "DEGREE: \(controller.degreeName(controller.scaleDegreeShift))"
+        }
     }
 
     private var faceHeaderTitle: String {
-        if controller.heldFaceButtonIndex != nil { return "ALTER / EXTEND" }
-        if controller.isL1Held { return "VOICING (L1)" }
-        if controller.isR1Held { return "PATTERN (R1)" }
-        return "FACE CHORDS"
+        switch controller.operatingMode {
+        case .melodic:
+            return "MELODIC (5 - 8)"
+        case .drums:
+            return "DRUM PADS (HIGH)"
+        case .companion:
+            return "MACRO TOGGLES"
+        case .chords:
+            if controller.heldFaceButtonIndex != nil { return "ALTER / EXTEND" }
+            if controller.isL1Held { return "VOICING (L1)" }
+            if controller.isR1Held { return "PATTERN (R1)" }
+            return "FACE CHORDS"
+        }
     }
 
     private enum DpadPos { case up, down, left, right }
 
     private func dpadLabel(for pos: DpadPos) -> String {
-        if controller.heldFaceButtonIndex != nil {
+        switch controller.operatingMode {
+        case .melodic:
             switch pos {
-            case .up: return "+1 St"
-            case .down: return "-1 St"
-            case .left: return "+Sub"
-            case .right: return "+8va"
+            case .left: return controller.noteNameForPitch(controller.computeMelodicPitch(degree: 0))
+            case .up: return controller.noteNameForPitch(controller.computeMelodicPitch(degree: 1))
+            case .right: return controller.noteNameForPitch(controller.computeMelodicPitch(degree: 2))
+            case .down: return controller.noteNameForPitch(controller.computeMelodicPitch(degree: 3))
             }
-        } else if controller.isL1Held {
+        case .drums:
+            switch pos {
+            case .left: return "KICK"
+            case .down: return "SNARE"
+            case .up: return "C-HAT"
+            case .right: return "O-HAT"
+            }
+        case .companion:
             switch pos {
             case .up: return "Oct+"
             case .down: return "Oct-"
-            case .left: return "Tonic"
-            case .right: return "Semi+"
+            case .left: return "Step-"
+            case .right: return "Step+"
             }
-        } else if controller.isR1Held {
-            switch pos {
-            case .up: return "+5 BPM"
-            case .down: return "-5 BPM"
-            case .left: return "Rate-"
-            case .right: return "Rate+"
-            }
-        } else {
-            switch pos {
-            case .up: return "+1 St"
-            case .down: return "-1 St"
-            case .left: return "-3 St"
-            case .right: return "+3 St"
+        case .chords:
+            if controller.heldFaceButtonIndex != nil {
+                switch pos {
+                case .up: return "+1 St"
+                case .down: return "-1 St"
+                case .left: return "+Sub"
+                case .right: return "+8va"
+                }
+            } else if controller.isL1Held {
+                switch pos {
+                case .up: return "Oct+"
+                case .down: return "Oct-"
+                case .left: return "Tonic"
+                case .right: return "Semi+"
+                }
+            } else if controller.isR1Held {
+                switch pos {
+                case .up: return "+5 BPM"
+                case .down: return "-5 BPM"
+                case .left: return "Rate-"
+                case .right: return "Rate+"
+                }
+            } else {
+                switch pos {
+                case .up: return "+1 St"
+                case .down: return "-1 St"
+                case .left: return "-3 St"
+                case .right: return "+3 St"
+                }
             }
         }
     }
 
     private func faceActionText(index: Int) -> String {
-        if controller.heldFaceButtonIndex != nil {
-            if controller.heldFaceButtonIndex == index {
-                return "HELD 🔒"
-            }
+        switch controller.operatingMode {
+        case .melodic:
+            let melodicDegrees = [0: 7, 1: 4, 2: 6, 3: 5]
+            let deg = melodicDegrees[index] ?? (index + 4)
+            return controller.noteNameForPitch(controller.computeMelodicPitch(degree: deg))
+        case .drums:
             switch index {
-            case 1: // Square
-                return controller.heldChordAdd7th ? "+7th ON" : "+7th"
-            case 2: // Circle
-                return controller.heldChordAdd9th ? "+9th ON" : "+9th"
-            case 3: // Triangle
-                return "Inv+"
-            default: // Cross (0)
-                return controller.heldChordAddSubBass ? "+Bass ON" : "+Bass"
+            case 0: return "TOM L"
+            case 1: return "CLAP"
+            case 2: return "CRASH"
+            case 3: return "TOM H"
+            default: return "DRUM"
             }
-        } else if controller.isL1Held {
+        case .companion:
             switch index {
-            case 0: return "Root"
-            case 1: return "1st Inv"
-            case 2: return "2nd Inv"
-            case 3: return "Drop-2"
+            case 0: return controller.latchMode ? "LATCH 🔒" : "LATCH"
+            case 1: return controller.chordMode ? "CHORD" : "NOTE"
+            case 2: return controller.isArpActive ? "ARP ⚡" : "ARP"
+            case 3: return "PANIC"
             default: return ""
             }
-        } else if controller.isR1Held {
-            switch index {
-            case 0: return "Up ▲"
-            case 1: return "Down ▼"
-            case 2: return "Up/Dn"
-            case 3: return "Rand"
-            default: return ""
+        case .chords:
+            if controller.heldFaceButtonIndex != nil {
+                if controller.heldFaceButtonIndex == index {
+                    return "HELD 🔒"
+                }
+                switch index {
+                case 1: return controller.heldChordAdd7th ? "+7th ON" : "+7th"
+                case 2: return controller.heldChordAdd9th ? "+9th ON" : "+9th"
+                case 3: return "Inv+"
+                default: return controller.heldChordAddSubBass ? "+Bass ON" : "+Bass"
+                }
+            } else if controller.isL1Held {
+                switch index {
+                case 0: return "Root"
+                case 1: return "1st Inv"
+                case 2: return "2nd Inv"
+                case 3: return "Drop-2"
+                default: return ""
+                }
+            } else if controller.isR1Held {
+                switch index {
+                case 0: return "Up ▲"
+                case 1: return "Down ▼"
+                case 2: return "Up/Dn"
+                case 3: return "Rand"
+                default: return ""
+                }
+            } else {
+                let degree = controller.scaleDegreeForButton(index: index)
+                let numeral = controller.romanNumeral(forDegree: degree)
+                let chord = controller.chordNameForDegree(degree)
+                return "\(numeral):\(chord)"
             }
-        } else {
-            let degree = controller.scaleDegreeForButton(index: index)
-            let numeral = controller.romanNumeral(forDegree: degree)
-            let chord = controller.chordNameForDegree(degree)
-            return "\(numeral):\(chord)"
+        }
+    }
+
+    // MARK: - Mode Selector Overlay (R2 Trigger Menu)
+    private func modeHeaderView(s: UIScale) -> some View {
+        HStack(spacing: s.d(8)) {
+            Image(systemName: "slider.horizontal.2.square.on.square")
+                .font(.system(size: s.f(15), weight: .black))
+                .foregroundColor(.cyan)
+
+            Text("SELECT OPERATING MODE")
+                .font(.system(size: s.f(13), weight: .black, design: .monospaced))
+                .foregroundColor(.white)
+
+            Spacer()
+
+            HStack(spacing: s.d(4)) {
+                Text("R2 DEPTH:")
+                    .font(.system(size: s.f(9), weight: .bold, design: .monospaced))
+                    .foregroundColor(Color(white: 0.6))
+                Text(String(format: "%.0f%%", controller.telemetry.rightTrigger * 100))
+                    .font(.system(size: s.f(11), weight: .black, design: .monospaced))
+                    .foregroundColor(.orange)
+            }
+            .padding(.horizontal, s.d(8))
+            .padding(.vertical, s.d(4))
+            .background(Color.white.opacity(0.12))
+            .cornerRadius(s.d(6))
+        }
+        .padding(.horizontal, s.d(6))
+    }
+
+    private func modeCardRow(idx: Int, s: UIScale) -> some View {
+        let mode = OperatingMode.allCases[idx]
+        let isSelected = controller.telemetry.menuSelectionIndex == idx
+        let isCurrentActive = controller.operatingMode == mode
+
+        return Button(action: {
+            controller.menuSelectionIndex = idx
+            controller.setOperatingMode(mode)
+            controller.telemetry.isMenuSelectorOpen = false
+            controller.isMenuSelectorOpen = false
+        }) {
+            HStack(spacing: s.d(12)) {
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.cyan : Color.white.opacity(0.1))
+                        .frame(width: s.d(36), height: s.d(36))
+
+                    Image(systemName: mode.icon)
+                        .font(.system(size: s.f(15), weight: .bold))
+                        .foregroundColor(isSelected ? .black : .white)
+                }
+
+                VStack(alignment: .leading, spacing: s.d(2)) {
+                    HStack(spacing: s.d(6)) {
+                        Text(mode.rawValue)
+                            .font(.system(size: s.f(12), weight: .black, design: .monospaced))
+                            .foregroundColor(isSelected ? .cyan : .white)
+
+                        if isCurrentActive {
+                            Text("ACTIVE")
+                                .font(.system(size: s.f(8), weight: .black, design: .monospaced))
+                                .padding(.horizontal, s.d(6))
+                                .padding(.vertical, s.d(2))
+                                .background(Color.green.opacity(0.3))
+                                .foregroundColor(.green)
+                                .cornerRadius(s.d(4))
+                        }
+                    }
+
+                    Text(mode.description)
+                        .font(.system(size: s.f(10), weight: .medium))
+                        .foregroundColor(isSelected ? .white : Color(white: 0.7))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: s.f(16), weight: .bold))
+                        .foregroundColor(.cyan)
+                }
+            }
+            .padding(s.d(10))
+            .background(
+                RoundedRectangle(cornerRadius: s.d(10))
+                    .fill(isSelected ? Color.cyan.opacity(0.18) : Color(white: 0.14))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: s.d(10))
+                    .stroke(isSelected ? Color.cyan : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+            )
+            .shadow(color: isSelected ? Color.cyan.opacity(0.3) : .clear, radius: s.d(8))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func modeFooterView(s: UIScale) -> some View {
+        HStack(spacing: s.d(6)) {
+            Image(systemName: "hand.tap.fill")
+                .font(.system(size: s.f(11)))
+                .foregroundColor(.orange)
+            Text("Pull R2 deeper or use D-Pad to navigate • Release R2 to select")
+                .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
+                .foregroundColor(Color(white: 0.8))
+        }
+        .padding(.top, s.d(4))
+    }
+
+    private func menuSelectorOverlayView(s: UIScale) -> some View {
+        ZStack {
+            Color.black.opacity(isDarkMode ? 0.78 : 0.55)
+                .ignoresSafeArea()
+
+            VStack(spacing: s.d(14)) {
+                modeHeaderView(s: s)
+
+                VStack(spacing: s.d(8)) {
+                    ForEach(0..<OperatingMode.allCases.count, id: \.self) { idx in
+                        modeCardRow(idx: idx, s: s)
+                    }
+                }
+
+                modeFooterView(s: s)
+            }
+            .padding(s.d(18))
+            .frame(width: s.d(520))
+            .background(
+                RoundedRectangle(cornerRadius: s.d(18))
+                    .fill(Color(white: 0.12))
+                    .shadow(color: Color.black.opacity(0.8), radius: s.d(24))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: s.d(18))
+                    .stroke(Color.cyan.opacity(0.8), lineWidth: 1.5)
+            )
         }
     }
 

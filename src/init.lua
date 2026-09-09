@@ -5,6 +5,7 @@ local arpeggiator = require("arpeggiator")
 local hud = require("hud")
 local controls = require("controls")
 local settings_ui = require("settings_ui")
+local sync = require("sync")
 
 local function profileLog(msg)
   local f = io.open("/tmp/midi_startup.log", "a")
@@ -21,6 +22,8 @@ _G.activeWatchers = _G.activeWatchers or {}
 
 arpeggiator.setHudModule(hud)
 hud.setControlsModule(controls)
+sync.init(config, hud)
+_G.activeWatchers.sync = sync
 
 function _G.toggleMidiMode(newState)
   if newState == nil then

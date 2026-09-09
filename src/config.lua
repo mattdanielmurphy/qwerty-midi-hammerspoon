@@ -189,6 +189,10 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
   hs.settings.set("qwertyMidi_stackedKeyLabelsInPerformanceMode", state.stackedKeyLabelsInPerformanceMode == true)
+
+  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastState then
+    _G.activeWatchers.sync.broadcastState(state)
+  end
 end
 
 local SCALES = {

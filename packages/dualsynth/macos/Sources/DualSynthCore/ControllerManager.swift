@@ -9,6 +9,40 @@ public enum ControlLayer: String, CaseIterable {
     case matrix = "Synth & FX (L1+R1)"
 }
 
+public enum OperatingMode: String, CaseIterable {
+    case melodic = "Melodic (8-Note Scale)"
+    case chords = "Chord Groovebox"
+    case companion = "Studio Companion"
+    case drums = "Drum & Percussion"
+
+    public var icon: String {
+        switch self {
+        case .melodic: return "music.note"
+        case .chords: return "pianokeys"
+        case .companion: return "slider.horizontal.3"
+        case .drums: return "circle.grid.2x2.fill"
+        }
+    }
+
+    public var shortBadge: String {
+        switch self {
+        case .melodic: return "MELODIC (8-NOTE)"
+        case .chords: return "CHORDS"
+        case .companion: return "COMPANION"
+        case .drums: return "DRUMS"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .melodic: return "8 diatonic scale degrees across D-Pad & Face buttons with L1/R1 octave paging"
+        case .chords: return "Diatonic chord generator with real-time morphing, inversions & arpeggiator"
+        case .companion: return "6-axis spatial expression, macro controls & transport companion for QWERTY"
+        case .drums: return "8 velocity-sensitive GM drum pads across D-Pad and Face buttons"
+        }
+    }
+}
+
 public enum ChordType: String, CaseIterable {
     case triad = "Triad"
     case seventh = "7th"
@@ -139,6 +173,14 @@ public struct ControllerTelemetry {
     public var heldChordAddHighOctave: Bool = false
     public var heldChordTemporaryStepShift: Int = 0
 
+    // Operating Mode & Menu Selector
+    public var operatingMode: OperatingMode = .chords
+    public var isMenuSelectorOpen: Bool = false
+    public var menuSelectionIndex: Int = 0
+    public var isSyncedWithQwerty: Bool = false
+    public var melodicOctaveOffset: Int = 0
+    public var currentVelocityVal: UInt8 = 100
+
     public init() {}
 }
 
@@ -163,6 +205,13 @@ public final class ControllerManager: ObservableObject {
     @Published public var isDualSense: Bool = false
     @Published public var currentLayer: ControlLayer = .base
     @Published public var telemetry = ControllerTelemetry()
+
+    // Operating Mode & Menu Selector
+    @Published public var operatingMode: OperatingMode = .chords
+    @Published public var isMenuSelectorOpen: Bool = false
+    @Published public var menuSelectionIndex: Int = 0
+    @Published public var isSyncedWithQwerty: Bool = false
+    @Published public var melodicOctaveOffset: Int = 0
 
     @Published public var rootKey: UInt8 = 60 // C4 default
     @Published public var octaveShift: Int = 0
@@ -209,6 +258,9 @@ public final class ControllerManager: ObservableObject {
     private var activeFaceButtons = Set<Int>()
     private var activeFacePitches: [Int: [UInt8]] = [:]
     private var activeFaceRoots: [Int: UInt8] = [:]
+    private var activeMelodicPitches: [Int: UInt8] = [:]
+    private var activeDrumPitches: [Int: UInt8] = [:]
+    private var isInternalSyncing: Bool = false
     private var latchedPitches: [UInt8] = []
     private var latchedRoots: [UInt8] = []
     private var currentlySoundingPitches: [UInt8] = []
@@ -257,15 +309,23 @@ public final class ControllerManager: ObservableObject {
             break
         }
 
+        setupHammerspoonSync()
         syncTelemetryEngineState()
     }
 
     deinit {
         stopArpeggiator()
         hapticEngine?.stop()
+        DistributedNotificationCenter.default().removeObserver(self)
     }
 
     private func syncTelemetryEngineState() {
+        telemetry.operatingMode = operatingMode
+        telemetry.isMenuSelectorOpen = isMenuSelectorOpen
+        telemetry.menuSelectionIndex = menuSelectionIndex
+        telemetry.isSyncedWithQwerty = isSyncedWithQwerty
+        telemetry.melodicOctaveOffset = melodicOctaveOffset
+        telemetry.currentVelocityVal = currentVelocity()
         telemetry.chordMode = chordMode
         telemetry.chordType = chordType
         telemetry.chordInversion = chordInversion
@@ -368,46 +428,71 @@ public final class ControllerManager: ObservableObject {
         gamepad.dpad.up.valueChangedHandler = { [weak self] (_, _, pressed) in
             guard let self = self else { return }
             self.telemetry.dpadUp = pressed
-            if pressed { self.handleDpadAction(direction: .up) }
+            self.handleDpadAction(direction: .up, pressed: pressed)
             self.notifyTelemetry()
         }
         gamepad.dpad.down.valueChangedHandler = { [weak self] (_, _, pressed) in
             guard let self = self else { return }
             self.telemetry.dpadDown = pressed
-            if pressed { self.handleDpadAction(direction: .down) }
+            self.handleDpadAction(direction: .down, pressed: pressed)
             self.notifyTelemetry()
         }
         gamepad.dpad.left.valueChangedHandler = { [weak self] (_, _, pressed) in
             guard let self = self else { return }
             self.telemetry.dpadLeft = pressed
-            if pressed { self.handleDpadAction(direction: .left) }
+            self.handleDpadAction(direction: .left, pressed: pressed)
             self.notifyTelemetry()
         }
         gamepad.dpad.right.valueChangedHandler = { [weak self] (_, _, pressed) in
             guard let self = self else { return }
             self.telemetry.dpadRight = pressed
-            if pressed { self.handleDpadAction(direction: .right) }
+            self.handleDpadAction(direction: .right, pressed: pressed)
             self.notifyTelemetry()
         }
 
         // 4. Triggers (L2 / R2)
+        // L2 Trigger: Dynamic Note Velocity & Continuous Expression / Filter Pressure
         gamepad.leftTrigger.valueChangedHandler = { [weak self] (_, value, _) in
             guard let self = self else { return }
             self.telemetry.leftTrigger = value
-            let ccVal = UInt8(value * 127)
-            self.delegate?.continuousParamChanged(cc: 74, value: ccVal, name: "L2 Brightness (CC74)")
-            self.delegate?.continuousParamChanged(cc: 2, value: ccVal, name: "L2 Filter/Breath (CC2)")
+            self.telemetry.currentVelocityVal = self.currentVelocity()
+
+            // Continuous Expression (CC #11) and Cutoff (CC #74)
+            let exprVal: UInt8 = value > 0.05 ? UInt8(clamp(50.0 + Double(value) * 77.0, min: 50, max: 127)) : 127
+            self.delegate?.continuousParamChanged(cc: 11, value: exprVal, name: "L2 Expr (CC11)")
+            if value > 0.05 {
+                let cutoffVal = UInt8(clamp(60.0 + Double(value) * 67.0, min: 60, max: 127))
+                self.delegate?.continuousParamChanged(cc: 74, value: cutoffVal, name: "L2 Cutoff (CC74)")
+            }
             self.notifyTelemetry()
         }
 
+        // R2 Trigger: Menu & Mode Selector
         gamepad.rightTrigger.valueChangedHandler = { [weak self] (_, value, _) in
             guard let self = self else { return }
             self.telemetry.rightTrigger = value
-            let exprVal: UInt8 = UInt8(90 + value * 37) // 90 to 127, never 0!
-            let resVal = UInt8(value * 127)
-            self.delegate?.continuousParamChanged(cc: 11, value: exprVal, name: "R2 Expr (CC11)")
-            if value > 0.05 {
-                self.delegate?.continuousParamChanged(cc: 71, value: resVal, name: "R2 Res (CC71)")
+
+            let wasOpen = self.telemetry.isMenuSelectorOpen
+            if value > 0.15 {
+                self.telemetry.isMenuSelectorOpen = true
+                self.isMenuSelectorOpen = true
+                let modesCount = OperatingMode.allCases.count
+                let norm = clamp((Double(value) - 0.15) / 0.70, min: 0.0, max: 0.999)
+                let newIdx = Int(norm * Double(modesCount))
+                if newIdx != self.telemetry.menuSelectionIndex {
+                    self.telemetry.menuSelectionIndex = newIdx
+                    self.menuSelectionIndex = newIdx
+                    self.triggerStageHapticBurst(stage: 1)
+                }
+            } else if wasOpen && value < 0.10 {
+                let allModes = OperatingMode.allCases
+                if self.menuSelectionIndex >= 0 && self.menuSelectionIndex < allModes.count {
+                    let selected = allModes[self.menuSelectionIndex]
+                    self.setOperatingMode(selected)
+                }
+                self.telemetry.isMenuSelectorOpen = false
+                self.isMenuSelectorOpen = false
+                self.triggerStageHapticBurst(stage: 2)
             }
             self.notifyTelemetry()
         }
@@ -706,7 +791,47 @@ public final class ControllerManager: ObservableObject {
     private func setupAdaptiveTriggers(_ controller: GCController) {
         guard let ds = controller.extendedGamepad as? GCDualSenseGamepad else { return }
         ds.leftTrigger.setModeSlopeFeedback(startPosition: 0.05, endPosition: 0.95, startStrength: 0.15, endStrength: 0.8)
-        ds.rightTrigger.setModeWeaponWithStartPosition(0.1, endPosition: 0.8, resistiveStrength: 0.6)
+        ds.rightTrigger.setModeWeaponWithStartPosition(0.15, endPosition: 0.85, resistiveStrength: 0.6)
+    }
+
+    public func currentVelocity() -> UInt8 {
+        let val = telemetry.leftTrigger
+        if val > 0.05 {
+            return UInt8(clamp(36.0 + Double(val) * 91.0, min: 36, max: 127))
+        }
+        return 100 // comfortable default strike velocity
+    }
+
+    public func setOperatingMode(_ mode: OperatingMode) {
+        guard operatingMode != mode else { return }
+        releaseCurrentlySoundingNotes()
+        for (_, pitch) in activeMelodicPitches {
+            delegate?.notesReleased(pitches: [pitch], name: "Mode Switch")
+        }
+        activeMelodicPitches.removeAll()
+        for (_, pitch) in activeDrumPitches {
+            delegate?.notesReleased(pitches: [pitch], name: "Mode Switch")
+        }
+        activeDrumPitches.removeAll()
+
+        operatingMode = mode
+        telemetry.operatingMode = mode
+        lastEventDescription = "Mode: \(mode.shortBadge)"
+        evaluateLayerState()
+        broadcastStateToHammerspoon()
+        notifyTelemetry()
+    }
+
+    public func cycleMenuSelection(forward: Bool = true) {
+        let count = OperatingMode.allCases.count
+        if forward {
+            menuSelectionIndex = (menuSelectionIndex + 1) % count
+        } else {
+            menuSelectionIndex = (menuSelectionIndex - 1 + count) % count
+        }
+        telemetry.menuSelectionIndex = menuSelectionIndex
+        triggerStageHapticBurst(stage: 1)
+        notifyTelemetry()
     }
 
     public func scaleDegreeForButton(index: Int) -> Int {
@@ -716,10 +841,62 @@ public final class ControllerManager: ObservableObject {
     }
 
     public func degreeName(_ step: Int) -> String {
-        let numerals = ["I", "ii", "iii", "IV", "V", "vi", "vii°"]
+        let numerals = ["I", "ii", "iii", "IV", "V", "vi", "vii°", "VIII"]
         let count = numerals.count
         let idx = ((step % count) + count) % count
         return numerals[idx]
+    }
+
+    public func computeMelodicPitch(degree: Int) -> UInt8 {
+        let totalDegree = degree + scaleDegreeShift
+        let intervals = currentScale.intervals
+        let numIntervals = intervals.count
+        let octaveOffset = Int(floor(Double(totalDegree) / Double(numIntervals)))
+        let idxInScale = ((totalDegree % numIntervals) + numIntervals) % numIntervals
+        let bumperShift = (isR1Held ? 12 : 0) - (isL1Held ? 12 : 0)
+        let pitch = Int(rootKey) + octaveShift + bumperShift + (octaveOffset * 12) + intervals[idxInScale]
+        return UInt8(clamp(pitch, min: 0, max: 127))
+    }
+
+    private func handleMelodicButton(index: Int, degree: Int, pressed: Bool) {
+        if pressed {
+            let pitch = computeMelodicPitch(degree: degree)
+            activeMelodicPitches[index] = pitch
+            let vel = currentVelocity()
+            delegate?.notesTriggered(pitches: [pitch], velocity: vel, name: noteNameForPitch(pitch))
+
+            let allPitches = Array(activeMelodicPitches.values).sorted()
+            telemetry.playedRootPitches = allPitches
+            telemetry.activeChordNotes = allPitches
+            lastEventDescription = "Melodic (\(degreeName(degree))): \(noteNameForPitch(pitch)) (Vel: \(vel))"
+        } else {
+            if let pitch = activeMelodicPitches.removeValue(forKey: index) {
+                delegate?.notesReleased(pitches: [pitch], name: noteNameForPitch(pitch))
+            }
+            let allPitches = Array(activeMelodicPitches.values).sorted()
+            telemetry.playedRootPitches = allPitches
+            telemetry.activeChordNotes = allPitches
+            lastEventDescription = "Released: \(degreeName(degree))"
+        }
+        notifyTelemetry()
+    }
+
+    private func handleDrumButton(index: Int, pitch: UInt8, name: String, pressed: Bool) {
+        if pressed {
+            activeDrumPitches[index] = pitch
+            let vel = currentVelocity()
+            delegate?.notesTriggered(pitches: [pitch], velocity: vel, name: name)
+            telemetry.playedRootPitches = [pitch]
+            telemetry.activeChordNotes = [pitch]
+            lastEventDescription = "Drum: \(name) (Vel: \(vel))"
+        } else {
+            if let p = activeDrumPitches.removeValue(forKey: index) {
+                delegate?.notesReleased(pitches: [p], name: name)
+            }
+            telemetry.playedRootPitches.removeAll()
+            telemetry.activeChordNotes.removeAll()
+        }
+        notifyTelemetry()
     }
 
     public func cycleChordInversion(forward: Bool = true) {
@@ -734,139 +911,175 @@ public final class ControllerManager: ObservableObject {
         }
     }
 
-    // MARK: - Shift Actions & Held-Chord Morphing
+    // MARK: - Face Actions (Modes & Shift Layers)
     private func handleFaceAction(buttonIndex: Int, pressed: Bool) {
-        if isL1Held {
-            // L1 Harmony Layer: Face buttons select Inversion directly
+        if telemetry.isMenuSelectorOpen {
             if pressed {
-                let inversions: [ChordInversion] = [.root, .first, .second, .drop2]
-                chordInversion = inversions[buttonIndex % inversions.count]
-                telemetry.chordInversion = chordInversion
-                lastEventDescription = "Voicing: \(chordInversion.rawValue)"
-                revoiceActiveChord()
+                menuSelectionIndex = buttonIndex % OperatingMode.allCases.count
+                telemetry.menuSelectionIndex = menuSelectionIndex
+                triggerStageHapticBurst(stage: 1)
+                notifyTelemetry()
             }
-        } else if isR1Held {
-            // R1 Arp Layer: Face buttons select Arp Pattern directly
-            if pressed {
-                let patterns: [ArpPattern] = [.up, .down, .upDown, .random]
-                arpPattern = patterns[buttonIndex % patterns.count]
-                telemetry.arpPattern = arpPattern
-                lastEventDescription = "Arp Pattern: \(arpPattern.rawValue)"
-                if isArpActive { restartArpeggiator() }
-            }
-        } else {
-            let degree = scaleDegreeForButton(index: buttonIndex)
+            return
+        }
 
+        switch operatingMode {
+        case .melodic:
+            // Face Buttons: Upper Tetrachord (Scale Degrees 4, 5, 6, 7)
+            // 1: Square -> Degree 4 (5th)
+            // 3: Triangle -> Degree 5 (6th)
+            // 2: Circle -> Degree 6 (7th)
+            // 0: Cross -> Degree 7 (8th / Octave)
+            let degreeMap = [0: 7, 1: 4, 2: 6, 3: 5]
+            let deg = degreeMap[buttonIndex] ?? (buttonIndex + 4)
+            handleMelodicButton(index: buttonIndex + 4, degree: deg, pressed: pressed)
+
+        case .drums:
+            let drums: [Int: (UInt8, String)] = [
+                0: (45, "Low Tom"),
+                1: (39, "Clap"),
+                2: (49, "Crash Cymbal"),
+                3: (50, "High Tom")
+            ]
+            if let (pitch, name) = drums[buttonIndex] {
+                handleDrumButton(index: buttonIndex + 4, pitch: pitch, name: name, pressed: pressed)
+            }
+
+        case .companion:
             if pressed {
-                // If a chord is already held, pressing another face button in block chord mode ALTERS / EXTENDS that chord!
-                if let heldIdx = heldFaceButtonIndex, heldIdx != buttonIndex, !isArpActive {
-                    switch buttonIndex {
-                    case 1: // Square: toggle 7th
-                        heldChordAdd7th.toggle()
-                        lastEventDescription = heldChordAdd7th ? "Morph: +7th Extension" : "Morph: 7th Off"
-                    case 2: // Circle: toggle 9th
-                        heldChordAdd9th.toggle()
-                        lastEventDescription = heldChordAdd9th ? "Morph: +9th Extension" : "Morph: 9th Off"
-                    case 3: // Triangle: cycle inversion
-                        cycleChordInversion()
-                    default: // Cross (if another button held): toggle sub-bass
-                        heldChordAddSubBass.toggle()
-                        lastEventDescription = heldChordAddSubBass ? "Morph: +Sub-Bass" : "Morph: Sub Off"
-                    }
+                switch buttonIndex {
+                case 0: toggleLatchMode()
+                case 1: toggleChordMode()
+                case 2: toggleArpeggiator()
+                case 3: triggerPanic()
+                default: break
+                }
+            }
+
+        case .chords:
+            if isL1Held {
+                if pressed {
+                    let inversions: [ChordInversion] = [.root, .first, .second, .drop2]
+                    chordInversion = inversions[buttonIndex % inversions.count]
+                    telemetry.chordInversion = chordInversion
+                    lastEventDescription = "Voicing: \(chordInversion.rawValue)"
                     revoiceActiveChord()
-                    notifyTelemetry()
-                    return
                 }
-
-                if activeFaceButtons.isEmpty {
-                    heldChordTemporaryStepShift = 0
-                    heldChordAdd7th = false
-                    heldChordAdd9th = false
-                    heldChordAddSubBass = false
-                    heldChordAddHighOctave = false
-                }
-                activeFaceButtons.insert(buttonIndex)
-                heldFaceButtonIndex = buttonIndex
-                telemetry.isHoldingChord = true
-                lastFaceDegree = degree
-
-                let rootPitch = computeRootPitch(forDegree: degree)
-                activeFaceRoots[buttonIndex] = rootPitch
-                let pitches = computePitches(forDegree: degree)
-                activeFacePitches[buttonIndex] = pitches
-
-                let combinedRoots = Array(Set(activeFaceRoots.values)).sorted()
-                latchedRoots = combinedRoots
-                telemetry.playedRootPitches = combinedRoots
-
-                let combinedPitches = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
-                latchedPitches = combinedPitches
-                telemetry.activeChordNotes = combinedPitches
-
-                let chordLabel = chordNameForDegree(degree)
-                telemetry.activeChordName = activeFaceButtons.count > 1 ? "\(chordLabel)+ (\(combinedPitches.count) notes)" : chordLabel
-
-                let triggerVal = telemetry.rightTrigger
-                let velocity: UInt8 = triggerVal > 0.05 ? UInt8(60 + triggerVal * 67) : 100
-
-                if isArpActive {
-                    restartArpeggiator()
-                    lastEventDescription = "Arp (\(combinedPitches.count) notes): \(combinedPitches.map { noteNameForPitch($0) }.joined(separator: " "))"
-                } else {
-                    releaseCurrentlySoundingNotes()
-                    playBlockChord(pitches: combinedPitches, name: telemetry.activeChordName, velocity: velocity)
-                    lastEventDescription = "\(telemetry.activeChordName) (\(combinedPitches.map { noteNameForPitch($0) }.joined(separator: "-")))"
+            } else if isR1Held {
+                if pressed {
+                    let patterns: [ArpPattern] = [.up, .down, .upDown, .random]
+                    arpPattern = patterns[buttonIndex % patterns.count]
+                    telemetry.arpPattern = arpPattern
+                    lastEventDescription = "Arp Pattern: \(arpPattern.rawValue)"
+                    if isArpActive { restartArpeggiator() }
                 }
             } else {
-                activeFaceButtons.remove(buttonIndex)
-                activeFacePitches.removeValue(forKey: buttonIndex)
-                activeFaceRoots.removeValue(forKey: buttonIndex)
+                let degree = scaleDegreeForButton(index: buttonIndex)
 
-                if !activeFaceButtons.isEmpty {
-                    // Other button(s) still held down
-                    heldFaceButtonIndex = activeFaceButtons.first
-                    let remainingRoots = Array(Set(activeFaceRoots.values)).sorted()
-                    latchedRoots = remainingRoots
-                    telemetry.playedRootPitches = remainingRoots
+                if pressed {
+                    if let heldIdx = heldFaceButtonIndex, heldIdx != buttonIndex, !isArpActive {
+                        switch buttonIndex {
+                        case 1:
+                            heldChordAdd7th.toggle()
+                            lastEventDescription = heldChordAdd7th ? "Morph: +7th Extension" : "Morph: 7th Off"
+                        case 2:
+                            heldChordAdd9th.toggle()
+                            lastEventDescription = heldChordAdd9th ? "Morph: +9th Extension" : "Morph: 9th Off"
+                        case 3:
+                            cycleChordInversion()
+                        default:
+                            heldChordAddSubBass.toggle()
+                            lastEventDescription = heldChordAddSubBass ? "Morph: +Sub-Bass" : "Morph: Sub Off"
+                        }
+                        revoiceActiveChord()
+                        notifyTelemetry()
+                        return
+                    }
 
-                    let remaining = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
-                    latchedPitches = remaining
-                    telemetry.activeChordNotes = remaining
+                    if activeFaceButtons.isEmpty {
+                        heldChordTemporaryStepShift = 0
+                        heldChordAdd7th = false
+                        heldChordAdd9th = false
+                        heldChordAddSubBass = false
+                        heldChordAddHighOctave = false
+                    }
+                    activeFaceButtons.insert(buttonIndex)
+                    heldFaceButtonIndex = buttonIndex
+                    telemetry.isHoldingChord = true
+                    lastFaceDegree = degree
+
+                    let rootPitch = computeRootPitch(forDegree: degree)
+                    activeFaceRoots[buttonIndex] = rootPitch
+                    let pitches = computePitches(forDegree: degree)
+                    activeFacePitches[buttonIndex] = pitches
+
+                    let combinedRoots = Array(Set(activeFaceRoots.values)).sorted()
+                    latchedRoots = combinedRoots
+                    telemetry.playedRootPitches = combinedRoots
+
+                    let combinedPitches = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
+                    latchedPitches = combinedPitches
+                    telemetry.activeChordNotes = combinedPitches
+
+                    let chordLabel = chordNameForDegree(degree)
+                    telemetry.activeChordName = activeFaceButtons.count > 1 ? "\(chordLabel)+ (\(combinedPitches.count) notes)" : chordLabel
+
+                    let velocity = currentVelocity()
 
                     if isArpActive {
                         restartArpeggiator()
-                        lastEventDescription = "Arp: \(remaining.map { noteNameForPitch($0) }.joined(separator: " "))"
+                        lastEventDescription = "Arp (\(combinedPitches.count) notes): \(combinedPitches.map { noteNameForPitch($0) }.joined(separator: " "))"
                     } else {
                         releaseCurrentlySoundingNotes()
-                        let triggerVal = telemetry.rightTrigger
-                        let velocity: UInt8 = triggerVal > 0.05 ? UInt8(60 + triggerVal * 67) : 100
-                        playBlockChord(pitches: remaining, name: "Held Harmony", velocity: velocity)
+                        playBlockChord(pitches: combinedPitches, name: telemetry.activeChordName, velocity: velocity)
+                        lastEventDescription = "\(telemetry.activeChordName) (\(combinedPitches.map { noteNameForPitch($0) }.joined(separator: "-")))"
                     }
                 } else {
-                    // All face buttons released
-                    heldFaceButtonIndex = nil
-                    heldChordTemporaryStepShift = 0
-                    heldChordAdd7th = false
-                    heldChordAdd9th = false
-                    heldChordAddSubBass = false
-                    heldChordAddHighOctave = false
-                    telemetry.isHoldingChord = false
+                    activeFaceButtons.remove(buttonIndex)
+                    activeFacePitches.removeValue(forKey: buttonIndex)
+                    activeFaceRoots.removeValue(forKey: buttonIndex)
 
-                    if !latchMode {
+                    if !activeFaceButtons.isEmpty {
+                        heldFaceButtonIndex = activeFaceButtons.first
+                        let remainingRoots = Array(Set(activeFaceRoots.values)).sorted()
+                        latchedRoots = remainingRoots
+                        telemetry.playedRootPitches = remainingRoots
+
+                        let remaining = Array(Set(activeFacePitches.values.flatMap { $0 })).sorted()
+                        latchedPitches = remaining
+                        telemetry.activeChordNotes = remaining
+
                         if isArpActive {
-                            stopArpeggiator()
+                            restartArpeggiator()
+                            lastEventDescription = "Arp: \(remaining.map { noteNameForPitch($0) }.joined(separator: " "))"
                         } else {
                             releaseCurrentlySoundingNotes()
+                            let velocity = currentVelocity()
+                            playBlockChord(pitches: remaining, name: "Held Harmony", velocity: velocity)
                         }
-                        latchedPitches.removeAll()
-                        latchedRoots.removeAll()
-                        telemetry.activeChordNotes.removeAll()
-                        telemetry.playedRootPitches.removeAll()
-                        lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
                     } else {
-                        // In latch mode, the notes are already playing smoothly!
-                        // Do NOT call revoiceActiveChord() or send Note-On on key-up!
-                        lastEventDescription = "Latched: \(telemetry.activeChordName)"
+                        heldFaceButtonIndex = nil
+                        heldChordTemporaryStepShift = 0
+                        heldChordAdd7th = false
+                        heldChordAdd9th = false
+                        heldChordAddSubBass = false
+                        heldChordAddHighOctave = false
+                        telemetry.isHoldingChord = false
+
+                        if !latchMode {
+                            if isArpActive {
+                                stopArpeggiator()
+                            } else {
+                                releaseCurrentlySoundingNotes()
+                            }
+                            latchedPitches.removeAll()
+                            latchedRoots.removeAll()
+                            telemetry.activeChordNotes.removeAll()
+                            telemetry.playedRootPitches.removeAll()
+                            lastEventDescription = "Released: \(faceButtonName(buttonIndex))"
+                        } else {
+                            lastEventDescription = "Latched: \(telemetry.activeChordName)"
+                        }
                     }
                 }
             }
@@ -874,90 +1087,157 @@ public final class ControllerManager: ObservableObject {
         notifyTelemetry()
     }
 
-    private func handleDpadAction(direction: DpadDir) {
-        if heldFaceButtonIndex != nil {
-            // HELD-CHORD MORPH MODE: Transpose held chord diatonically or add extensions!
-            switch direction {
-            case .up:
-                heldChordTemporaryStepShift += 1
-                lastEventDescription = "Held Chord: Step +\(heldChordTemporaryStepShift)"
-            case .down:
-                heldChordTemporaryStepShift -= 1
-                lastEventDescription = "Held Chord: Step \(heldChordTemporaryStepShift)"
-            case .left:
-                heldChordAddSubBass.toggle()
-                lastEventDescription = heldChordAddSubBass ? "Held: +Sub-Bass" : "Held: Sub-Bass Off"
-            case .right:
-                heldChordAddHighOctave.toggle()
-                lastEventDescription = heldChordAddHighOctave ? "Held: +8va High" : "Held: 8va Off"
+    // MARK: - D-Pad Actions (Operating Modes & Navigation)
+    private func handleDpadAction(direction: DpadDir, pressed: Bool) {
+        if telemetry.isMenuSelectorOpen {
+            if pressed {
+                switch direction {
+                case .up, .left: cycleMenuSelection(forward: false)
+                case .down, .right: cycleMenuSelection(forward: true)
+                }
             }
-            revoiceActiveChord()
-            notifyTelemetry()
             return
         }
 
-        if isL1Held {
-            // L1 Layer: Root/Octave & Direct Tonic Reset
+        switch operatingMode {
+        case .melodic:
+            // D-Pad: Lower Tetrachord (Scale Degrees 0, 1, 2, 3)
+            // Left: Degree 0 (Tonic / 1)
+            // Up: Degree 1 (2nd)
+            // Right: Degree 2 (3rd)
+            // Down: Degree 3 (4th)
+            let degreeMap: [DpadDir: (Int, Int)] = [
+                .left: (0, 0),
+                .up: (1, 1),
+                .right: (2, 2),
+                .down: (3, 3)
+            ]
+            if let (idx, deg) = degreeMap[direction] {
+                handleMelodicButton(index: idx, degree: deg, pressed: pressed)
+            }
+
+        case .drums:
+            let drums: [DpadDir: (Int, UInt8, String)] = [
+                .left: (0, 36, "Bass Drum (Kick)"),
+                .down: (1, 38, "Acoustic Snare"),
+                .up: (2, 42, "Closed Hi-Hat"),
+                .right: (3, 46, "Open Hi-Hat")
+            ]
+            if let (idx, pitch, name) = drums[direction] {
+                handleDrumButton(index: idx, pitch: pitch, name: name, pressed: pressed)
+            }
+
+        case .companion:
+            guard pressed else { return }
             switch direction {
             case .up:
                 octaveShift = min(36, octaveShift + 12)
                 lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
+                broadcastStateToHammerspoon()
             case .down:
                 octaveShift = max(-36, octaveShift - 12)
                 lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
+                broadcastStateToHammerspoon()
             case .left:
-                // Direct Tonic Reset (Step = 0)!
-                scaleDegreeShift = 0
-                lastEventDescription = "Diatonic: Reset to Tonic (0)"
+                scaleDegreeShift -= 1
+                lastEventDescription = "Scale Transpose: -1 Step"
+                broadcastStateToHammerspoon()
             case .right:
-                // Chromatic Semitone +1
-                rootKey = (rootKey >= 84) ? 48 : rootKey + 1
-                lastEventDescription = "Root Key: \(noteNameForPitch(rootKey))"
+                scaleDegreeShift += 1
+                lastEventDescription = "Scale Transpose: +1 Step"
+                broadcastStateToHammerspoon()
             }
             revoiceActiveChord()
             notifyTelemetry()
-            return
-        }
 
-        if isR1Held {
-            // R1 Layer: Arp Tempo & Rate Controls
+        case .chords:
+            guard pressed else { return }
+            if heldFaceButtonIndex != nil {
+                switch direction {
+                case .up:
+                    heldChordTemporaryStepShift += 1
+                    lastEventDescription = "Held Chord: Step +\(heldChordTemporaryStepShift)"
+                case .down:
+                    heldChordTemporaryStepShift -= 1
+                    lastEventDescription = "Held Chord: Step \(heldChordTemporaryStepShift)"
+                case .left:
+                    heldChordAddSubBass.toggle()
+                    lastEventDescription = heldChordAddSubBass ? "Held: +Sub-Bass" : "Held: Sub-Bass Off"
+                case .right:
+                    heldChordAddHighOctave.toggle()
+                    lastEventDescription = heldChordAddHighOctave ? "Held: +8va High" : "Held: 8va Off"
+                }
+                revoiceActiveChord()
+                notifyTelemetry()
+                return
+            }
+
+            if isL1Held {
+                switch direction {
+                case .up:
+                    octaveShift = min(36, octaveShift + 12)
+                    lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
+                    broadcastStateToHammerspoon()
+                case .down:
+                    octaveShift = max(-36, octaveShift - 12)
+                    lastEventDescription = "Octave: \(octaveShift / 12 > 0 ? "+" : "")\(octaveShift / 12)"
+                    broadcastStateToHammerspoon()
+                case .left:
+                    scaleDegreeShift = 0
+                    lastEventDescription = "Diatonic: Reset to Tonic (0)"
+                    broadcastStateToHammerspoon()
+                case .right:
+                    rootKey = (rootKey >= 84) ? 48 : rootKey + 1
+                    lastEventDescription = "Root Key: \(noteNameForPitch(rootKey))"
+                    broadcastStateToHammerspoon()
+                }
+                revoiceActiveChord()
+                notifyTelemetry()
+                return
+            }
+
+            if isR1Held {
+                switch direction {
+                case .up:
+                    bpm = min(240.0, bpm + 5.0)
+                    telemetry.bpm = bpm
+                    lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
+                    if isArpActive { restartArpeggiator() }
+                    broadcastStateToHammerspoon()
+                case .down:
+                    bpm = max(40.0, bpm - 5.0)
+                    telemetry.bpm = bpm
+                    lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
+                    if isArpActive { restartArpeggiator() }
+                    broadcastStateToHammerspoon()
+                case .left:
+                    cycleArpRate(forward: false)
+                case .right:
+                    cycleArpRate(forward: true)
+                }
+                notifyTelemetry()
+                return
+            }
+
+            // Base Layer: Diatonic Scale Degree Transposition!
             switch direction {
             case .up:
-                bpm = min(240.0, bpm + 5.0)
-                telemetry.bpm = bpm
-                lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
-                if isArpActive { restartArpeggiator() }
+                scaleDegreeShift += 1
+                lastEventDescription = "Scale Transpose: +1 Step (Degree \(degreeName(scaleDegreeShift)))"
             case .down:
-                bpm = max(40.0, bpm - 5.0)
-                telemetry.bpm = bpm
-                lastEventDescription = String(format: "Tempo: %.0f BPM", bpm)
-                if isArpActive { restartArpeggiator() }
+                scaleDegreeShift -= 1
+                lastEventDescription = "Scale Transpose: -1 Step (Degree \(degreeName(scaleDegreeShift)))"
             case .left:
-                cycleArpRate(forward: false)
+                scaleDegreeShift -= 3
+                lastEventDescription = "Scale Transpose: -3 Steps (Degree \(degreeName(scaleDegreeShift)))"
             case .right:
-                cycleArpRate(forward: true)
+                scaleDegreeShift += 3
+                lastEventDescription = "Scale Transpose: +3 Steps (Degree \(degreeName(scaleDegreeShift)))"
             }
+            revoiceActiveChord()
+            broadcastStateToHammerspoon()
             notifyTelemetry()
-            return
         }
-
-        // Base Layer: Diatonic Scale Degree Transposition!
-        switch direction {
-        case .up:
-            scaleDegreeShift += 1
-            lastEventDescription = "Scale Transpose: +1 Step (Degree \(degreeName(scaleDegreeShift)))"
-        case .down:
-            scaleDegreeShift -= 1
-            lastEventDescription = "Scale Transpose: -1 Step (Degree \(degreeName(scaleDegreeShift)))"
-        case .left:
-            scaleDegreeShift -= 3 // Quick jump down 3 steps (e.g. IV -> I)
-            lastEventDescription = "Scale Transpose: -3 Steps (Degree \(degreeName(scaleDegreeShift)))"
-        case .right:
-            scaleDegreeShift += 3 // Quick jump up 3 steps (e.g. I -> IV)
-            lastEventDescription = "Scale Transpose: +3 Steps (Degree \(degreeName(scaleDegreeShift)))"
-        }
-        revoiceActiveChord()
-        notifyTelemetry()
     }
 
     private enum DpadDir { case up, down, left, right }
@@ -1379,8 +1659,7 @@ public final class ControllerManager: ObservableObject {
             arpStepIndex = (arpStepIndex + 1) % count
         }
 
-        let triggerVal = telemetry.rightTrigger
-        let velocity: UInt8 = triggerVal > 0.05 ? UInt8(50 + triggerVal * 77) : 95
+        let velocity = currentVelocity()
 
         lastArpPitch = pitch
         telemetry.currentArpStep = arpStepIndex
@@ -1401,23 +1680,159 @@ public final class ControllerManager: ObservableObject {
 
     private func evaluateLayerState() {
         let prevLayer = currentLayer
-        if isL1Held && isR1Held {
-            currentLayer = .matrix
-            setLightbarColor(red: 0.92, green: 0.28, blue: 0.60) // Magenta
-        } else if isL1Held {
-            currentLayer = .harmony
-            setLightbarColor(red: 0.23, green: 0.51, blue: 0.96) // Blue
-        } else if isR1Held {
-            currentLayer = .arp
-            setLightbarColor(red: 0.96, green: 0.62, blue: 0.04) // Amber
-        } else {
+
+        switch operatingMode {
+        case .melodic:
+            melodicOctaveOffset = (isR1Held ? 12 : 0) - (isL1Held ? 12 : 0)
+            telemetry.melodicOctaveOffset = melodicOctaveOffset
             currentLayer = .base
-            setLightbarColor(red: 0.06, green: 0.72, blue: 0.51) // Green
+            setLightbarColor(red: 0.0, green: 0.85, blue: 0.95) // Cyan
+        case .companion:
+            currentLayer = .base
+            setLightbarColor(red: 0.58, green: 0.35, blue: 0.95) // Purple
+        case .drums:
+            currentLayer = .base
+            setLightbarColor(red: 0.95, green: 0.45, blue: 0.20) // Coral
+        case .chords:
+            if isL1Held && isR1Held {
+                currentLayer = .matrix
+                setLightbarColor(red: 0.92, green: 0.28, blue: 0.60) // Magenta
+            } else if isL1Held {
+                currentLayer = .harmony
+                setLightbarColor(red: 0.23, green: 0.51, blue: 0.96) // Blue
+            } else if isR1Held {
+                currentLayer = .arp
+                setLightbarColor(red: 0.96, green: 0.62, blue: 0.04) // Amber
+            } else {
+                currentLayer = .base
+                setLightbarColor(red: 0.06, green: 0.72, blue: 0.51) // Green
+            }
         }
 
         if prevLayer != currentLayer {
             delegate?.layerDidChange(currentLayer)
         }
+    }
+
+    // MARK: - Hammerspoon Bidirectional Synchronization
+    private func setupHammerspoonSync() {
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleQwertyStateBroadcast(_:)),
+            name: NSNotification.Name("QwertyMidiStateBroadcast"),
+            object: nil
+        )
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleQwertyNoteBroadcast(_:)),
+            name: NSNotification.Name("QwertyMidiNoteBroadcast"),
+            object: nil
+        )
+    }
+
+    @objc private func handleQwertyStateBroadcast(_ notification: Notification) {
+        guard !isInternalSyncing, let userInfo = notification.userInfo else { return }
+        isInternalSyncing = true
+        defer { isInternalSyncing = false }
+
+        var stateChanged = false
+
+        if let root = (userInfo["root"] as? NSNumber)?.intValue ?? (userInfo["root"] as? Int) {
+            let targetKey = UInt8(clamp(root + 60, min: 24, max: 96))
+            if self.rootKey != targetKey {
+                self.rootKey = targetKey
+                stateChanged = true
+            }
+        }
+        if let scaleIdx = (userInfo["scaleIdx"] as? NSNumber)?.intValue ?? (userInfo["scaleIdx"] as? Int) {
+            let validIdx = scaleIdx % availableScales.count
+            if self.scaleIndex != validIdx {
+                self.scaleIndex = validIdx
+                self.scaleName = availableScales[validIdx].name
+                stateChanged = true
+            }
+        }
+        if let bpmVal = (userInfo["bpm"] as? NSNumber)?.doubleValue ?? (userInfo["bpm"] as? Double) {
+            if abs(self.bpm - bpmVal) > 0.5 {
+                self.bpm = bpmVal
+                stateChanged = true
+            }
+        }
+        if let oct = (userInfo["octaveShift"] as? NSNumber)?.intValue ?? (userInfo["octaveShift"] as? Int) {
+            if self.octaveShift != oct {
+                self.octaveShift = oct
+                stateChanged = true
+            }
+        }
+        if let chord = (userInfo["chordIdx"] as? NSNumber)?.intValue ?? (userInfo["chordIdx"] as? Int) {
+            let allChords = ChordType.allCases
+            if chord >= 0 && chord < allChords.count && self.chordType != allChords[chord] {
+                self.chordType = allChords[chord]
+                stateChanged = true
+            }
+        }
+
+        self.telemetry.isSyncedWithQwerty = true
+        self.isSyncedWithQwerty = true
+        if stateChanged {
+            self.lastEventDescription = "🔗 Synced: \(self.noteNameForPitch(self.rootKey)) \(self.scaleName)"
+            self.syncTelemetryEngineState()
+            self.revoiceActiveChord()
+        }
+        self.notifyTelemetry()
+    }
+
+    @objc private func handleQwertyNoteBroadcast(_ notification: Notification) {
+        guard let userInfo = notification.userInfo else { return }
+        let isNoteOn = (userInfo["isNoteOn"] as? Bool) ?? false
+        var notes: [UInt8] = []
+
+        if let rawArray = userInfo["pitches"] as? [Any] {
+            notes = rawArray.compactMap { item in
+                if let num = item as? NSNumber { return num.uint8Value }
+                if let intVal = item as? Int { return UInt8(clamping: intVal) }
+                return nil
+            }
+        } else if let singleNum = (userInfo["pitches"] as? NSNumber)?.uint8Value {
+            notes = [singleNum]
+        } else if let singleInt = userInfo["pitches"] as? Int {
+            notes = [UInt8(clamping: singleInt)]
+        }
+
+        if !notes.isEmpty {
+            if isNoteOn {
+                self.telemetry.playedRootPitches = notes
+                self.telemetry.activeChordNotes = notes
+            } else {
+                if !self.latchMode && self.operatingMode != .melodic {
+                    self.telemetry.playedRootPitches.removeAll()
+                    self.telemetry.activeChordNotes.removeAll()
+                }
+            }
+            self.telemetry.isSyncedWithQwerty = true
+            self.isSyncedWithQwerty = true
+            self.notifyTelemetry()
+        }
+    }
+
+    public func broadcastStateToHammerspoon() {
+        guard !isInternalSyncing else { return }
+        let rootOffset = (Int(rootKey) - 60) % 12
+        let rootNormalized = (rootOffset + 12) % 12
+        let payload: [String: Any] = [
+            "root": rootNormalized,
+            "scaleIdx": scaleIndex,
+            "scaleName": scaleName,
+            "bpm": bpm,
+            "octaveShift": octaveShift,
+            "chordIdx": ChordType.allCases.firstIndex(of: chordType) ?? 0,
+            "operatingMode": operatingMode.rawValue
+        ]
+        DistributedNotificationCenter.default().post(
+            name: NSNotification.Name("DualSynthStateBroadcast"),
+            object: nil,
+            userInfo: payload
+        )
     }
 
     private func notifyTelemetry() {

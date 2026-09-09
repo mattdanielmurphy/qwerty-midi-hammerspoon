@@ -47,6 +47,11 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
       dev:sendCommand("noteOn", { note = noteNum, velocity = vel, channel = ch })
     end
   end
+
+  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastNotes then
+    local isNoteOn = (cmd == "noteOn" and (vel or 0) > 0)
+    _G.activeWatchers.sync.broadcastNotes(noteNum, isNoteOn)
+  end
 end
 
 local function sendSustainCC(val)
