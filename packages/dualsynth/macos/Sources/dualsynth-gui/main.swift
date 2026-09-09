@@ -8,7 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
     let controller = ControllerManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
         controller.delegate = self
+
+        setupMainMenu()
 
         let contentView = DualSenseHUDView(controller: controller, midi: midi)
 
@@ -22,11 +25,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
         window.minSize = NSSize(width: 760, height: 540)
         window.title = "DualSynth Studio HUD"
         window.contentView = NSHostingView(rootView: contentView)
-        window.level = .floating // Keep on top so user can see it while playing in Logic Pro!
+        window.level = .normal // Normal window level (does NOT float over other apps)
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
 
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // Application Menu
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "DualSynth")
+        appMenu.addItem(withTitle: "About DualSynth", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Hide DualSynth", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit DualSynth", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        // Window Menu
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

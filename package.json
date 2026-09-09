@@ -10,6 +10,7 @@
     "bundle": "bash bin/bundle_and_reload.sh",
     "dev:hud": "bun --cwd packages/surface-hud run dev",
     "dualsynth:gui": "cd packages/dualsynth/macos && swift run dualsynth-gui",
-    "dualsynth:cli": "cd packages/dualsynth/macos && swift run dualsynth-cli"
+    "dualsynth:cli": "cd packages/dualsynth/macos && swift run dualsynth-cli",
+    "dualsynth:app": "bash bin/build_app.sh"
   }
 }
