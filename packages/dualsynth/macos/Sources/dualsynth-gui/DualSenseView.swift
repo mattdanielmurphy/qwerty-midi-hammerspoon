@@ -184,30 +184,29 @@ public struct DualSenseHUDView: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 12) {
-                // Top Header Bar (With fixed non-wrapping elements)
-                headerBar
+        GeometryReader { geometry in
+            let baseWidth: CGFloat = 760
+            let baseHeight: CGFloat = 550
+            let margin: CGFloat = 20
+            let scaleX = (geometry.size.width - margin * 2) / baseWidth
+            let scaleY = (geometry.size.height - margin * 2) / baseHeight
+            let scale = max(0.6, min(scaleX, scaleY))
 
-                // Centered DualSense Controller Chassis
-                HStack {
-                    Spacer(minLength: 0)
+            ZStack {
+                theme.bgCanvas
+                    .ignoresSafeArea()
+
+                VStack(spacing: 8) {
+                    headerBar
                     controllerChassisView
-                    Spacer(minLength: 0)
+                    performanceDeckView
+                    statusConsoleView
                 }
-
-                // Lower Performance Deck
-                performanceDeckView
-                    .frame(maxWidth: 820)
-
-                // Bottom Status Console
-                statusConsoleView
-                    .frame(maxWidth: 820)
+                .frame(width: baseWidth)
+                .scaleEffect(scale, anchor: .center)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .frame(minWidth: 780, minHeight: 580)
         .background(theme.bgCanvas)
     }
 
