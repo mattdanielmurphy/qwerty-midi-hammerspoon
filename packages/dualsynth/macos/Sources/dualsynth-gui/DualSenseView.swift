@@ -32,6 +32,22 @@ public struct ThemeColors {
     public var consoleBg: Color { isDark ? Color(white: 0.07) : Color(white: 0.90) }
 }
 
+public struct UIScale {
+    public let factor: CGFloat
+
+    public init(_ factor: CGFloat = 1.0) {
+        self.factor = factor
+    }
+
+    public func d(_ val: CGFloat) -> CGFloat {
+        return round(val * factor)
+    }
+
+    public func f(_ val: CGFloat) -> CGFloat {
+        return max(7.0, round(val * factor))
+    }
+}
+
 struct StickRadarView: View {
     let title: String
     let x: Float
@@ -39,11 +55,12 @@ struct StickRadarView: View {
     let isClicked: Bool
     let subtitle: String
     let theme: ThemeColors
+    let s: UIScale
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: s.d(4)) {
             Text(title)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.system(size: s.f(12), weight: .bold, design: .monospaced))
                 .foregroundColor(theme.textPrimary)
                 .lineLimit(1)
 
@@ -51,23 +68,23 @@ struct StickRadarView: View {
                 // Outer bezel
                 Circle()
                     .fill(theme.wellBg)
-                    .frame(width: 96, height: 96)
+                    .frame(width: s.d(96), height: s.d(96))
                     .overlay(
                         Circle()
-                            .stroke(isClicked ? Color.cyan : theme.wellBorder, lineWidth: isClicked ? 2.5 : 1.2)
+                            .stroke(isClicked ? Color.cyan : theme.wellBorder, lineWidth: isClicked ? s.d(2.5) : s.d(1.2))
                     )
 
                 // Concentric guide ring
                 Circle()
                     .stroke(theme.crosshair.opacity(0.4), lineWidth: 1)
-                    .frame(width: 50, height: 50)
+                    .frame(width: s.d(50), height: s.d(50))
 
                 // Crosshairs
                 Path { path in
-                    path.move(to: CGPoint(x: 48, y: 8))
-                    path.addLine(to: CGPoint(x: 48, y: 88))
-                    path.move(to: CGPoint(x: 8, y: 48))
-                    path.addLine(to: CGPoint(x: 88, y: 48))
+                    path.move(to: CGPoint(x: s.d(48), y: s.d(8)))
+                    path.addLine(to: CGPoint(x: s.d(48), y: s.d(88)))
+                    path.move(to: CGPoint(x: s.d(8), y: s.d(48)))
+                    path.addLine(to: CGPoint(x: s.d(88), y: s.d(48)))
                 }
                 .stroke(theme.crosshair, lineWidth: 1)
 
@@ -77,34 +94,34 @@ struct StickRadarView: View {
                         RadialGradient(
                             gradient: Gradient(colors: [isClicked ? .cyan : .blue, theme.wellBorder]),
                             center: .center,
-                            startRadius: 2,
-                            endRadius: 16
+                            startRadius: s.d(2),
+                            endRadius: s.d(16)
                         )
                     )
-                    .frame(width: 28, height: 28)
-                    .shadow(color: isClicked ? .cyan : .blue.opacity(0.5), radius: 5)
+                    .frame(width: s.d(28), height: s.d(28))
+                    .shadow(color: isClicked ? .cyan : .blue.opacity(0.5), radius: s.d(5))
                     .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                    .offset(x: CGFloat(x) * 32, y: CGFloat(-y) * 32)
+                    .offset(x: CGFloat(x) * s.d(32), y: CGFloat(-y) * s.d(32))
             }
-            .frame(width: 96, height: 96)
+            .frame(width: s.d(96), height: s.d(96))
 
-            HStack(spacing: 6) {
+            HStack(spacing: s.d(6)) {
                 Text(String(format: "X:%+.2f", x))
                 Text(String(format: "Y:%+.2f", y))
             }
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
             .foregroundColor(theme.textSecondary)
             .lineLimit(1)
 
             Text(subtitle)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: s.f(9), weight: .semibold))
                 .foregroundColor(theme.textTertiary)
                 .lineLimit(1)
         }
-        .frame(width: 128, height: 172)
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 12).fill(theme.cardBg))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
+        .frame(width: s.d(128), height: s.d(172))
+        .padding(s.d(6))
+        .background(RoundedRectangle(cornerRadius: s.d(12)).fill(theme.cardBg))
+        .overlay(RoundedRectangle(cornerRadius: s.d(12)).stroke(theme.cardBorder, lineWidth: 1))
         .fixedSize()
     }
 }
@@ -115,20 +132,21 @@ struct TriggerGaugeView: View {
     let subtitle: String
     let activeColor: Color
     let theme: ThemeColors
+    let s: UIScale
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: s.d(3)) {
             Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.system(size: s.f(11), weight: .bold, design: .monospaced))
                 .foregroundColor(theme.textPrimary)
                 .lineLimit(1)
 
             ZStack(alignment: .bottom) {
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: s.d(5))
                     .fill(theme.wellBg)
-                    .frame(width: 32, height: 80)
+                    .frame(width: s.d(32), height: s.d(80))
 
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: s.d(5))
                     .fill(
                         LinearGradient(
                             colors: [activeColor, activeColor.opacity(0.6)],
@@ -136,25 +154,25 @@ struct TriggerGaugeView: View {
                             endPoint: .bottom
                         )
                     )
-                    .frame(width: 32, height: max(5, CGFloat(value) * 80))
-                    .shadow(color: activeColor.opacity(value > 0.05 ? 0.6 : 0.0), radius: 4)
+                    .frame(width: s.d(32), height: max(s.d(5), CGFloat(value) * s.d(80)))
+                    .shadow(color: activeColor.opacity(value > 0.05 ? 0.6 : 0.0), radius: s.d(4))
             }
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: s.d(5))
                     .stroke(theme.wellBorder, lineWidth: 1)
             )
 
             Text(String(format: "%3.0f%%", value * 100))
-                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .font(.system(size: s.f(10), weight: .black, design: .monospaced))
                 .foregroundColor(value > 0.05 ? activeColor : theme.textSecondary)
                 .lineLimit(1)
 
             Text(subtitle)
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: s.f(8), weight: .bold))
                 .foregroundColor(theme.textTertiary)
                 .lineLimit(1)
         }
-        .frame(width: 72)
+        .frame(width: s.d(72))
         .fixedSize()
     }
 }
@@ -187,23 +205,23 @@ public struct DualSenseHUDView: View {
         GeometryReader { geometry in
             let baseWidth: CGFloat = 760
             let baseHeight: CGFloat = 550
-            let margin: CGFloat = 20
+            let margin: CGFloat = 16
             let scaleX = (geometry.size.width - margin * 2) / baseWidth
             let scaleY = (geometry.size.height - margin * 2) / baseHeight
-            let scale = max(0.6, min(scaleX, scaleY))
+            let scaleFactor = max(0.65, min(scaleX, scaleY))
+            let s = UIScale(scaleFactor)
 
             ZStack {
                 theme.bgCanvas
                     .ignoresSafeArea()
 
-                VStack(spacing: 8) {
-                    headerBar
-                    controllerChassisView
-                    performanceDeckView
-                    statusConsoleView
+                VStack(spacing: s.d(8)) {
+                    headerBar(s: s)
+                    controllerChassisView(s: s)
+                    performanceDeckView(s: s)
+                    statusConsoleView(s: s)
                 }
-                .frame(width: baseWidth)
-                .scaleEffect(scale, anchor: .center)
+                .frame(width: s.d(baseWidth))
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -211,17 +229,17 @@ public struct DualSenseHUDView: View {
     }
 
     // MARK: - Header Bar
-    private var headerBar: some View {
-        HStack(spacing: 10) {
+    private func headerBar(s: UIScale) -> some View {
+        HStack(spacing: s.d(10)) {
             // Connection status
-            HStack(spacing: 6) {
+            HStack(spacing: s.d(6)) {
                 Circle()
                     .fill(controller.isConnected ? Color.green : Color.red)
-                    .frame(width: 9, height: 9)
-                    .shadow(color: controller.isConnected ? .green : .red, radius: 4)
+                    .frame(width: s.d(9), height: s.d(9))
+                    .shadow(color: controller.isConnected ? .green : .red, radius: s.d(4))
 
                 Text(controller.controllerName)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: s.f(13), weight: .bold))
                     .foregroundColor(theme.textPrimary)
                     .lineLimit(1)
             }
@@ -230,62 +248,62 @@ public struct DualSenseHUDView: View {
             Spacer()
 
             // Active Layer Badge
-            HStack(spacing: 5) {
+            HStack(spacing: s.d(5)) {
                 Circle()
                     .fill(layerColor)
-                    .frame(width: 7, height: 7)
+                    .frame(width: s.d(7), height: s.d(7))
                 Text(controller.currentLayer.rawValue.uppercased())
-                    .font(.system(size: 11, weight: .black, design: .monospaced))
+                    .font(.system(size: s.f(11), weight: .black, design: .monospaced))
                     .foregroundColor(layerColor)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .padding(.horizontal, s.d(12))
+            .padding(.vertical, s.d(5))
             .background(layerColor.opacity(0.18))
             .overlay(Capsule().stroke(layerColor, lineWidth: 1.2))
             .clipShape(Capsule())
             .fixedSize()
 
             // Musical Mode Badges (Fixed horizontal size so text NEVER wraps)
-            HStack(spacing: 6) {
+            HStack(spacing: s.d(6)) {
                 Button(action: { controller.toggleChordMode() }) {
                     Text("CHORDS: \(controller.chordMode ? "ON" : "OFF")")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, s.d(8))
+                        .padding(.vertical, s.d(4))
                         .background(controller.chordMode ? Color.green.opacity(0.2) : theme.buttonBg)
                         .foregroundColor(controller.chordMode ? .green : theme.textSecondary)
-                        .cornerRadius(6)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.chordMode ? Color.green : theme.buttonBorder, lineWidth: 1))
+                        .cornerRadius(s.d(6))
+                        .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(controller.chordMode ? Color.green : theme.buttonBorder, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
 
                 Button(action: { controller.toggleLatchMode() }) {
                     Text("LATCH: \(controller.latchMode ? "ON 🔒" : "OFF")")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, s.d(8))
+                        .padding(.vertical, s.d(4))
                         .background(controller.latchMode ? Color.cyan.opacity(0.2) : theme.buttonBg)
                         .foregroundColor(controller.latchMode ? .cyan : theme.textSecondary)
-                        .cornerRadius(6)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.latchMode ? Color.cyan : theme.buttonBorder, lineWidth: 1))
+                        .cornerRadius(s.d(6))
+                        .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(controller.latchMode ? Color.cyan : theme.buttonBorder, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
 
                 Button(action: { controller.toggleArpeggiator() }) {
                     Text("ARP: \(controller.isArpActive ? "ON ⚡" : "OFF")")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, s.d(8))
+                        .padding(.vertical, s.d(4))
                         .background(controller.isArpActive ? Color.orange.opacity(0.2) : theme.buttonBg)
                         .foregroundColor(controller.isArpActive ? .orange : theme.textSecondary)
-                        .cornerRadius(6)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.isArpActive ? Color.orange : theme.buttonBorder, lineWidth: 1))
+                        .cornerRadius(s.d(6))
+                        .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(controller.isArpActive ? Color.orange : theme.buttonBorder, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
@@ -306,103 +324,104 @@ public struct DualSenseHUDView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: s.d(5)) {
                     Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
                         .foregroundColor(isDarkMode ? .yellow : .orange)
                     Text(themeSelection.rawValue)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: s.f(11), weight: .bold))
                         .foregroundColor(theme.textPrimary)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
+                .padding(.horizontal, s.d(8))
+                .padding(.vertical, s.d(5))
                 .background(theme.buttonBg)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.buttonBorder, lineWidth: 1))
-                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(theme.buttonBorder, lineWidth: 1))
+                .cornerRadius(s.d(6))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, s.d(12))
+        .padding(.vertical, s.d(6))
         .background(theme.cardBg)
-        .cornerRadius(10)
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.cardBorder, lineWidth: 1))
+        .cornerRadius(s.d(10))
+        .overlay(RoundedRectangle(cornerRadius: s.d(10)).stroke(theme.cardBorder, lineWidth: 1))
     }
 
     // MARK: - DualSense Controller Chassis View (Rigid Static Dimensions)
-    private var controllerChassisView: some View {
-        VStack(spacing: 10) {
+    private func controllerChassisView(s: UIScale) -> some View {
+        VStack(spacing: s.d(10)) {
             // Upper Triggers & Shoulders
-            HStack(spacing: 16) {
+            HStack(spacing: s.d(16)) {
                 // L2 Trigger & L1 Bumper
-                HStack(spacing: 10) {
+                HStack(spacing: s.d(10)) {
                     TriggerGaugeView(
                         title: "L2 TRIGGER",
                         value: controller.telemetry.leftTrigger,
                         subtitle: "CC74 Cutoff",
                         activeColor: .purple,
-                        theme: theme
+                        theme: theme,
+                        s: s
                     )
 
-                    VStack(spacing: 4) {
+                    VStack(spacing: s.d(4)) {
                         Text("L1 BUMPER")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                             .foregroundColor(theme.textPrimary)
                             .lineLimit(1)
 
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: s.d(8))
                             .fill(controller.telemetry.l1 ? Color.blue : theme.buttonBg)
-                            .frame(width: 76, height: 34)
+                            .frame(width: s.d(76), height: s.d(34))
                             .overlay(
                                 Text("HARMONY")
-                                    .font(.system(size: 9, weight: .black))
+                                    .font(.system(size: s.f(9), weight: .black))
                                     .foregroundColor(controller.telemetry.l1 ? .white : theme.textSecondary)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: s.d(8))
                                     .stroke(controller.telemetry.l1 ? Color.blue : theme.buttonBorder, lineWidth: 1.5)
                             )
-                            .shadow(color: controller.telemetry.l1 ? .blue : .clear, radius: 6)
+                            .shadow(color: controller.telemetry.l1 ? .blue : .clear, radius: s.d(6))
                     }
-                    .frame(width: 76)
+                    .frame(width: s.d(76))
                     .fixedSize()
                 }
 
                 Spacer()
 
                 // Center Touchpad with Glowing Lightbar Contour & Create/Options Buttons
-                HStack(spacing: 12) {
-                    createButtonView
-                    touchpadView
-                    optionsButtonView
+                HStack(spacing: s.d(12)) {
+                    createButtonView(s: s)
+                    touchpadView(s: s)
+                    optionsButtonView(s: s)
                 }
                 .fixedSize()
 
                 Spacer()
 
                 // R1 Bumper & R2 Trigger
-                HStack(spacing: 10) {
-                    VStack(spacing: 4) {
+                HStack(spacing: s.d(10)) {
+                    VStack(spacing: s.d(4)) {
                         Text("R1 BUMPER")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                             .foregroundColor(theme.textPrimary)
                             .lineLimit(1)
 
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: s.d(8))
                             .fill(controller.telemetry.r1 ? Color.orange : theme.buttonBg)
-                            .frame(width: 76, height: 34)
+                            .frame(width: s.d(76), height: s.d(34))
                             .overlay(
                                 Text("ARP / RHYTHM")
-                                    .font(.system(size: 8, weight: .black))
+                                    .font(.system(size: s.f(8), weight: .black))
                                     .foregroundColor(controller.telemetry.r1 ? .white : theme.textSecondary)
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: 8)
+                                RoundedRectangle(cornerRadius: s.d(8))
                                     .stroke(controller.telemetry.r1 ? Color.orange : theme.buttonBorder, lineWidth: 1.5)
                             )
-                            .shadow(color: controller.telemetry.r1 ? .orange : .clear, radius: 6)
+                            .shadow(color: controller.telemetry.r1 ? .orange : .clear, radius: s.d(6))
                     }
-                    .frame(width: 76)
+                    .frame(width: s.d(76))
                     .fixedSize()
 
                     TriggerGaugeView(
@@ -410,14 +429,15 @@ public struct DualSenseHUDView: View {
                         value: controller.telemetry.rightTrigger,
                         subtitle: "Expr / Vel",
                         activeColor: .green,
-                        theme: theme
+                        theme: theme,
+                        s: s
                     )
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, s.d(14))
 
             // Dynamic RGB Lightbar Arc
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: s.d(4))
                 .fill(
                     LinearGradient(
                         colors: [layerColor.opacity(0.1), layerColor, layerColor.opacity(0.1)],
@@ -425,33 +445,33 @@ public struct DualSenseHUDView: View {
                         endPoint: .trailing
                     )
                 )
-                .frame(height: 5)
-                .shadow(color: layerColor, radius: 8)
-                .padding(.horizontal, 32)
+                .frame(height: s.d(5))
+                .shadow(color: layerColor, radius: s.d(8))
+                .padding(.horizontal, s.d(32))
 
             // Main Face Area: Static Width Columns (Never shrinks or reflows)
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: s.d(14)) {
                 // 1. D-Pad Column (Static Width 128)
-                VStack(spacing: 6) {
+                VStack(spacing: s.d(6)) {
                     Text(dpadHeaderTitle)
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .black, design: .monospaced))
                         .foregroundColor(controller.isL1Held ? .blue : (controller.isR1Held ? .orange : theme.textSecondary))
                         .lineLimit(1)
 
                     ZStack {
                         Circle()
                             .fill(theme.chassisInner)
-                            .frame(width: 108, height: 108)
+                            .frame(width: s.d(108), height: s.d(108))
                             .overlay(Circle().stroke(theme.wellBorder, lineWidth: 1.2))
 
-                        dpadButton(label: dpadLabel(for: .up), active: controller.telemetry.dpadUp, offset: CGSize(width: 0, height: -32))
-                        dpadButton(label: dpadLabel(for: .down), active: controller.telemetry.dpadDown, offset: CGSize(width: 0, height: 32))
-                        dpadButton(label: dpadLabel(for: .left), active: controller.telemetry.dpadLeft, offset: CGSize(width: -32, height: 0))
-                        dpadButton(label: dpadLabel(for: .right), active: controller.telemetry.dpadRight, offset: CGSize(width: 32, height: 0))
+                        dpadButton(label: dpadLabel(for: .up), active: controller.telemetry.dpadUp, offset: CGSize(width: 0, height: -s.d(32)), s: s)
+                        dpadButton(label: dpadLabel(for: .down), active: controller.telemetry.dpadDown, offset: CGSize(width: 0, height: s.d(32)), s: s)
+                        dpadButton(label: dpadLabel(for: .left), active: controller.telemetry.dpadLeft, offset: CGSize(width: -s.d(32), height: 0), s: s)
+                        dpadButton(label: dpadLabel(for: .right), active: controller.telemetry.dpadRight, offset: CGSize(width: s.d(32), height: 0), s: s)
                     }
-                    .frame(width: 108, height: 108)
+                    .frame(width: s.d(108), height: s.d(108))
                 }
-                .frame(width: 128, height: 172)
+                .frame(width: s.d(128), height: s.d(172))
                 .fixedSize()
 
                 // 2. Left Stick (Static Width 128)
@@ -461,15 +481,16 @@ public struct DualSenseHUDView: View {
                     y: controller.telemetry.leftStickY,
                     isClicked: controller.telemetry.l3,
                     subtitle: controller.isL1Held ? "Pitch Bend" : "X:Bend | Y:Mod/Cut",
-                    theme: theme
+                    theme: theme,
+                    s: s
                 )
 
                 // 3. Center Column: PS Button + Mic Button (Static Width 50)
-                VStack(spacing: 10) {
-                    psButtonView
-                    micMuteButtonView
+                VStack(spacing: s.d(10)) {
+                    psButtonView(s: s)
+                    micMuteButtonView(s: s)
                 }
-                .frame(width: 50, height: 172)
+                .frame(width: s.d(50), height: s.d(172))
                 .fixedSize()
 
                 // 4. Right Stick (Static Width 128, NEVER Collapses)
@@ -479,98 +500,99 @@ public struct DualSenseHUDView: View {
                     y: controller.telemetry.rightStickY,
                     isClicked: controller.telemetry.r3,
                     subtitle: controller.isL1Held ? "Width / Chorus" : "X:Pan | Y:Dyn/Res",
-                    theme: theme
+                    theme: theme,
+                    s: s
                 )
 
                 // 5. Face Buttons Diamond (Static Width 128)
-                VStack(spacing: 6) {
+                VStack(spacing: s.d(6)) {
                     Text(faceHeaderTitle)
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .black, design: .monospaced))
                         .foregroundColor(controller.isL1Held ? .blue : (controller.isR1Held ? .orange : theme.textSecondary))
                         .lineLimit(1)
 
                     ZStack {
                         Circle()
                             .fill(theme.chassisInner)
-                            .frame(width: 108, height: 108)
+                            .frame(width: s.d(108), height: s.d(108))
                             .overlay(Circle().stroke(theme.wellBorder, lineWidth: 1.2))
 
-                        faceButton(symbol: "△", actionText: faceActionText(index: 3), active: controller.telemetry.triangle, isHeld: controller.heldFaceButtonIndex == 3, color: .green, offset: CGSize(width: 0, height: -32))
-                        faceButton(symbol: "○", actionText: faceActionText(index: 2), active: controller.telemetry.circle, isHeld: controller.heldFaceButtonIndex == 2, color: .red, offset: CGSize(width: 32, height: 0))
-                        faceButton(symbol: "✕", actionText: faceActionText(index: 0), active: controller.telemetry.cross, isHeld: controller.heldFaceButtonIndex == 0, color: .blue, offset: CGSize(width: 0, height: 32))
-                        faceButton(symbol: "□", actionText: faceActionText(index: 1), active: controller.telemetry.square, isHeld: controller.heldFaceButtonIndex == 1, color: .pink, offset: CGSize(width: -32, height: 0))
+                        faceButton(symbol: "△", actionText: faceActionText(index: 3), active: controller.telemetry.triangle, isHeld: controller.heldFaceButtonIndex == 3, color: .green, offset: CGSize(width: 0, height: -s.d(32)), s: s)
+                        faceButton(symbol: "○", actionText: faceActionText(index: 2), active: controller.telemetry.circle, isHeld: controller.heldFaceButtonIndex == 2, color: .red, offset: CGSize(width: s.d(32), height: 0), s: s)
+                        faceButton(symbol: "✕", actionText: faceActionText(index: 0), active: controller.telemetry.cross, isHeld: controller.heldFaceButtonIndex == 0, color: .blue, offset: CGSize(width: 0, height: s.d(32)), s: s)
+                        faceButton(symbol: "□", actionText: faceActionText(index: 1), active: controller.telemetry.square, isHeld: controller.heldFaceButtonIndex == 1, color: .pink, offset: CGSize(width: -s.d(32), height: 0), s: s)
                     }
-                    .frame(width: 108, height: 108)
+                    .frame(width: s.d(108), height: s.d(108))
                 }
-                .frame(width: 128, height: 172)
+                .frame(width: s.d(128), height: s.d(172))
                 .fixedSize()
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, s.d(10))
+            .padding(.bottom, s.d(6))
         }
-        .frame(width: 760)
-        .padding(14)
+        .frame(width: s.d(760))
+        .padding(s.d(14))
         .background(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: s.d(20))
                 .fill(theme.chassisOuter)
-                .shadow(color: isDarkMode ? Color.black.opacity(0.4) : Color.black.opacity(0.06), radius: 10)
+                .shadow(color: isDarkMode ? Color.black.opacity(0.4) : Color.black.opacity(0.06), radius: s.d(10))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: s.d(20))
                 .stroke(theme.chassisBorder, lineWidth: 1.5)
         )
         .fixedSize()
     }
 
     // MARK: - Center Touchpad View
-    private var touchpadView: some View {
+    private func touchpadView(s: UIScale) -> some View {
         Button(action: { controller.triggerPanic() }) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: s.d(10))
                     .fill(theme.chassisInner)
-                    .frame(width: 130, height: 56)
+                    .frame(width: s.d(130), height: s.d(56))
 
-                VStack(spacing: 2) {
+                VStack(spacing: s.d(2)) {
                     Text("DUALSENSE")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(9), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
                     Text(controller.telemetry.touchpad ? "PANIC" : "CLICK = PANIC")
-                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(8), weight: .black, design: .monospaced))
                         .foregroundColor(controller.telemetry.touchpad ? .red : .green)
                 }
             }
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: s.d(10))
                     .stroke(controller.telemetry.touchpad ? Color.red : layerColor.opacity(0.8), lineWidth: 1.5)
             )
-            .shadow(color: layerColor.opacity(0.3), radius: 6)
+            .shadow(color: layerColor.opacity(0.3), radius: s.d(6))
         }
         .buttonStyle(.plain)
     }
 
     // MARK: - Create Button (Shows ||| Glyph & Live Chord Type)
-    private var createButtonView: some View {
+    private func createButtonView(s: UIScale) -> some View {
         Button(action: { controller.cycleChordType() }) {
-            VStack(spacing: 2) {
-                HStack(spacing: 3) {
+            VStack(spacing: s.d(2)) {
+                HStack(spacing: s.d(3)) {
                     ForEach(0..<3) { _ in
                         Capsule()
                             .fill(controller.telemetry.create ? Color.cyan : theme.textSecondary)
-                            .frame(width: 2, height: 8)
+                            .frame(width: s.d(2), height: s.d(8))
                     }
                     Text("CHORD")
-                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(8), weight: .black, design: .monospaced))
                         .foregroundColor(controller.telemetry.create ? .cyan : theme.textSecondary)
                 }
                 Text(controller.chordType.rawValue.uppercased())
-                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .font(.system(size: s.f(9), weight: .black, design: .monospaced))
                     .foregroundColor(controller.telemetry.create ? .white : .cyan)
                     .lineLimit(1)
             }
-            .frame(width: 64, height: 32)
+            .frame(width: s.d(64), height: s.d(32))
             .background(controller.telemetry.create ? Color.cyan.opacity(0.3) : theme.buttonBg)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.telemetry.create ? Color.cyan : theme.buttonBorder, lineWidth: 1.2))
-            .cornerRadius(6)
+            .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(controller.telemetry.create ? Color.cyan : theme.buttonBorder, lineWidth: 1.2))
+            .cornerRadius(s.d(6))
         }
         .buttonStyle(.plain)
         .help("Create: Cycle Chord Types (Triad, 7th, 9th, Sus4, Power)")
@@ -578,30 +600,30 @@ public struct DualSenseHUDView: View {
     }
 
     // MARK: - Options Button (Shows ☰ Glyph & Live Scale Name)
-    private var optionsButtonView: some View {
+    private func optionsButtonView(s: UIScale) -> some View {
         Button(action: { controller.cycleScale() }) {
-            VStack(spacing: 2) {
-                HStack(spacing: 3) {
-                    VStack(spacing: 1.5) {
+            VStack(spacing: s.d(2)) {
+                HStack(spacing: s.d(3)) {
+                    VStack(spacing: s.d(1.5)) {
                         ForEach(0..<3) { _ in
                             Capsule()
                                 .fill(controller.telemetry.options ? Color.orange : theme.textSecondary)
-                                .frame(width: 8, height: 1.5)
+                                .frame(width: s.d(8), height: max(1, s.d(1.5)))
                         }
                     }
                     Text("SCALE")
-                        .font(.system(size: 8, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(8), weight: .black, design: .monospaced))
                         .foregroundColor(controller.telemetry.options ? .orange : theme.textSecondary)
                 }
                 Text(controller.scaleName.uppercased())
-                    .font(.system(size: 9, weight: .black, design: .monospaced))
+                    .font(.system(size: s.f(9), weight: .black, design: .monospaced))
                     .foregroundColor(controller.telemetry.options ? .white : .orange)
                     .lineLimit(1)
             }
-            .frame(width: 64, height: 32)
+            .frame(width: s.d(64), height: s.d(32))
             .background(controller.telemetry.options ? Color.orange.opacity(0.3) : theme.buttonBg)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(controller.telemetry.options ? Color.orange : theme.buttonBorder, lineWidth: 1.2))
-            .cornerRadius(6)
+            .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(controller.telemetry.options ? Color.orange : theme.buttonBorder, lineWidth: 1.2))
+            .cornerRadius(s.d(6))
         }
         .buttonStyle(.plain)
         .help("Options: Cycle Musical Scale (Major, Minor, Dorian, etc.)")
@@ -609,23 +631,23 @@ public struct DualSenseHUDView: View {
     }
 
     // MARK: - PS Button (Shows PS & Live Latch State)
-    private var psButtonView: some View {
+    private func psButtonView(s: UIScale) -> some View {
         Button(action: { controller.toggleLatchMode() }) {
-            VStack(spacing: 2) {
+            VStack(spacing: s.d(2)) {
                 ZStack {
                     Circle()
                         .fill(controller.telemetry.home ? Color.blue : theme.buttonBg)
-                        .frame(width: 32, height: 32)
+                        .frame(width: s.d(32), height: s.d(32))
                         .overlay(Circle().stroke(controller.telemetry.home ? Color.blue : (controller.latchMode ? Color.cyan : theme.buttonBorder), lineWidth: 1.5))
-                        .shadow(color: controller.telemetry.home ? .blue : (controller.latchMode ? Color.cyan.opacity(0.4) : .clear), radius: 5)
+                        .shadow(color: controller.telemetry.home ? .blue : (controller.latchMode ? Color.cyan.opacity(0.4) : .clear), radius: s.d(5))
 
                     Text("PS")
-                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .font(.system(size: s.f(11), weight: .black, design: .rounded))
                         .foregroundColor(controller.telemetry.home ? .white : (controller.latchMode ? .cyan : theme.textPrimary))
                 }
 
                 Text(controller.latchMode ? "LATCH 🔒" : "MOMENT")
-                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .font(.system(size: s.f(7), weight: .bold, design: .monospaced))
                     .foregroundColor(controller.latchMode ? .cyan : theme.textTertiary)
                     .lineLimit(1)
             }
@@ -636,23 +658,23 @@ public struct DualSenseHUDView: View {
     }
 
     // MARK: - Mic Mute Button (Shows Panic & Mute State)
-    private var micMuteButtonView: some View {
+    private func micMuteButtonView(s: UIScale) -> some View {
         Button(action: { controller.triggerPanic() }) {
-            VStack(spacing: 2) {
+            VStack(spacing: s.d(2)) {
                 ZStack {
                     Capsule()
                         .fill(controller.telemetry.micMuted ? Color.red.opacity(0.4) : theme.buttonBg)
-                        .frame(width: 32, height: 14)
+                        .frame(width: s.d(32), height: s.d(14))
                         .overlay(Capsule().stroke(controller.telemetry.micMuted ? Color.red : theme.buttonBorder, lineWidth: 1))
 
                     Circle()
                         .fill(controller.telemetry.micMuted ? Color.red : Color.orange.opacity(0.5))
-                        .frame(width: 5, height: 5)
-                        .shadow(color: controller.telemetry.micMuted ? .red : .clear, radius: 4)
+                        .frame(width: s.d(5), height: s.d(5))
+                        .shadow(color: controller.telemetry.micMuted ? .red : .clear, radius: s.d(4))
                 }
 
                 Text("PANIC")
-                    .font(.system(size: 7, weight: .black, design: .monospaced))
+                    .font(.system(size: s.f(7), weight: .black, design: .monospaced))
                     .foregroundColor(controller.telemetry.micMuted ? .red : theme.textTertiary)
                     .lineLimit(1)
             }
@@ -663,30 +685,30 @@ public struct DualSenseHUDView: View {
     }
 
     // MARK: - Performance & Telemetry Deck
-    private var performanceDeckView: some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func performanceDeckView(s: UIScale) -> some View {
+        HStack(alignment: .top, spacing: s.d(12)) {
             // Gyroscope & Haptic Feedback Card
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: s.d(8)) {
                 HStack {
                     Image(systemName: "gyroscope")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: s.f(13), weight: .bold))
                         .foregroundColor(.cyan)
                     Text("6-AXIS GYRO & HAPTICS")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textPrimary)
                     Spacer()
                     Text(String(format: "TILT: %3.0f°", controller.telemetry.pitchAngle))
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(12), weight: .black, design: .monospaced))
                         .foregroundColor(.cyan)
                 }
 
                 // Tilt Angle Horizon Meter
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: s.d(6))
                         .fill(theme.wellBg)
-                        .frame(height: 14)
+                        .frame(height: s.d(14))
 
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: s.d(6))
                         .fill(
                             LinearGradient(
                                 colors: [.cyan, .blue],
@@ -694,118 +716,118 @@ public struct DualSenseHUDView: View {
                                 endPoint: .trailing
                             )
                         )
-                        .frame(width: max(6, CGFloat(controller.telemetry.pitchAngle / 75.0) * 180), height: 14)
+                        .frame(width: max(s.d(6), CGFloat(controller.telemetry.pitchAngle / 75.0) * s.d(180)), height: s.d(14))
                 }
                 .frame(maxWidth: .infinity)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.wellBorder, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(theme.wellBorder, lineWidth: 1))
 
                 HStack {
                     Text("MOD WHEEL (CC #1):")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
                     Text("\(controller.telemetry.modWheel) / 127")
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .black, design: .monospaced))
                         .foregroundColor(.cyan)
 
                     Spacer()
 
                     Text("HAPTIC PULSE:")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
                     let stage = Int(round(controller.telemetry.hapticIntensity * 5.0))
                     Text(stage == 0 ? "OFF" : "STAGE \(stage)/5")
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .black, design: .monospaced))
                         .foregroundColor(stage > 0 ? .orange : theme.textTertiary)
                     if stage > 0 {
                         Image(systemName: "waveform.path")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: s.f(12), weight: .bold))
                             .foregroundColor(.orange)
                     }
                 }
             }
-            .padding(12)
+            .padding(s.d(12))
             .background(theme.cardBg)
-            .cornerRadius(12)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
+            .cornerRadius(s.d(12))
+            .overlay(RoundedRectangle(cornerRadius: s.d(12)).stroke(theme.cardBorder, lineWidth: 1))
 
             // Arpeggiator & Musical Chord Card
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: s.d(8)) {
                 HStack {
                     Image(systemName: "metronome.fill")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: s.f(13), weight: .bold))
                         .foregroundColor(.orange)
                     Text("ARPEGGIATOR & CHORDS")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textPrimary)
                     Spacer()
                     Text("BPM: \(Int(controller.bpm))")
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(12), weight: .black, design: .monospaced))
                         .foregroundColor(.orange)
                 }
 
                 // Live Active Chord & Notes
-                HStack(spacing: 6) {
+                HStack(spacing: s.d(6)) {
                     Text("ACTIVE:")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
 
                     Text(controller.telemetry.activeChordName)
-                        .font(.system(size: 12, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(12), weight: .black, design: .monospaced))
                         .foregroundColor(.green)
 
                     Spacer()
 
                     Text(controller.telemetry.activeChordNotes.map { controller.noteNameForPitch($0) }.joined(separator: " "))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(size: s.f(11), weight: .bold, design: .monospaced))
                         .foregroundColor(theme.textPrimary)
                 }
 
                 // 8-Step LED Sequencer indicator
-                HStack(spacing: 5) {
+                HStack(spacing: s.d(5)) {
                     ForEach(0..<8) { step in
                         Circle()
                             .fill(controller.isArpActive && (controller.telemetry.currentArpStep % 8 == step) ? Color.orange : theme.wellBorder)
-                            .frame(width: 8, height: 8)
-                            .shadow(color: controller.isArpActive && (controller.telemetry.currentArpStep % 8 == step) ? .orange : .clear, radius: 4)
+                            .frame(width: s.d(8), height: s.d(8))
+                            .shadow(color: controller.isArpActive && (controller.telemetry.currentArpStep % 8 == step) ? .orange : .clear, radius: s.d(4))
                     }
                     Spacer()
                     Text("RATE: \(controller.arpRate.rawValue)")
-                        .font(.system(size: 10, weight: .black, design: .monospaced))
+                        .font(.system(size: s.f(10), weight: .black, design: .monospaced))
                         .foregroundColor(theme.textSecondary)
                 }
             }
-            .padding(12)
+            .padding(s.d(12))
             .background(theme.cardBg)
-            .cornerRadius(12)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
+            .cornerRadius(s.d(12))
+            .overlay(RoundedRectangle(cornerRadius: s.d(12)).stroke(theme.cardBorder, lineWidth: 1))
         }
     }
 
     // MARK: - Status Console View
-    private var statusConsoleView: some View {
+    private func statusConsoleView(s: UIScale) -> some View {
         HStack {
             Text("EVENT:")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                 .foregroundColor(theme.textSecondary)
 
             Text(controller.lastEventDescription)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.system(size: s.f(12), weight: .bold, design: .monospaced))
                 .foregroundColor(.cyan)
 
             Spacer()
 
             Text("ROOT: \(controller.noteNameForPitch(controller.rootKey)) | OCT: \(controller.octaveShift / 12 > 0 ? "+" : "")\(controller.octaveShift / 12) | \(controller.scaleName.uppercased())")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                 .foregroundColor(theme.textSecondary)
 
             Text("• COREMIDI ACTIVE")
-                .font(.system(size: 9, weight: .black))
+                .font(.system(size: s.f(9), weight: .black))
                 .foregroundColor(.green)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, s.d(14))
+        .padding(.vertical, s.d(8))
         .background(theme.consoleBg)
-        .cornerRadius(8)
+        .cornerRadius(s.d(8))
     }
 
     // MARK: - Dynamic Shift Label Resolvers
@@ -905,19 +927,20 @@ public struct DualSenseHUDView: View {
         }
     }
 
-    private func dpadButton(label: String, active: Bool, offset: CGSize) -> some View {
+    private func dpadButton(label: String, active: Bool, offset: CGSize, s: UIScale) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: s.d(6))
                 .fill(active ? Color.cyan : theme.buttonBg)
-                .frame(width: 32, height: 26)
+                .frame(width: s.d(32), height: s.d(26))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: s.d(6))
                         .stroke(active ? Color.cyan : theme.buttonBorder, lineWidth: 1)
                 )
-                .shadow(color: active ? .cyan : .clear, radius: 6)
+                .shadow(color: active ? .cyan : .clear, radius: s.d(6))
 
+            let rawFontSize: CGFloat = label.count > 4 ? 7 : (label.count > 2 ? 8 : 11)
             Text(label)
-                .font(.system(size: label.count > 4 ? 7 : (label.count > 2 ? 8 : 11), weight: .black, design: .monospaced))
+                .font(.system(size: s.f(rawFontSize), weight: .black, design: .monospaced))
                 .foregroundColor(active ? .black : theme.textPrimary)
                 .lineLimit(1)
         }
@@ -925,23 +948,24 @@ public struct DualSenseHUDView: View {
         .fixedSize()
     }
 
-    private func faceButton(symbol: String, actionText: String, active: Bool, isHeld: Bool, color: Color, offset: CGSize) -> some View {
+    private func faceButton(symbol: String, actionText: String, active: Bool, isHeld: Bool, color: Color, offset: CGSize, s: UIScale) -> some View {
         ZStack {
             Circle()
                 .fill(active ? color : (isHeld ? color.opacity(0.35) : theme.buttonBg))
-                .frame(width: 36, height: 36)
+                .frame(width: s.d(36), height: s.d(36))
                 .overlay(
                     Circle().stroke(active || isHeld ? color : theme.buttonBorder, lineWidth: active || isHeld ? 2 : 1.2)
                 )
-                .shadow(color: active || isHeld ? color.opacity(0.6) : .clear, radius: 8)
+                .shadow(color: active || isHeld ? color.opacity(0.6) : .clear, radius: s.d(8))
 
             VStack(spacing: 0) {
                 Text(symbol)
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: s.f(10), weight: .black))
                     .foregroundColor(active ? .white : color)
                     .lineLimit(1)
+                let rawFontSize: CGFloat = actionText.count > 6 ? 7 : (actionText.count > 4 ? 7.5 : 8.5)
                 Text(actionText)
-                    .font(.system(size: actionText.count > 6 ? 7 : (actionText.count > 4 ? 7.5 : 8.5), weight: .black, design: .monospaced))
+                    .font(.system(size: s.f(rawFontSize), weight: .black, design: .monospaced))
                     .foregroundColor(active ? .white : theme.textPrimary)
                     .lineLimit(1)
             }
