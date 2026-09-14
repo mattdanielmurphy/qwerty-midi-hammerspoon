@@ -6,6 +6,10 @@ local hud = require("hud")
 local controls = require("controls")
 local settings_ui = require("settings_ui")
 local sync = require("sync")
+local nanokey = nil
+pcall(function()
+  nanokey = require("nanokey")
+end)
 
 local function profileLog(msg)
   local f = io.open("/tmp/midi_startup.log", "a")
@@ -25,6 +29,11 @@ hud.setControlsModule(controls)
 sync.init(config, hud)
 _G.activeWatchers.sync = sync
 
+if nanokey then
+  nanokey.setHud(hud)
+  _G.activeWatchers.nanokey = nanokey
+end
+
 function _G.toggleMidiMode(newState)
   if newState == nil then
     state.midiActive = not state.midiActive
@@ -39,6 +48,9 @@ function _G.toggleMidiMode(newState)
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
+    if nanokey and nanokey.connect then
+      nanokey.connect("nanoKEY Studio")
+    end
     profileLog("Before createMidiWebview")
     local h = hud.createMidiWebview()
     profileLog("After createMidiWebview, before show")
@@ -56,6 +68,10 @@ function _G.toggleMidiMode(newState)
     state.sustainActive = false
     midi.sendMidiCC(64, 0)
     
+    if nanokey and nanokey.disconnect then
+      nanokey.disconnect()
+    end
+
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
     state.bpmInputMode = false

@@ -1350,6 +1350,459 @@
   #key-context-menu .ctx-item.danger:hover {
     background: rgba(200, 80, 70, 0.3);
   }
+
+  /* ── Surface Switcher ── */
+  .surface-switcher {
+    display: inline-flex;
+    background: rgba(20, 18, 16, 0.85);
+    border: 1px solid rgba(212, 163, 89, 0.4);
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+    margin-left: 6px;
+    -webkit-app-region: no-drag;
+  }
+  .surface-btn {
+    background: transparent;
+    border: none;
+    color: #a0958a;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .surface-btn:hover {
+    color: #fff;
+    background: rgba(212, 163, 89, 0.15);
+  }
+  .surface-btn.active {
+    background: #d4a359;
+    color: #141210;
+    font-weight: 800;
+    box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
+  }
+
+  /* ── nanoKEY Studio Hardware Silhouette ── */
+  #hud-container.surface-nanokey {
+    height: 380px !important;
+  }
+  .nanokey-view {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: linear-gradient(180deg, #181614 0%, #121110 100%);
+    border-radius: 10px;
+    padding: 8px 12px;
+    border: 1px solid rgba(90, 82, 74, 0.4);
+    box-shadow: inset 0 1px 3px rgba(255,255,255,0.05), inset 0 -2px 6px rgba(0,0,0,0.8);
+    position: relative;
+    user-select: none;
+  }
+
+  /* Top Section: Knobs, Touchpad, Pads */
+  .nk-top-row {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 12px;
+    height: 118px;
+  }
+
+  /* Knobs Area */
+  .nk-knobs-area {
+    flex: 1.1;
+    background: rgba(26, 24, 22, 0.7);
+    border: 1px solid rgba(80, 72, 64, 0.45);
+    border-radius: 8px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .nk-area-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #8c8275;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+  }
+  .nk-brand {
+    font-weight: 900;
+    color: #d4a359;
+    letter-spacing: 1.5px;
+  }
+  .nk-knobs-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 4px 6px;
+    flex: 1;
+    align-items: center;
+  }
+  .nk-knob-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .nk-knob-dial {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #38342e 0%, #1a1816 75%);
+    border: 1.5px solid rgba(140, 125, 105, 0.4);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.15);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.05s linear;
+  }
+  .nk-knob-notch {
+    position: absolute;
+    top: 2px;
+    width: 2px;
+    height: 7px;
+    background: #d4a359;
+    border-radius: 1px;
+    box-shadow: 0 0 3px rgba(212, 163, 89, 0.8);
+  }
+  .nk-knob-label {
+    font-size: 7.5px;
+    font-weight: 700;
+    color: #a89e90;
+    text-align: center;
+    line-height: 1;
+  }
+  .nk-knob-val {
+    font-size: 7px;
+    font-weight: 600;
+    color: #d4a359;
+  }
+
+  /* Kaoss Touchpad Area */
+  .nk-touchpad-area {
+    width: 140px;
+    background: rgba(22, 20, 18, 0.85);
+    border: 1px solid rgba(80, 72, 64, 0.45);
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nk-touchpad-screen {
+    width: 100%;
+    flex: 1;
+    background: radial-gradient(circle at center, #0f1c24 0%, #070e12 100%);
+    border: 1.5px solid rgba(0, 180, 216, 0.35);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 0 12px rgba(0, 180, 216, 0.2);
+  }
+  .nk-touchpad-grid {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(0, 180, 216, 0.1) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 180, 216, 0.1) 1px, transparent 1px);
+    background-size: 16px 16px;
+    background-position: center center;
+    pointer-events: none;
+  }
+  .nk-touch-cursor {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    border: 1.5px solid #00e5ff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px #00e5ff, inset 0 0 4px #00e5ff;
+    pointer-events: none;
+    transition: left 0.05s ease-out, top 0.05s ease-out;
+  }
+  .nk-touch-cursor::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    background: #00e5ff;
+    border-radius: 50%;
+  }
+
+  /* Trigger Pads Area */
+  .nk-pads-area {
+    flex: 1.2;
+    background: rgba(26, 24, 22, 0.7);
+    border: 1px solid rgba(80, 72, 64, 0.45);
+    border-radius: 8px;
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .nk-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #555;
+    display: inline-block;
+    box-shadow: 0 0 2px #555;
+    transition: all 0.2s ease;
+  }
+  .nk-status-dot.connected {
+    background: #00e676;
+    box-shadow: 0 0 6px #00e676;
+  }
+  .nk-pads-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 5px;
+    flex: 1;
+  }
+  .nk-pad {
+    background: linear-gradient(180deg, #2a2622 0%, #1e1b18 100%);
+    border: 1.5px solid rgba(140, 125, 105, 0.35);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.08);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.08s ease;
+    cursor: pointer;
+  }
+  .nk-pad:hover {
+    border-color: rgba(212, 163, 89, 0.6);
+  }
+  .nk-pad.active, .nk-pad.fired {
+    background: radial-gradient(circle at center, #ffd166 0%, #d4a359 100%) !important;
+    border-color: #ffe082 !important;
+    box-shadow: 0 0 14px rgba(255, 209, 102, 0.9), inset 0 0 6px rgba(255,255,255,0.8) !important;
+    transform: scale(0.97);
+  }
+  .nk-pad-name {
+    font-size: 8px;
+    font-weight: 800;
+    color: #e5dec9;
+    letter-spacing: 0.5px;
+  }
+  .nk-pad-chord {
+    font-size: 7px;
+    font-weight: 700;
+    color: #d4a359;
+  }
+  .nk-pad-macro {
+    font-size: 8px;
+    font-weight: 800;
+    display: none;
+    text-align: center;
+    line-height: 1.1;
+  }
+
+  /* Macro layer dynamic display on pads */
+  .sustain-active .nk-pad .nk-pad-name,
+  .sustain-active .nk-pad .nk-pad-chord,
+  .scene-active .nk-pad .nk-pad-name,
+  .scene-active .nk-pad .nk-pad-chord {
+    display: none;
+  }
+  .sustain-active .nk-pad .nk-pad-macro {
+    display: block;
+    color: #5ea2eb;
+    text-shadow: 0 0 4px rgba(94, 162, 235, 0.5);
+  }
+  .scene-active .nk-pad .nk-pad-macro {
+    display: block;
+    color: #c084fc;
+    text-shadow: 0 0 4px rgba(192, 132, 252, 0.5);
+  }
+
+  /* Middle Controls Row */
+  .nk-mid-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 28px;
+    padding: 0 4px;
+    gap: 8px;
+  }
+  .nk-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .nk-btn {
+    background: linear-gradient(180deg, #262320 0%, #1c1a18 100%);
+    border: 1px solid rgba(120, 110, 95, 0.4);
+    border-radius: 4px;
+    color: #c8bfb0;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    cursor: pointer;
+    transition: all 0.1s ease;
+  }
+  .nk-btn:hover {
+    background: #332f2b;
+    border-color: #d4a359;
+  }
+  .nk-btn.active {
+    background: #d4a359 !important;
+    color: #141210 !important;
+    font-weight: 800;
+    box-shadow: 0 0 10px rgba(212, 163, 89, 0.8) !important;
+    border-color: #fff !important;
+  }
+  .nk-btn-sustain.active {
+    background: #5ea2eb !important;
+    box-shadow: 0 0 12px rgba(94, 162, 235, 0.9) !important;
+  }
+  .nk-btn-scene.active {
+    background: #c084fc !important;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.9) !important;
+  }
+  .nk-btn-inset {
+    background: rgba(16, 14, 13, 0.8);
+    border: 1px solid rgba(60, 55, 50, 0.6);
+    border-radius: 5px;
+    padding: 2px 4px;
+    display: flex;
+    gap: 3px;
+  }
+
+  /* Keyboard Section: 25 Chiclet Keys */
+  .nk-keyboard-section {
+    flex: 1;
+    position: relative;
+    background: #0d0c0b;
+    border-radius: 6px;
+    padding: 3px 4px 6px 4px;
+    border: 1px solid rgba(70, 64, 58, 0.5);
+    display: flex;
+    overflow: hidden;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.9);
+  }
+  .nk-white-keys {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    gap: 4px;
+  }
+  .nk-key-white {
+    flex: 1;
+    height: 100%;
+    background: linear-gradient(180deg, #2b2824 0%, #1f1d1a 80%, #181614 100%);
+    border: 1px solid rgba(130, 118, 102, 0.45);
+    border-radius: 4px 4px 8px 8px;
+    box-shadow: 0 3px 5px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.12);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding-bottom: 8px;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.06s ease;
+  }
+  .nk-key-white:hover {
+    border-color: rgba(212, 163, 89, 0.6);
+  }
+  .nk-key-white.active {
+    background: linear-gradient(180deg, #ffe082 0%, #d4a359 100%) !important;
+    border-color: #ffffff !important;
+    box-shadow: 0 0 14px rgba(255, 209, 102, 0.95), inset 0 0 8px rgba(255,255,255,0.8) !important;
+    transform: translateY(2px);
+  }
+  .nk-key-white.active .nk-key-name {
+    color: #141210 !important;
+    font-weight: 900;
+  }
+
+  .nk-black-keys {
+    position: absolute;
+    top: 3px;
+    left: 4px;
+    right: 4px;
+    height: 58%;
+    pointer-events: none;
+  }
+  .nk-key-black {
+    position: absolute;
+    width: 3.8%;
+    height: 100%;
+    transform: translateX(-50%);
+    background: linear-gradient(180deg, #181614 0%, #0c0b0a 100%);
+    border: 1px solid rgba(90, 80, 70, 0.55);
+    border-radius: 3px 3px 6px 6px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.85), inset 0 1px 1px rgba(255,255,255,0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding-bottom: 5px;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 10;
+    transition: all 0.06s ease;
+  }
+  .nk-key-black:hover {
+    border-color: rgba(212, 163, 89, 0.8);
+  }
+  .nk-key-black.active {
+    background: linear-gradient(180deg, #ffb74d 0%, #c88c28 100%) !important;
+    border-color: #ffffff !important;
+    box-shadow: 0 0 14px rgba(255, 183, 77, 0.95), inset 0 0 6px rgba(255,255,255,0.8) !important;
+    transform: translateX(-50%) translateY(2px) !important;
+  }
+  .nk-key-black.active .nk-key-name {
+    color: #141210 !important;
+    font-weight: 900;
+  }
+  .nk-key-name {
+    font-size: 9px;
+    font-weight: 800;
+    color: #d6ccbc;
+    line-height: 1;
+  }
+  .nk-key-degree {
+    font-size: 7px;
+    font-weight: 600;
+    color: #d4a359;
+    margin-top: 1px;
+  }
+  .nk-key-macro {
+    font-size: 7px;
+    font-weight: 700;
+    color: #c084fc;
+    display: none;
+    margin-top: 1px;
+    white-space: nowrap;
+  }
+  .scene-active .nk-key-macro {
+    display: block;
+  }
+  .scene-active .nk-key-degree {
+    display: none;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -1424,6 +1877,10 @@
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
+      <div class="surface-switcher" id="surface-switcher" title="Toggle Active Playing Surface">
+        <button class="surface-btn active" id="btn-surface-qwerty" onclick="setSurface('qwerty')">💻 QWERTY</button>
+        <button class="surface-btn" id="btn-surface-nanokey" onclick="setSurface('nanokey')">🎹 nanoKEY</button>
+      </div>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
         <div id="mod-wheel-label">MOD 0</div>
@@ -1461,7 +1918,180 @@
       </div>
     </div>
 
+    <!-- nanoKEY Studio Authentic Hardware View -->
+    <div class="nanokey-view" id="nanokey-view" style="display: none;">
+      <!-- TOP ROW: Knobs, Kaoss Touchpad, Trigger Pads -->
+      <div class="nk-top-row">
+        <!-- Knobs Area (8 assignable rotary dials) -->
+        <div class="nk-knobs-area">
+          <div class="nk-area-header">
+            <span class="nk-brand">KORG</span>
+            <span>8 KNOBS</span>
+          </div>
+          <div class="nk-knobs-grid">
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K1 (14)</div>
+              <div class="nk-knob-val" id="nk-knob-val-1">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K2 (15)</div>
+              <div class="nk-knob-val" id="nk-knob-val-2">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K3 (16)</div>
+              <div class="nk-knob-val" id="nk-knob-val-3">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K4 (17)</div>
+              <div class="nk-knob-val" id="nk-knob-val-4">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K5 (18)</div>
+              <div class="nk-knob-val" id="nk-knob-val-5">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K6 (19)</div>
+              <div class="nk-knob-val" id="nk-knob-val-6">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K7 (20)</div>
+              <div class="nk-knob-val" id="nk-knob-val-7">0</div>
+            </div>
+            <div class="nk-knob-item">
+              <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
+              <div class="nk-knob-label">K8 (21)</div>
+              <div class="nk-knob-val" id="nk-knob-val-8">0</div>
+            </div>
+          </div>
+        </div>
 
+        <!-- KAOSS Touchpad -->
+        <div class="nk-touchpad-area">
+          <div class="nk-area-header">
+            <span>KAOSS TOUCH</span>
+            <span>X:<span id="nk-touch-x">0</span> Y:<span id="nk-touch-y">0</span></span>
+          </div>
+          <div class="nk-touchpad-screen" id="nk-touchpad-screen">
+            <div class="nk-touchpad-grid"></div>
+            <div class="nk-touch-cursor" id="nk-touch-cursor" style="left: 50%; top: 50%;"></div>
+          </div>
+        </div>
+
+        <!-- Trigger Pads (8 velocity pads) -->
+        <div class="nk-pads-area">
+          <div class="nk-area-header">
+            <span>TRIGGER PADS</span>
+            <span class="nk-status-dot connected" id="nk-status-dot" title="nanoKEY Studio Connected"></span>
+          </div>
+          <div class="nk-pads-grid">
+            <div class="nk-pad" id="nk-pad-1" data-pad="1">
+              <span class="nk-pad-name">PAD 1</span>
+              <span class="nk-pad-chord">CHORD 1</span>
+              <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-2" data-pad="2">
+              <span class="nk-pad-name">PAD 2</span>
+              <span class="nk-pad-chord">CHORD 2</span>
+              <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-3" data-pad="3">
+              <span class="nk-pad-name">PAD 3</span>
+              <span class="nk-pad-chord">CHORD 3</span>
+              <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-4" data-pad="4">
+              <span class="nk-pad-name">PAD 4</span>
+              <span class="nk-pad-chord">CHORD 4</span>
+              <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-5" data-pad="5">
+              <span class="nk-pad-name">PAD 5</span>
+              <span class="nk-pad-chord">CHORD 5</span>
+              <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-6" data-pad="6">
+              <span class="nk-pad-name">PAD 6</span>
+              <span class="nk-pad-chord">CHORD 6</span>
+              <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-7" data-pad="7">
+              <span class="nk-pad-name">PAD 7</span>
+              <span class="nk-pad-chord">CHORD 7</span>
+              <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
+            </div>
+            <div class="nk-pad" id="nk-pad-8" data-pad="8">
+              <span class="nk-pad-name">PAD 8</span>
+              <span class="nk-pad-chord">CHORD 8</span>
+              <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIDDLE CONTROLS ROW -->
+      <div class="nk-mid-row">
+        <div class="nk-btn-inset">
+          <button class="nk-btn" id="nk-btn-oct-down">OCT -</button>
+          <button class="nk-btn" id="nk-btn-oct-up">OCT +</button>
+        </div>
+
+        <div class="nk-btn-group">
+          <button class="nk-btn" id="nk-btn-scale-guide">SCALE GUIDE</button>
+          <button class="nk-btn" id="nk-btn-easy-scale">EASY SCALE</button>
+          <button class="nk-btn" id="nk-btn-touch-scale">TOUCH SCALE</button>
+          <button class="nk-btn" id="nk-btn-chord-pad">CHORD PAD</button>
+          <button class="nk-btn" id="nk-btn-arp">ARP</button>
+          <button class="nk-btn" id="nk-btn-key-range">KEY RANGE</button>
+        </div>
+
+        <div class="nk-btn-group">
+          <button class="nk-btn nk-btn-scene" id="nk-btn-scene" title="Hold for System & Navigation Macros">SCENE</button>
+          <button class="nk-btn nk-btn-sustain" id="nk-btn-sustain" title="Hold for Transport & Window Macros">SUSTAIN</button>
+        </div>
+      </div>
+
+      <!-- KEYBOARD SECTION: 25 Chiclet Keys (15 White, 10 Black) -->
+      <div class="nk-keyboard-section">
+        <div class="nk-white-keys">
+          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
+          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
+          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
+          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
+          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
+          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
+          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
+          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
+          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
+          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
+          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
+          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
+          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
+          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
+          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
+        </div>
+
+        <div class="nk-black-keys">
+          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 6.67%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">PRESET 2</span></div>
+          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 13.33%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">PRESET 4</span></div>
+          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 26.67%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">PRESET 7</span></div>
+          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 33.33%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">BROWSER</span></div>
+          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 40.00%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EDITOR</span></div>
+          <div class="nk-key-black" id="nk-key-61" data-note="61" style="left: 53.33%;"><span class="nk-key-name">C#4</span><span class="nk-key-macro">SCREENSHOT</span></div>
+          <div class="nk-key-black" id="nk-key-63" data-note="63" style="left: 60.00%;"><span class="nk-key-name">D#4</span><span class="nk-key-macro">VOL +</span></div>
+          <div class="nk-key-black" id="nk-key-66" data-note="66" style="left: 73.33%;"><span class="nk-key-name">F#4</span><span class="nk-key-macro">NEXT TRK</span></div>
+          <div class="nk-key-black" id="nk-key-68" data-note="68" style="left: 80.00%;"><span class="nk-key-name">G#4</span><span class="nk-key-macro">REDO</span></div>
+          <div class="nk-key-black" id="nk-key-70" data-note="70" style="left: 86.67%;"><span class="nk-key-name">A#4</span><span class="nk-key-macro">EXPORT</span></div>
+        </div>
+      </div>
+    </div>
+  </div> <!-- #hud-container -->
 
 <script>
   // Anti-Suspension Web Audio Sentinel: Keeps WebKit ProcessThrottler active as Foreground Media
@@ -3291,6 +3921,10 @@
     try {
       if (!data) return;
 
+      if (data.activeSurface && window.currentSurface !== data.activeSurface) {
+        if (typeof setSurface === 'function') setSurface(data.activeSurface, false);
+      }
+
       renderCount++;
       if (renderCount >= 100) {
         renderCount = 0;
@@ -3645,6 +4279,170 @@ window.updateKeyState = function(code, pressed, latched) {
     el.classList.toggle('latched-key', !!latched);
   }
 };
+
+/* ── Surface Switching & nanoKEY Hardware Telemetry ── */
+window.currentSurface = 'qwerty';
+
+window.setSurface = function(surface, notifyHost) {
+  surface = surface || 'qwerty';
+  window.currentSurface = surface;
+
+  const btnQwerty = document.getElementById('btn-surface-qwerty');
+  const btnNanokey = document.getElementById('btn-surface-nanokey');
+  const perfView = document.getElementById('performance-view');
+  const nanoView = document.getElementById('nanokey-view');
+  const hudContainer = document.getElementById('hud-container');
+
+  if (surface === 'nanokey') {
+    if (btnQwerty) btnQwerty.classList.remove('active');
+    if (btnNanokey) btnNanokey.classList.add('active');
+    if (perfView) perfView.style.display = 'none';
+    if (nanoView) nanoView.style.display = 'flex';
+    if (hudContainer) hudContainer.classList.add('surface-nanokey');
+  } else {
+    if (btnQwerty) btnQwerty.classList.add('active');
+    if (btnNanokey) btnNanokey.classList.remove('active');
+    if (perfView) perfView.style.display = 'flex';
+    if (nanoView) nanoView.style.display = 'none';
+    if (hudContainer) hudContainer.classList.remove('surface-nanokey');
+  }
+
+  if (notifyHost !== false) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'switchSurface', surface: surface });
+    }
+  }
+};
+
+window.onSurfaceChanged = function(surface) {
+  window.setSurface(surface, false);
+};
+
+window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
+  extra = extra || {};
+  const nkView = document.getElementById('nanokey-view');
+  if (!nkView) return;
+
+  if (controlId === 'connection') {
+    const dot = document.getElementById('nk-status-dot');
+    if (dot) dot.classList.toggle('connected', !!pressed);
+    return;
+  }
+
+  // Layer switches (base, macro_sustain, macro_scene, macro_both)
+  if (controlId === 'layer') {
+    const isSustain = (layer === 'macro_sustain' || layer === 'macro_both');
+    const isScene = (layer === 'macro_scene' || layer === 'macro_both');
+    nkView.classList.toggle('sustain-active', isSustain);
+    nkView.classList.toggle('scene-active', isScene);
+    const btnSus = document.getElementById('nk-btn-sustain');
+    if (btnSus) btnSus.classList.toggle('active', isSustain);
+    const btnScn = document.getElementById('nk-btn-scene');
+    if (btnScn) btnScn.classList.toggle('active', isScene);
+
+    document.querySelectorAll('.nk-pad-macro').forEach(el => {
+      if (isScene && el.dataset.scene) {
+        el.textContent = el.dataset.scene;
+      } else if (isSustain && el.dataset.sustain) {
+        el.textContent = el.dataset.sustain;
+      }
+    });
+    return;
+  }
+
+  // Sustain button (CC #25)
+  if (controlId === 'btn_sustain') {
+    const btnSus = document.getElementById('nk-btn-sustain');
+    if (btnSus) btnSus.classList.toggle('active', !!pressed);
+    nkView.classList.toggle('sustain-active', !!pressed);
+    document.querySelectorAll('.nk-pad-macro').forEach(el => {
+      if (pressed && el.dataset.sustain) el.textContent = el.dataset.sustain;
+    });
+    return;
+  }
+
+  // Scene button (SysEx)
+  if (controlId === 'btn_scene') {
+    const btnScn = document.getElementById('nk-btn-scene');
+    if (btnScn) btnScn.classList.toggle('active', !!pressed);
+    nkView.classList.toggle('scene-active', !!pressed);
+    document.querySelectorAll('.nk-pad-macro').forEach(el => {
+      if (pressed && el.dataset.scene) el.textContent = el.dataset.scene;
+    });
+    return;
+  }
+
+  // Rotary Knobs (knob_1 .. knob_8)
+  if (typeof controlId === 'string' && controlId.indexOf('knob_') === 0) {
+    const knobIdx = controlId.replace('knob_', '');
+    const dial = document.getElementById('nk-knob-' + knobIdx);
+    const valEl = document.getElementById('nk-knob-val-' + knobIdx);
+    if (dial && value !== null && value !== undefined) {
+      const angle = -135 + (value / 127) * 270;
+      dial.style.transform = 'rotate(' + angle.toFixed(1) + 'deg)';
+    }
+    if (valEl && value !== null && value !== undefined) {
+      valEl.textContent = value;
+    }
+    return;
+  }
+
+  // Kaoss Touchpad (cc_1, cc_2, cc_24, cc_26, cc_20)
+  if (controlId === 'cc_1' || controlId === 'cc_24') {
+    const cur = document.getElementById('nk-touch-cursor');
+    const xEl = document.getElementById('nk-touch-x');
+    if (cur && value !== null && value !== undefined) cur.style.left = (value / 127 * 100).toFixed(1) + '%';
+    if (xEl && value !== null && value !== undefined) xEl.textContent = value;
+    return;
+  }
+  if (controlId === 'cc_2' || controlId === 'cc_26' || controlId === 'cc_20') {
+    const cur = document.getElementById('nk-touch-cursor');
+    const yEl = document.getElementById('nk-touch-y');
+    if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';
+    if (yEl && value !== null && value !== undefined) yEl.textContent = value;
+    return;
+  }
+
+  // Trigger Pads (pad_1 .. pad_8)
+  if (typeof controlId === 'string' && controlId.indexOf('pad_') === 0) {
+    const padIdx = controlId.replace('pad_', '');
+    const pad = document.getElementById('nk-pad-' + padIdx);
+    if (pad) {
+      pad.classList.toggle('active', !!pressed);
+      if (pressed) {
+        pad.classList.add('fired');
+        setTimeout(() => pad.classList.remove('fired'), 120);
+      }
+    }
+    return;
+  }
+
+  // Keyboard Keys (key_48 .. key_72)
+  if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
+    const note = controlId.replace('key_', '');
+    const key = document.getElementById('nk-key-' + note);
+    if (key) {
+      key.classList.toggle('active', !!pressed);
+    }
+    return;
+  }
+};
+
+// Add interactive click feedback on hardware GUI
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.nk-pad').forEach(pad => {
+    pad.addEventListener('mousedown', () => {
+      pad.classList.add('active', 'fired');
+    });
+    pad.addEventListener('mouseup', () => {
+      pad.classList.remove('active', 'fired');
+    });
+  });
+  document.querySelectorAll('.nk-key-white, .nk-key-black').forEach(key => {
+    key.addEventListener('mousedown', () => key.classList.add('active'));
+    key.addEventListener('mouseup', () => key.classList.remove('active'));
+  });
+});
 
 </script>
 </body>

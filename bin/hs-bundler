@@ -11,7 +11,7 @@ import argparse
 
 TARGET_PRESETS = {
     "qwerty-midi": {
-        "src_dirs": ["packages/music-engine", "src"],
+        "src_dirs": ["packages/music-engine", "packages/nanokey-studio", "src"],
         "entry": "init.lua",
         "output": "qwerty_midi.lua",
         "web_index": "src/web/index.html",

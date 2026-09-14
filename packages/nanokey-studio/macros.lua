@@ -34,6 +34,34 @@ local MACRO_HANDLERS = {
     local win = hs.window.focusedWindow()
     if win then win:maximize() end
   end,
+  ["Restore Win"] = function()
+    local win = hs.window.focusedWindow()
+    if win then
+      local screen = win:screen():frame()
+      local w = math.floor(screen.w * 0.7)
+      local h = math.floor(screen.h * 0.7)
+      win:setFrame({
+        x = math.floor(screen.x + (screen.w - w) / 2),
+        y = math.floor(screen.y + (screen.h - h) / 2),
+        w = w,
+        h = h
+      })
+    end
+  end,
+  ["Scale Cycle"] = function()
+    local config = require("config")
+    if config and config.state and config.SCALES then
+      config.state.currentScaleIdx = (config.state.currentScaleIdx % #config.SCALES) + 1
+      local hud = require("hud")
+      if hud and hud.updateWebviewHud then hud.updateWebviewHud() end
+    end
+  end,
+  ["Prev Track"] = function()
+    hs.eventtap.keyStroke({}, "left")
+  end,
+  ["Next Track"] = function()
+    hs.eventtap.keyStroke({}, "right")
+  end,
   ["Center Win"] = function()
     local win = hs.window.focusedWindow()
     if win then

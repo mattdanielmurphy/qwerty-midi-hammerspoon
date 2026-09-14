@@ -48,6 +48,8 @@ local hudUpdateScheduled = false
 local lastFrameScale = nil
 local _savedNormalHeight = nil
 
+state.activeSurface = state.activeSurface or hs.settings.get("qwertyMidi_activeSurface") or "qwerty"
+
 local function safeEvaluateJS(js)
   if not _G.activeWatchers.midiWebview then return end
   local ok, err = pcall(function()
@@ -65,11 +67,45 @@ local function updateSingleKeyState(code, pressed, latched)
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
 end
 
+local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%s, %s, %s, %s, %s);",
+    hs.json.encode(controlId),
+    value and tostring(value) or "null",
+    pressed and "true" or "false",
+    hs.json.encode(layer or "base"),
+    extra and hs.json.encode(extra) or "null")
+  safeEvaluateJS(js)
+end
+
+local function setSurfaceView(surface)
+  surface = surface or "qwerty"
+  state.activeSurface = surface
+  hs.settings.set("qwertyMidi_activeSurface", surface)
+
+  if _G.activeWatchers.midiWebview then
+    local wv = _G.activeWatchers.midiWebview
+    local curFrame = wv:frame()
+    local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+    local NOTIF_BAND = math.floor(50 * effectiveScale)
+    local targetH = math.floor(((surface == "nanokey") and 380 or 280) * effectiveScale) + NOTIF_BAND
+    
+    local diffH = targetH - curFrame.h
+    local screen = hs.screen.mainScreen():frame()
+    local newY = math.max(screen.y, math.min(screen.y + screen.h - targetH, curFrame.y - diffH))
+    wv:frame({ x = curFrame.x, y = newY, w = curFrame.w, h = targetH })
+    _G.activeWatchers.hudY = newY
+    hs.settings.set("qwertyMidi_hudY", newY)
+  end
+
+  safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%s);", hs.json.encode(surface)))
+end
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
-  local baseW, baseH = 980, 280
+  local baseW = 980
+  local baseH = (state.activeSurface == "nanokey") and 380 or 280
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local newW = math.floor(baseW * effectiveScale)
@@ -313,6 +349,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
     keys = keyUpdates,
@@ -430,7 +467,8 @@ local function createMidiWebview()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local width = math.floor(980 * effectiveScale)
-  local height = math.floor(280 * effectiveScale) + NOTIF_BAND
+  local baseH = (state.activeSurface == "nanokey") and 380 or 280
+  local height = math.floor(baseH * effectiveScale) + NOTIF_BAND
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
   local hudX = savedX or _G.activeWatchers.hudX or math.floor(screen.x + (screen.w - width) / 2)
@@ -728,7 +766,6 @@ local function createMidiWebview()
       end
     elseif body.type == "hoverScrollable" then
       _G.activeWatchers.isHoveringScrollable = body.state
-      -- Safer file logging replacing os.execute
       if body.message then
         local f = io.open("/tmp/wv_js.log", "a")
         if f then
@@ -736,6 +773,8 @@ local function createMidiWebview()
           f:close()
         end
       end
+    elseif body.type == "switchSurface" then
+      setSurfaceView(body.surface)
     end
     config.saveSettings()
   end)
@@ -971,5 +1010,7 @@ return {
   pingController = pingController,
   getLastPongTime = function() return lastPongTime end,
   getLastLatencyMs = function() return lastLatencyMs end,
-  dumpMidiLogs = dumpMidiLogs
+  dumpMidiLogs = dumpMidiLogs,
+  setSurfaceView = setSurfaceView,
+  updateNanoKeyControl = updateNanoKeyControl
 }

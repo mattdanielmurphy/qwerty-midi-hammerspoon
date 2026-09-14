@@ -3,7 +3,7 @@
 ## Project Overview & Monorepo Structure
 `surface-studio-suite` (formerly `qwerty-midi-hammerspoon`) is a Bun workspace monorepo (`packages/*`) unifying multimodal MIDI performance surfaces with a shared music engine and spatial HUD:
 - `packages/qwerty-midi/`: Modular QWERTY keyboard MIDI controller for Hammerspoon.
-- `packages/nanokey-studio/`: Korg nanoKEY Studio hardware driver with CC=54 sustain macro layer.
+- `packages/nanokey-studio/`: Korg nanoKEY Studio hardware driver with CC #25 Sustain & native SysEx Scene dual hold-to-reveal macro layers, 8 CC #14-21 rotary knobs, KAOSS touchpad, 8 velocity trigger pads, 25 chiclet keys (C3 to C5), and dynamic surface switcher.
 - `packages/music-engine/`: Core musical intelligence (harmony, scale quantizer, chord voicings, master clock, arpeggiator).
 - `packages/surface-hud/`: Framework-agnostic Vite/WebKit HUD with 30fps coalescing and Web Audio anti-suspension sentinels.
 - `packages/studio-suite/`: Master multi-controller orchestrator (QWERTY Ch 1 + nanoKEY Ch 2).
