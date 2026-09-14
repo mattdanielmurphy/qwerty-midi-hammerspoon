@@ -1402,24 +1402,43 @@
     box-shadow: inset 0 1px 3px rgba(255,255,255,0.05), inset 0 -2px 6px rgba(0,0,0,0.8);
     position: relative;
     user-select: none;
+    box-sizing: border-box;
   }
 
-  /* Top Section: Knobs, Touchpad, Pads */
+  /* Top Section: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) */
   .nk-top-row {
     display: flex;
     align-items: stretch;
     justify-content: space-between;
     gap: 12px;
-    height: 118px;
+    height: 165px;
+  }
+
+  .nk-column {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .nk-left-column {
+    flex: 1.15;
+  }
+  .nk-center-column {
+    width: 145px;
+    display: flex;
+    flex-direction: column;
+  }
+  .nk-right-column {
+    flex: 1.25;
   }
 
   /* Knobs Area */
   .nk-knobs-area {
-    flex: 1.1;
+    flex: 1;
     background: rgba(26, 24, 22, 0.7);
     border: 1px solid rgba(80, 72, 64, 0.45);
     border-radius: 8px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -1432,7 +1451,7 @@
     font-weight: 800;
     letter-spacing: 1px;
     color: #8c8275;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     text-transform: uppercase;
   }
   .nk-brand {
@@ -1440,11 +1459,23 @@
     color: #d4a359;
     letter-spacing: 1.5px;
   }
+  .nk-model-title {
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.8px;
+    color: #d6ccbc;
+  }
+  .nk-model-sub {
+    font-size: 6.5px;
+    font-weight: 700;
+    color: #8c8275;
+    letter-spacing: 0.5px;
+  }
   .nk-knobs-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: repeat(2, 1fr);
-    gap: 4px 6px;
+    gap: 3px 5px;
     flex: 1;
     align-items: center;
   }
@@ -1452,15 +1483,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 1px;
   }
   .nk-knob-dial {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, #38342e 0%, #1a1816 75%);
     border: 1.5px solid rgba(140, 125, 105, 0.4);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.15);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.15);
     position: relative;
     display: flex;
     align-items: center;
@@ -1471,26 +1502,26 @@
     position: absolute;
     top: 2px;
     width: 2px;
-    height: 7px;
+    height: 6px;
     background: #d4a359;
     border-radius: 1px;
     box-shadow: 0 0 3px rgba(212, 163, 89, 0.8);
   }
   .nk-knob-label {
-    font-size: 7.5px;
+    font-size: 7px;
     font-weight: 700;
     color: #a89e90;
     text-align: center;
     line-height: 1;
   }
   .nk-knob-val {
-    font-size: 7px;
+    font-size: 6.5px;
     font-weight: 600;
     color: #d4a359;
     line-height: 1;
   }
   .nk-knob-cc {
-    font-size: 6.5px;
+    font-size: 6px;
     font-weight: 600;
     color: #7a7062;
     line-height: 1;
@@ -1498,7 +1529,8 @@
 
   /* Kaoss Touchpad Area */
   .nk-touchpad-area {
-    width: 140px;
+    width: 100%;
+    height: 100%;
     background: rgba(22, 20, 18, 0.85);
     border: 1px solid rgba(80, 72, 64, 0.45);
     border-radius: 8px;
@@ -1507,6 +1539,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: space-between;
+    box-sizing: border-box;
   }
   .nk-touchpad-screen {
     width: 100%;
@@ -1551,11 +1584,11 @@
 
   /* Trigger Pads Area */
   .nk-pads-area {
-    flex: 1.2;
+    flex: 1;
     background: rgba(26, 24, 22, 0.7);
     border: 1px solid rgba(80, 72, 64, 0.45);
     border-radius: 8px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -1577,13 +1610,28 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: repeat(2, 1fr);
-    gap: 5px;
+    gap: 3px 5px;
     flex: 1;
+  }
+  .nk-pad-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .nk-pad-hdr {
+    font-size: 6px;
+    font-weight: 700;
+    color: #7a7062;
+    text-transform: uppercase;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+    letter-spacing: 0.2px;
   }
   .nk-pad {
     background: linear-gradient(180deg, #2a2622 0%, #1e1b18 100%);
     border: 1.5px solid rgba(140, 125, 105, 0.35);
-    border-radius: 6px;
+    border-radius: 5px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1594,6 +1642,7 @@
     overflow: hidden;
     transition: all 0.08s ease;
     cursor: pointer;
+    flex: 1;
   }
   .nk-pad:hover {
     border-color: rgba(212, 163, 89, 0.6);
@@ -1605,18 +1654,18 @@
     transform: scale(0.97);
   }
   .nk-pad-name {
-    font-size: 8px;
+    font-size: 7.5px;
     font-weight: 800;
     color: #e5dec9;
     letter-spacing: 0.5px;
   }
   .nk-pad-chord {
-    font-size: 7px;
+    font-size: 6.5px;
     font-weight: 700;
     color: #d4a359;
   }
   .nk-pad-macro {
-    font-size: 8px;
+    font-size: 7.5px;
     font-weight: 800;
     display: none;
     text-align: center;
@@ -1641,59 +1690,104 @@
     text-shadow: 0 0 4px rgba(192, 132, 252, 0.5);
   }
 
-  /* Middle Controls Row */
-  .nk-mid-row {
+  /* Authentic Function Buttons Rows (Under Knobs on Left, Under Pads on Right) */
+  .nk-btn-row {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
-    height: 28px;
-    padding: 0 4px;
-    gap: 8px;
+    padding: 1px 2px;
+    height: 32px;
   }
-  .nk-btn-group {
+  .nk-btn-cluster {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 4px;
   }
-  .nk-btn {
-    background: linear-gradient(180deg, #262320 0%, #1c1a18 100%);
-    border: 1px solid rgba(120, 110, 95, 0.4);
-    border-radius: 4px;
-    color: #c8bfb0;
-    font-size: 8px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    padding: 3px 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
-    cursor: pointer;
-    transition: all 0.1s ease;
+  .nk-btn-gap {
+    width: 10px;
+    flex-shrink: 0;
   }
-  .nk-btn:hover {
-    background: #332f2b;
-    border-color: #d4a359;
+  .nk-btn-unit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
   }
-  .nk-btn.active {
-    background: #d4a359 !important;
-    color: #141210 !important;
+  .nk-btn-label {
+    font-size: 6px;
     font-weight: 800;
-    box-shadow: 0 0 10px rgba(212, 163, 89, 0.8) !important;
-    border-color: #fff !important;
+    letter-spacing: 0.3px;
+    color: #8c8275;
+    text-transform: uppercase;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1;
+  }
+  .nk-btn-subgroup {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .nk-btn-cap {
+    height: 15px;
+    min-width: 22px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 7.5px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    transition: all 0.1s ease;
+    border: none;
+  }
+  .nk-btn-sm {
+    min-width: 14px;
+    padding: 0 3px;
+    font-size: 8px;
+    font-weight: 800;
+  }
+
+  /* Inert Buttons (Internal Hardware Functions): distinct, non-clickable, matte recessed */
+  .nk-btn-inert {
+    background: linear-gradient(180deg, #171513 0%, #0f0e0d 100%);
+    border: 1px solid rgba(75, 68, 60, 0.4);
+    color: #655c50;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+    pointer-events: none;
+    cursor: default;
+    user-select: none;
+  }
+
+  /* Interactive Buttons (Sustain & Scene): clickable, hover glow, active backlit state */
+  .nk-btn-interactive {
+    background: linear-gradient(180deg, #2c2824 0%, #1f1c19 100%);
+    border: 1px solid rgba(140, 125, 105, 0.55);
+    color: #e5dec9;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.1);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .nk-btn-interactive:hover {
+    border-color: #d4a359;
+    background: #36312c;
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
+  }
+  .nk-btn-interactive:active {
+    transform: translateY(1px);
   }
   .nk-btn-sustain.active {
-    background: #5ea2eb !important;
-    box-shadow: 0 0 12px rgba(94, 162, 235, 0.9) !important;
+    background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%) !important;
+    border-color: #93c5fd !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.9), inset 0 1px 2px rgba(255,255,255,0.7) !important;
   }
   .nk-btn-scene.active {
-    background: #c084fc !important;
-    box-shadow: 0 0 12px rgba(192, 132, 252, 0.9) !important;
-  }
-  .nk-btn-inset {
-    background: rgba(16, 14, 13, 0.8);
-    border: 1px solid rgba(60, 55, 50, 0.6);
-    border-radius: 5px;
-    padding: 2px 4px;
-    display: flex;
-    gap: 3px;
+    background: linear-gradient(180deg, #a855f7 0%, #7e22ce 100%) !important;
+    border-color: #d8b4fe !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.9), inset 0 1px 2px rgba(255,255,255,0.7) !important;
   }
 
   /* Keyboard Section: 25 Chiclet Keys */
@@ -1725,7 +1819,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-end;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
     position: relative;
     cursor: pointer;
     transition: all 0.06s ease;
@@ -1739,7 +1833,9 @@
     box-shadow: 0 0 14px rgba(255, 209, 102, 0.95), inset 0 0 8px rgba(255,255,255,0.8) !important;
     transform: translateY(2px);
   }
-  .nk-key-white.active .nk-key-name {
+  .nk-key-white.active .nk-key-name,
+  .nk-key-white.active .nk-key-scale,
+  .nk-key-white.active .nk-key-degree {
     color: #141210 !important;
     font-weight: 900;
   }
@@ -1785,19 +1881,28 @@
     font-weight: 900;
   }
   .nk-key-name {
-    font-size: 9px;
+    font-size: 8.5px;
     font-weight: 800;
     color: #d6ccbc;
     line-height: 1;
   }
+  .nk-key-scale {
+    font-size: 6px;
+    font-weight: 700;
+    color: #9c9284;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1;
+    margin-top: 2px;
+  }
   .nk-key-degree {
-    font-size: 7px;
+    font-size: 6.5px;
     font-weight: 600;
     color: #d4a359;
     margin-top: 1px;
   }
   .nk-key-macro {
-    font-size: 7px;
+    font-size: 6.5px;
     font-weight: 700;
     color: #c084fc;
     display: none;
@@ -1807,6 +1912,7 @@
   .scene-active .nk-key-macro {
     display: block;
   }
+  .scene-active .nk-key-scale,
   .scene-active .nk-key-degree {
     display: none;
   }
@@ -1927,169 +2033,259 @@
 
     <!-- nanoKEY Studio Authentic Hardware View -->
     <div class="nanokey-view" id="nanokey-view" style="display: none;">
-      <!-- TOP ROW: Knobs, Kaoss Touchpad, Trigger Pads -->
+      <!-- TOP ROW: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) -->
       <div class="nk-top-row">
-        <!-- Knobs Area (8 assignable rotary dials) -->
-        <div class="nk-knobs-area">
-          <div class="nk-area-header">
-            <span class="nk-brand">KORG</span>
-            <span>8 KNOBS</span>
+        
+        <!-- LEFT COLUMN: 8 Knobs + Left Function Buttons -->
+        <div class="nk-column nk-left-column">
+          <!-- Knobs Area (8 assignable rotary dials) -->
+          <div class="nk-knobs-area">
+            <div class="nk-area-header">
+              <span class="nk-brand">KORG</span>
+              <span>8 KNOBS</span>
+            </div>
+            <div class="nk-knobs-grid">
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
+                <div class="nk-knob-val" id="nk-knob-val-1">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
+                <div class="nk-knob-val" id="nk-knob-val-2">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
+                <div class="nk-knob-val" id="nk-knob-val-3">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
+                <div class="nk-knob-val" id="nk-knob-val-4">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
+                <div class="nk-knob-val" id="nk-knob-val-5">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
+                <div class="nk-knob-val" id="nk-knob-val-6">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
+                <div class="nk-knob-val" id="nk-knob-val-7">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
+              </div>
+              <div class="nk-knob-item">
+                <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
+                <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
+                <div class="nk-knob-val" id="nk-knob-val-8">0</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
+              </div>
+            </div>
           </div>
-          <div class="nk-knobs-grid">
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
-              <div class="nk-knob-val" id="nk-knob-val-1">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
+
+          <!-- Left Function Buttons Row (Under Knobs) -->
+          <div class="nk-btn-row nk-left-btn-row">
+            <!-- Group 1: Octave (-/+), Sustain -->
+            <div class="nk-btn-cluster">
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Octave</div>
+                <div class="nk-btn-subgroup">
+                  <button class="nk-btn-cap nk-btn-sm nk-btn-inert" id="nk-btn-oct-down" title="Internal Hardware Transpose">-</button>
+                  <button class="nk-btn-cap nk-btn-sm nk-btn-inert" id="nk-btn-oct-up" title="Internal Hardware Transpose">+</button>
+                </div>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Sustain</div>
+                <button class="nk-btn-cap nk-btn-interactive nk-btn-sustain" id="nk-btn-sustain" title="Sustain / Hold for Transport & Window Macros">SUS</button>
+              </div>
             </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
-              <div class="nk-knob-val" id="nk-knob-val-2">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
-              <div class="nk-knob-val" id="nk-knob-val-3">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
-              <div class="nk-knob-val" id="nk-knob-val-4">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
-              <div class="nk-knob-val" id="nk-knob-val-5">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
-              <div class="nk-knob-val" id="nk-knob-val-6">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
-              <div class="nk-knob-val" id="nk-knob-val-7">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
-            </div>
-            <div class="nk-knob-item">
-              <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
-              <div class="nk-knob-val" id="nk-knob-val-8">0</div>
-              <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
+
+            <!-- Spacer gap -->
+            <div class="nk-btn-gap"></div>
+
+            <!-- Group 2: Touch Scale, X-Y, Pitch / Mod -->
+            <div class="nk-btn-cluster">
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Touch Scale</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-touch-scale" title="Internal Hardware Function">SCALE</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">X-Y</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-xy" title="Internal Hardware Function">X-Y</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Pitch / Mod</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-pitch-mod" title="Internal Hardware Function">P/M</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- KAOSS Touchpad -->
-        <div class="nk-touchpad-area">
-          <div class="nk-area-header">
-            <span>KAOSS TOUCH</span>
-            <span>X:<span id="nk-touch-x">0</span> Y:<span id="nk-touch-y">0</span></span>
-          </div>
-          <div class="nk-touchpad-screen" id="nk-touchpad-screen">
-            <div class="nk-touchpad-grid"></div>
-            <div class="nk-touch-cursor" id="nk-touch-cursor" style="left: 50%; top: 50%;"></div>
-          </div>
-        </div>
-
-        <!-- Trigger Pads (8 velocity pads) -->
-        <div class="nk-pads-area">
-          <div class="nk-area-header">
-            <span>TRIGGER PADS</span>
-            <span class="nk-status-dot connected" id="nk-status-dot" title="nanoKEY Studio Connected"></span>
-          </div>
-          <div class="nk-pads-grid">
-            <div class="nk-pad" id="nk-pad-1" data-pad="1">
-              <span class="nk-pad-name">PAD 1</span>
-              <span class="nk-pad-chord">CHORD 1</span>
-              <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
+        <!-- CENTER COLUMN: KAOSS Touchpad -->
+        <div class="nk-center-column">
+          <div class="nk-touchpad-area">
+            <div class="nk-area-header" style="width: 100%;">
+              <span>KAOSS TOUCH</span>
+              <span>X:<span id="nk-touch-x">0</span> Y:<span id="nk-touch-y">0</span></span>
             </div>
-            <div class="nk-pad" id="nk-pad-2" data-pad="2">
-              <span class="nk-pad-name">PAD 2</span>
-              <span class="nk-pad-chord">CHORD 2</span>
-              <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-3" data-pad="3">
-              <span class="nk-pad-name">PAD 3</span>
-              <span class="nk-pad-chord">CHORD 3</span>
-              <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-4" data-pad="4">
-              <span class="nk-pad-name">PAD 4</span>
-              <span class="nk-pad-chord">CHORD 4</span>
-              <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-5" data-pad="5">
-              <span class="nk-pad-name">PAD 5</span>
-              <span class="nk-pad-chord">CHORD 5</span>
-              <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-6" data-pad="6">
-              <span class="nk-pad-name">PAD 6</span>
-              <span class="nk-pad-chord">CHORD 6</span>
-              <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-7" data-pad="7">
-              <span class="nk-pad-name">PAD 7</span>
-              <span class="nk-pad-chord">CHORD 7</span>
-              <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
-            </div>
-            <div class="nk-pad" id="nk-pad-8" data-pad="8">
-              <span class="nk-pad-name">PAD 8</span>
-              <span class="nk-pad-chord">CHORD 8</span>
-              <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
+            <div class="nk-touchpad-screen" id="nk-touchpad-screen">
+              <div class="nk-touchpad-grid"></div>
+              <div class="nk-touch-cursor" id="nk-touch-cursor" style="left: 50%; top: 50%;"></div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- MIDDLE CONTROLS ROW -->
-      <div class="nk-mid-row">
-        <div class="nk-btn-inset">
-          <button class="nk-btn" id="nk-btn-oct-down">OCT -</button>
-          <button class="nk-btn" id="nk-btn-oct-up">OCT +</button>
+        <!-- RIGHT COLUMN: Trigger Pads + Right Function Buttons -->
+        <div class="nk-column nk-right-column">
+          <!-- Trigger Pads (8 velocity trigger pads) -->
+          <div class="nk-pads-area">
+            <div class="nk-area-header">
+              <div>
+                <span class="nk-model-title">nanoKEY Studio</span>
+                <span class="nk-model-sub">MOBILE MIDI KEYBOARD</span>
+              </div>
+              <span class="nk-status-dot connected" id="nk-status-dot" title="nanoKEY Studio Connected"></span>
+            </div>
+            <div class="nk-pads-grid">
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Arp Type</div>
+                <div class="nk-pad" id="nk-pad-1" data-pad="1">
+                  <span class="nk-pad-name">PAD 1</span>
+                  <span class="nk-pad-chord">CHORD 1</span>
+                  <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Arp Range</div>
+                <div class="nk-pad" id="nk-pad-2" data-pad="2">
+                  <span class="nk-pad-name">PAD 2</span>
+                  <span class="nk-pad-chord">CHORD 2</span>
+                  <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Key Sync</div>
+                <div class="nk-pad" id="nk-pad-3" data-pad="3">
+                  <span class="nk-pad-name">PAD 3</span>
+                  <span class="nk-pad-chord">CHORD 3</span>
+                  <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Wireless</div>
+                <div class="nk-pad" id="nk-pad-4" data-pad="4">
+                  <span class="nk-pad-name">PAD 4</span>
+                  <span class="nk-pad-chord">CHORD 4</span>
+                  <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Gate Type -</div>
+                <div class="nk-pad" id="nk-pad-5" data-pad="5">
+                  <span class="nk-pad-name">PAD 5</span>
+                  <span class="nk-pad-chord">CHORD 5</span>
+                  <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Gate Type +</div>
+                <div class="nk-pad" id="nk-pad-6" data-pad="6">
+                  <span class="nk-pad-name">PAD 6</span>
+                  <span class="nk-pad-chord">CHORD 6</span>
+                  <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Scale -</div>
+                <div class="nk-pad" id="nk-pad-7" data-pad="7">
+                  <span class="nk-pad-name">PAD 7</span>
+                  <span class="nk-pad-chord">CHORD 7</span>
+                  <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
+                </div>
+              </div>
+              <div class="nk-pad-cell">
+                <div class="nk-pad-hdr">Scale +</div>
+                <div class="nk-pad" id="nk-pad-8" data-pad="8">
+                  <span class="nk-pad-name">PAD 8</span>
+                  <span class="nk-pad-chord">CHORD 8</span>
+                  <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Function Buttons Row (Under Pads) -->
+          <div class="nk-btn-row nk-right-btn-row">
+            <!-- Group 3: Scene, Shift / Tap, Arp -->
+            <div class="nk-btn-cluster">
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Scene</div>
+                <button class="nk-btn-cap nk-btn-interactive nk-btn-scene" id="nk-btn-scene" title="Scene / Hold for Presets & Navigation Macros">SCENE</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Shift / Tap</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-shift-tap" title="Internal Hardware Function">SHIFT</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Arp</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-arp" title="Internal Hardware Function">ARP</button>
+              </div>
+            </div>
+
+            <!-- Spacer gap -->
+            <div class="nk-btn-gap"></div>
+
+            <!-- Group 4: Chord Pad, Easy Scale, Scale Guide -->
+            <div class="nk-btn-cluster">
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Chord Pad</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-chord-pad" title="Internal Hardware Function">CHORD</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Easy Scale</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-easy-scale" title="Internal Hardware Function">EASY</button>
+              </div>
+              <div class="nk-btn-unit">
+                <div class="nk-btn-label">Scale Guide</div>
+                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-scale-guide" title="Internal Hardware Function">GUIDE</button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="nk-btn-group">
-          <button class="nk-btn" id="nk-btn-scale-guide">SCALE GUIDE</button>
-          <button class="nk-btn" id="nk-btn-easy-scale">EASY SCALE</button>
-          <button class="nk-btn" id="nk-btn-touch-scale">TOUCH SCALE</button>
-          <button class="nk-btn" id="nk-btn-chord-pad">CHORD PAD</button>
-          <button class="nk-btn" id="nk-btn-arp">ARP</button>
-          <button class="nk-btn" id="nk-btn-key-range">KEY RANGE</button>
-        </div>
-
-        <div class="nk-btn-group">
-          <button class="nk-btn nk-btn-scene" id="nk-btn-scene" title="Hold for System & Navigation Macros">SCENE</button>
-          <button class="nk-btn nk-btn-sustain" id="nk-btn-sustain" title="Hold for Transport & Window Macros">SUSTAIN</button>
-        </div>
       </div>
 
       <!-- KEYBOARD SECTION: 25 Chiclet Keys (15 White, 10 Black) -->
       <div class="nk-keyboard-section">
         <div class="nk-white-keys">
-          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
-          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
-          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
-          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
-          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
-          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
-          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
-          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
-          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
-          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
-          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
-          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
-          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
-          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
-          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
+          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
+          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
+          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
+          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
+          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
+          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
+          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
+          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
+          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
+          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
+          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
+          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
+          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
+          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
+          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
         </div>
 
         <div class="nk-black-keys">
@@ -4454,34 +4650,117 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
   if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
     const rawNote = parseInt(controlId.replace('key_', ''), 10);
     if (!isNaN(rawNote)) {
-      let key = document.getElementById('nk-key-' + rawNote);
-      if (!key) {
-        let mapped = rawNote;
-        while (mapped < 48) mapped += 12;
-        while (mapped > 72) mapped -= 12;
-        key = document.getElementById('nk-key-' + mapped);
+      if (!window._activeNanoKeyNotes) window._activeNanoKeyNotes = {};
+      if (pressed) {
+        window._activeNanoKeyNotes[rawNote] = true;
+      } else {
+        delete window._activeNanoKeyNotes[rawNote];
       }
+
+      let mapped = rawNote;
+      while (mapped < 48) mapped += 12;
+      while (mapped > 72) mapped -= 12;
+
+      let isStillActive = false;
+      for (const nStr in window._activeNanoKeyNotes) {
+        let n = parseInt(nStr, 10);
+        while (n < 48) n += 12;
+        while (n > 72) n -= 12;
+        if (n === mapped) {
+          isStillActive = true;
+          break;
+        }
+      }
+
+      const key = document.getElementById('nk-key-' + mapped);
       if (key) {
-        key.classList.toggle('active', !!pressed);
+        key.classList.toggle('active', isStillActive);
       }
     }
     return;
   }
 };
 
-// Add interactive click feedback on hardware GUI
+// Interactive event handlers for nanoKEY hardware GUI
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.nk-pad').forEach(pad => {
-    pad.addEventListener('mousedown', () => {
-      pad.classList.add('active', 'fired');
+  // 1. Sustain Button (Toggle Sustain CC #64 & Macro Layer)
+  const btnSustain = document.getElementById('nk-btn-sustain');
+  if (btnSustain) {
+    btnSustain.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeySustain', toggle: true });
+      }
     });
-    pad.addEventListener('mouseup', () => {
-      pad.classList.remove('active', 'fired');
+  }
+
+  // 2. Scene Button (Toggle Scene SysEx & Macro Layer)
+  const btnScene = document.getElementById('nk-btn-scene');
+  if (btnScene) {
+    btnScene.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyScene', toggle: true });
+      }
+    });
+  }
+
+  // 3. Trigger Pads (Mouse interaction + MIDI/Macro trigger)
+  document.querySelectorAll('.nk-pad').forEach(pad => {
+    const padIdx = parseInt(pad.dataset.pad, 10);
+    const triggerPad = (pressed) => {
+      pad.classList.toggle('active', pressed);
+      if (pressed) {
+        pad.classList.add('fired');
+        setTimeout(() => pad.classList.remove('fired'), 120);
+      }
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({
+          type: 'nanokeyPad',
+          pad: padIdx,
+          pressed: pressed
+        });
+      }
+    };
+
+    pad.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      triggerPad(true);
+    });
+    pad.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      triggerPad(false);
+    });
+    pad.addEventListener('mouseleave', (e) => {
+      if (pad.classList.contains('active')) triggerPad(false);
     });
   });
+
+  // 4. Chiclet Keys (Mouse interaction + MIDI Note trigger)
   document.querySelectorAll('.nk-key-white, .nk-key-black').forEach(key => {
-    key.addEventListener('mousedown', () => key.classList.add('active'));
-    key.addEventListener('mouseup', () => key.classList.remove('active'));
+    const noteNum = parseInt(key.dataset.note, 10);
+    const triggerKey = (pressed) => {
+      key.classList.toggle('active', pressed);
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({
+          type: 'nanokeyKey',
+          note: noteNum,
+          pressed: pressed
+        });
+      }
+    };
+
+    key.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      triggerKey(true);
+    });
+    key.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      triggerKey(false);
+    });
+    key.addEventListener('mouseleave', (e) => {
+      if (key.classList.contains('active')) triggerKey(false);
+    });
   });
 });
 

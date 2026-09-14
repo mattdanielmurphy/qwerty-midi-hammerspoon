@@ -780,6 +780,22 @@ local function createMidiWebview()
       end
     elseif body.type == "switchSurface" then
       setSurfaceView(body.surface)
+    elseif body.type == "nanokeyKey" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("key", body)
+      end
+    elseif body.type == "nanokeyPad" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("pad", body)
+      end
+    elseif body.type == "nanokeySustain" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("sustain", body)
+      end
+    elseif body.type == "nanokeyScene" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("scene", body)
+      end
     end
     config.saveSettings()
   end)

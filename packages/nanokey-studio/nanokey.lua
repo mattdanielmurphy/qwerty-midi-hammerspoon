@@ -2,6 +2,8 @@
 -- Hardware driver and layer manager for Korg nanoKEY Studio in Hammerspoon.
 
 local macros = require("macros")
+local midi = nil
+pcall(function() midi = require("midi") end)
 
 local nanoKey = {}
 local midiDevice = nil
@@ -130,10 +132,10 @@ end
 function nanoKey.handleMidiEvent(commandType, description, metadata)
   metadata = metadata or {}
   local cc = metadata.controllerNumber
-  local val = metadata.controllerValue
-  local note = metadata.noteNumber
-  local vel = metadata.velocity
-  local ch = metadata.channel
+  local val = metadata.controllerValue or metadata.value or 0
+  local note = metadata.note or metadata.noteNumber or metadata.pitch
+  local vel = metadata.velocity or 0
+  local ch = metadata.channel or 0
   local dataHex = metadata.data or ""
   local sysexDataHex = metadata.sysexData or ""
 
@@ -216,7 +218,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 5. Pad Triggers (Channel 1 or notes 36..43)
+  -- 5. Pad Triggers (Channel 1 or notes 36..43, or drum channel 9)
   local padIdx = noteToPadIndex(note)
   if padIdx then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
@@ -256,17 +258,15 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
         if hudRef and hudRef.updateNanoKeyControl then
           hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { note = note, velocity = vel })
         end
-        return false
       end
     elseif isUp then
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note })
       end
-      return (activeLayer ~= "base")
     end
   end
 
-  -- 6. Keyboard Keys (Notes 48 to 72 = C3 to C5, or shifted)
+  -- 6. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
   if note and note >= 24 and note <= 108 then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
@@ -307,6 +307,76 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   end
 
   return false
+end
+
+function nanoKey.handleGuiAction(actionType, data)
+  data = data or {}
+  if actionType == "key" then
+    local note = tonumber(data.note)
+    local isDown = (data.pressed == true)
+    if note and midi then
+      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0)
+    end
+    if hudRef and hudRef.updateNanoKeyControl and note then
+      hudRef.updateNanoKeyControl("key_" .. note, isDown and 100 or 0, isDown, activeLayer, { note = note })
+    end
+  elseif actionType == "pad" then
+    local padIdx = tonumber(data.pad)
+    local isDown = (data.pressed == true)
+    if padIdx and padIdx >= 1 and padIdx <= 8 then
+      if isDown then
+        if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
+          local padSustainMacros = {
+            [1] = "Play/Pause", [2] = "Record", [3] = "Rewind", [4] = "Forward",
+            [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Restore Win"
+          }
+          local mName = padSustainMacros[padIdx]
+          if mName then macros.execute(mName) end
+        elseif activeLayer == "macro_scene" then
+          local padSceneMacros = {
+            [1] = "Preset 1", [2] = "Preset 2", [3] = "Preset 3", [4] = "Preset 4",
+            [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Panic All"
+          }
+          local mName = padSceneMacros[padIdx]
+          if mName then macros.execute(mName) end
+        else
+          if midi then
+            midi.sendMidiNote("noteOn", 35 + padIdx, 100, 9)
+          end
+        end
+      else
+        if activeLayer == "base" and midi then
+          midi.sendMidiNote("noteOff", 35 + padIdx, 0, 9)
+        end
+      end
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("pad_" .. padIdx, isDown and 100 or 0, isDown, activeLayer)
+      end
+    end
+  elseif actionType == "sustain" then
+    if data.toggle then
+      sustainHeld = not sustainHeld
+    elseif data.pressed ~= nil then
+      sustainHeld = (data.pressed == true)
+    end
+    computeActiveLayer()
+    if midi then
+      midi.sendSustainCC(sustainHeld and 127 or 0)
+    end
+    if hudRef and hudRef.updateNanoKeyControl then
+      hudRef.updateNanoKeyControl("btn_sustain", sustainHeld and 127 or 0, sustainHeld, activeLayer)
+    end
+  elseif actionType == "scene" then
+    if data.toggle then
+      sceneHeld = not sceneHeld
+    elseif data.pressed ~= nil then
+      sceneHeld = (data.pressed == true)
+    end
+    computeActiveLayer()
+    if hudRef and hudRef.updateNanoKeyControl then
+      hudRef.updateNanoKeyControl("btn_scene", sceneHeld and 127 or 0, sceneHeld, activeLayer)
+    end
+  end
 end
 
 function nanoKey.connect(targetName)
