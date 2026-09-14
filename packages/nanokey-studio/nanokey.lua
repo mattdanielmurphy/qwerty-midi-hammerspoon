@@ -14,10 +14,15 @@ local onStateChangeCallback = nil
 local function log(msg)
   local line = os.date("%H:%M:%S") .. " [nanoKEY Studio]: " .. tostring(msg)
   print(line)
-  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
+  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
   if f then
     f:write(line .. "\n")
     f:close()
+  end
+  local f2 = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
+  if f2 then
+    f2:write(line .. "\n")
+    f2:close()
   end
 end
 
@@ -69,12 +74,55 @@ function nanoKey.setLayer(newLayer)
   end
 end
 
--- Map pad MIDI note numbers (36..43 standard, or 60..67 if octave shifted) to 1..8
+-- Map pad MIDI note numbers (36..43 standard drum notes) to 1..8
 local function noteToPadIndex(note)
-  if note >= 36 and note <= 43 then
+  if note and note >= 36 and note <= 43 then
     return note - 35
-  elseif note >= 60 and note <= 67 then
-    return note - 59
+  end
+  return nil
+end
+
+local KNOB_NAMES = {
+  [1] = "Cutoff",
+  [2] = "Peak",
+  [3] = "Drive",
+  [4] = "Volume",
+  [5] = "Attack",
+  [6] = "Decay",
+  [7] = "Sustain",
+  [8] = "Release"
+}
+
+-- Adaptive knob base offset (defaults to 16, so CC 17 -> Knob 1, CC 24 -> Knob 8)
+local activeKnobOffset = 16
+
+local function resolveKnobIndex(cc)
+  if not cc then return nil end
+  -- Auto-detect hardware offset:
+  if cc == 16 then
+    -- Hardware is using 16..23 (offset +2 from 14..21): 16->1, 17->2, ..., 23->8
+    activeKnobOffset = 15
+    return 1
+  elseif cc >= 25 and cc <= 27 then
+    -- Hardware is using Korg Gadget factory scene (20..27): 20->1, ..., 27->8
+    activeKnobOffset = 19
+    return cc - 19
+  end
+
+  local idx = cc - activeKnobOffset
+  if idx >= 1 and idx <= 8 then
+    return idx
+  end
+
+  -- Fallback heuristics:
+  if cc >= 17 and cc <= 24 then
+    return cc - 16
+  elseif cc >= 16 and cc <= 23 then
+    return cc - 15
+  elseif cc >= 20 and cc <= 27 then
+    return cc - 19
+  elseif cc >= 14 and cc <= 21 then
+    return cc - 13
   end
   return nil
 end
@@ -85,25 +133,39 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   local val = metadata.controllerValue
   local note = metadata.noteNumber
   local vel = metadata.velocity
+  local ch = metadata.channel
   local dataHex = metadata.data or ""
   local sysexDataHex = metadata.sysexData or ""
 
+  -- Telemetry logging for all MIDI events
+  if commandType == "controlChange" then
+    log(string.format("MIDI CC: #%s = %s (ch=%s)", tostring(cc), tostring(val), tostring(ch)))
+  elseif commandType == "noteOn" or commandType == "noteOff" then
+    log(string.format("MIDI %s: note=%s vel=%s (ch=%s)", commandType, tostring(note), tostring(vel), tostring(ch)))
+  elseif commandType == "systemExclusive" then
+    log(string.format("MIDI SysEx: len=%d data=%s", #dataHex, dataHex))
+  end
+
   -- 1. Check for Sustain Button (CC #25 default, or CC #54 / CC #64 fallback)
+  -- Sustain button is momentary (127 on press, 0 on release), typically on channel 15
   if commandType == "controlChange" and (cc == 25 or cc == 54 or cc == 64) then
-    if val and val > 0 then
-      sustainHeld = true
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
+    local isMomentary = (val == 0 or val == 127)
+    if (cc == 54 or cc == 64) or (cc == 25 and isMomentary) then
+      if val and val > 0 then
+        sustainHeld = true
+        computeActiveLayer()
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
+        end
+      else
+        sustainHeld = false
+        computeActiveLayer()
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
+        end
       end
-    else
-      sustainHeld = false
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
-      end
+      return true
     end
-    return true
   end
 
   -- 2. Check for Scene Button via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 40 40 7f/00 00 f7)
@@ -126,18 +188,27 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 3. Rotary Knobs (CC #14 to CC #21 on Channel 15 or any channel)
-  if commandType == "controlChange" and cc and cc >= 14 and cc <= 21 then
-    local knobIdx = cc - 13
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("knob_" .. knobIdx, val, true, activeLayer, { cc = cc, value = val })
+  -- 3. Rotary Knobs (8 knobs labelled by Korg Gadget defaults: Cutoff, Peak, Drive, Volume, ADSR)
+  if commandType == "controlChange" and cc then
+    local knobIdx = resolveKnobIndex(cc)
+    if knobIdx and knobIdx >= 1 and knobIdx <= 8 then
+      local knobName = KNOB_NAMES[knobIdx] or ("Knob " .. knobIdx)
+      log(string.format("Knob %d [%s] (CC #%d) = %d [offset=%d]", knobIdx, knobName, cc, val or 0, activeKnobOffset))
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("knob_" .. knobIdx, val, true, activeLayer, {
+          cc = cc,
+          value = val,
+          knob = knobIdx,
+          name = knobName
+        })
+      end
+      return false
     end
-    return false
   end
 
-  -- 4. KAOSS Touchpad (Touch X = CC #1 or CC #24; Touch Y = CC #2 or CC #26, or CC #20)
+  -- 4. KAOSS Touchpad (Touch X = CC #1 or CC #28; Touch Y = CC #2 or CC #29)
   if commandType == "controlChange" and cc then
-    if cc == 1 or cc == 24 or cc == 2 or cc == 26 or cc == 20 then
+    if cc == 1 or cc == 28 or cc == 2 or cc == 29 then
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("cc_" .. cc, val, true, activeLayer, { cc = cc, value = val })
       end
@@ -266,6 +337,9 @@ function nanoKey.connect(targetName)
     return false
   end
 
+  _G.activeWatchers = _G.activeWatchers or {}
+  _G.activeWatchers.nanoKeyMidiDevice = midiDevice
+
   midiDevice:callback(function(obj, devName, cmdType, desc, metadata)
     nanoKey.handleMidiEvent(cmdType, desc, metadata)
   end)
@@ -279,6 +353,8 @@ end
 
 function nanoKey.disconnect()
   if midiDevice then
+    _G.activeWatchers = _G.activeWatchers or {}
+    _G.activeWatchers.nanoKeyMidiDevice = nil
     midiDevice = nil
     log("Disconnected.")
     if hudRef and hudRef.updateNanoKeyControl then

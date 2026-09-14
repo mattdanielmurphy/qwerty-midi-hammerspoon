@@ -48,14 +48,14 @@ function _G.toggleMidiMode(newState)
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
-    if nanokey and nanokey.connect then
-      nanokey.connect("nanoKEY Studio")
-    end
     profileLog("Before createMidiWebview")
     local h = hud.createMidiWebview()
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
+    if nanokey and nanokey.connect then
+      pcall(function() nanokey.connect("nanoKEY Studio") end)
+    end
   else
     -- Stop all key repeats before tearing down
     if controls.stopAllControlRepeats then

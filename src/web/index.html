@@ -1487,6 +1487,13 @@
     font-size: 7px;
     font-weight: 600;
     color: #d4a359;
+    line-height: 1;
+  }
+  .nk-knob-cc {
+    font-size: 6.5px;
+    font-weight: 600;
+    color: #7a7062;
+    line-height: 1;
   }
 
   /* Kaoss Touchpad Area */
@@ -1931,43 +1938,51 @@
           <div class="nk-knobs-grid">
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K1 (14)</div>
+              <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
               <div class="nk-knob-val" id="nk-knob-val-1">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K2 (15)</div>
+              <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
               <div class="nk-knob-val" id="nk-knob-val-2">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K3 (16)</div>
+              <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
               <div class="nk-knob-val" id="nk-knob-val-3">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K4 (17)</div>
+              <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
               <div class="nk-knob-val" id="nk-knob-val-4">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K5 (18)</div>
+              <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
               <div class="nk-knob-val" id="nk-knob-val-5">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K6 (19)</div>
+              <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
               <div class="nk-knob-val" id="nk-knob-val-6">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K7 (20)</div>
+              <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
               <div class="nk-knob-val" id="nk-knob-val-7">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K8 (21)</div>
+              <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
               <div class="nk-knob-val" id="nk-knob-val-8">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
             </div>
           </div>
         </div>
@@ -4277,6 +4292,20 @@ window.updateKeyState = function(code, pressed, latched) {
     else delete el.dataset.physicallyPressed;
     el.classList.toggle('pressed', !!pressed || (el.classList.contains('arp-playing')));
     el.classList.toggle('latched-key', !!latched);
+
+    // Also illuminate chiclet key if in nanoKEY view
+    const noteEl = el.querySelector(':scope > .key-note') || el.querySelector('.key-note');
+    if (noteEl && noteEl.textContent) {
+      const noteTxt = noteEl.textContent.trim();
+      const nkKeys = document.querySelectorAll('.nk-key-white, .nk-key-black');
+      for (let i = 0; i < nkKeys.length; i++) {
+        const nameEl = nkKeys[i].querySelector('.nk-key-name');
+        if (nameEl && nameEl.textContent.trim() === noteTxt) {
+          nkKeys[i].classList.toggle('active', !!pressed);
+          break;
+        }
+      }
+    }
   }
 };
 
@@ -4377,6 +4406,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     const knobIdx = controlId.replace('knob_', '');
     const dial = document.getElementById('nk-knob-' + knobIdx);
     const valEl = document.getElementById('nk-knob-val-' + knobIdx);
+    const ccEl = document.getElementById('nk-knob-cc-' + knobIdx);
     if (dial && value !== null && value !== undefined) {
       const angle = -135 + (value / 127) * 270;
       dial.style.transform = 'rotate(' + angle.toFixed(1) + 'deg)';
@@ -4384,18 +4414,21 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     if (valEl && value !== null && value !== undefined) {
       valEl.textContent = value;
     }
+    if (ccEl && extra && extra.cc) {
+      ccEl.textContent = 'CC ' + extra.cc;
+    }
     return;
   }
 
-  // Kaoss Touchpad (cc_1, cc_2, cc_24, cc_26, cc_20)
-  if (controlId === 'cc_1' || controlId === 'cc_24') {
+  // Kaoss Touchpad (Touch X = CC 1 / CC 28; Touch Y = CC 2 / CC 29)
+  if (controlId === 'cc_1' || controlId === 'cc_28') {
     const cur = document.getElementById('nk-touch-cursor');
     const xEl = document.getElementById('nk-touch-x');
     if (cur && value !== null && value !== undefined) cur.style.left = (value / 127 * 100).toFixed(1) + '%';
     if (xEl && value !== null && value !== undefined) xEl.textContent = value;
     return;
   }
-  if (controlId === 'cc_2' || controlId === 'cc_26' || controlId === 'cc_20') {
+  if (controlId === 'cc_2' || controlId === 'cc_29') {
     const cur = document.getElementById('nk-touch-cursor');
     const yEl = document.getElementById('nk-touch-y');
     if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';
@@ -4417,12 +4450,20 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     return;
   }
 
-  // Keyboard Keys (key_48 .. key_72)
+  // Keyboard Keys (key_<note> with automatic octave folding into 48..72)
   if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
-    const note = controlId.replace('key_', '');
-    const key = document.getElementById('nk-key-' + note);
-    if (key) {
-      key.classList.toggle('active', !!pressed);
+    const rawNote = parseInt(controlId.replace('key_', ''), 10);
+    if (!isNaN(rawNote)) {
+      let key = document.getElementById('nk-key-' + rawNote);
+      if (!key) {
+        let mapped = rawNote;
+        while (mapped < 48) mapped += 12;
+        while (mapped > 72) mapped -= 12;
+        key = document.getElementById('nk-key-' + mapped);
+      }
+      if (key) {
+        key.classList.toggle('active', !!pressed);
+      }
     }
     return;
   }

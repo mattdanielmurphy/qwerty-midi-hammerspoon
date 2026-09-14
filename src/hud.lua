@@ -69,12 +69,17 @@ end
 
 local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
-  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%s, %s, %s, %s, %s);",
-    hs.json.encode(controlId),
+  local extraJson = "null"
+  if type(extra) == "table" then
+    local ok, res = pcall(hs.json.encode, extra)
+    if ok and res then extraJson = res end
+  end
+  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%q, %s, %s, %q, %s);",
+    tostring(controlId or ""),
     value and tostring(value) or "null",
     pressed and "true" or "false",
-    hs.json.encode(layer or "base"),
-    extra and hs.json.encode(extra) or "null")
+    tostring(layer or "base"),
+    extraJson)
   safeEvaluateJS(js)
 end
 
@@ -98,7 +103,7 @@ local function setSurfaceView(surface)
     hs.settings.set("qwertyMidi_hudY", newY)
   end
 
-  safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%s);", hs.json.encode(surface)))
+  safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%q);", tostring(surface)))
 end
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)

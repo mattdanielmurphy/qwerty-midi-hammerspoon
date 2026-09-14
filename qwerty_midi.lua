@@ -65,14 +65,14 @@ function _G.toggleMidiMode(newState)
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
-    if nanokey and nanokey.connect then
-      nanokey.connect("nanoKEY Studio")
-    end
     profileLog("Before createMidiWebview")
     local h = hud.createMidiWebview()
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
+    if nanokey and nanokey.connect then
+      pcall(function() nanokey.connect("nanoKEY Studio") end)
+    end
   else
     -- Stop all key repeats before tearing down
     if controls.stopAllControlRepeats then
@@ -1771,10 +1771,15 @@ local onStateChangeCallback = nil
 local function log(msg)
   local line = os.date("%H:%M:%S") .. " [nanoKEY Studio]: " .. tostring(msg)
   print(line)
-  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
+  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
   if f then
     f:write(line .. "\n")
     f:close()
+  end
+  local f2 = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
+  if f2 then
+    f2:write(line .. "\n")
+    f2:close()
   end
 end
 
@@ -1826,12 +1831,55 @@ function nanoKey.setLayer(newLayer)
   end
 end
 
--- Map pad MIDI note numbers (36..43 standard, or 60..67 if octave shifted) to 1..8
+-- Map pad MIDI note numbers (36..43 standard drum notes) to 1..8
 local function noteToPadIndex(note)
-  if note >= 36 and note <= 43 then
+  if note and note >= 36 and note <= 43 then
     return note - 35
-  elseif note >= 60 and note <= 67 then
-    return note - 59
+  end
+  return nil
+end
+
+local KNOB_NAMES = {
+  [1] = "Cutoff",
+  [2] = "Peak",
+  [3] = "Drive",
+  [4] = "Volume",
+  [5] = "Attack",
+  [6] = "Decay",
+  [7] = "Sustain",
+  [8] = "Release"
+}
+
+-- Adaptive knob base offset (defaults to 16, so CC 17 -> Knob 1, CC 24 -> Knob 8)
+local activeKnobOffset = 16
+
+local function resolveKnobIndex(cc)
+  if not cc then return nil end
+  -- Auto-detect hardware offset:
+  if cc == 16 then
+    -- Hardware is using 16..23 (offset +2 from 14..21): 16->1, 17->2, ..., 23->8
+    activeKnobOffset = 15
+    return 1
+  elseif cc >= 25 and cc <= 27 then
+    -- Hardware is using Korg Gadget factory scene (20..27): 20->1, ..., 27->8
+    activeKnobOffset = 19
+    return cc - 19
+  end
+
+  local idx = cc - activeKnobOffset
+  if idx >= 1 and idx <= 8 then
+    return idx
+  end
+
+  -- Fallback heuristics:
+  if cc >= 17 and cc <= 24 then
+    return cc - 16
+  elseif cc >= 16 and cc <= 23 then
+    return cc - 15
+  elseif cc >= 20 and cc <= 27 then
+    return cc - 19
+  elseif cc >= 14 and cc <= 21 then
+    return cc - 13
   end
   return nil
 end
@@ -1842,25 +1890,39 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   local val = metadata.controllerValue
   local note = metadata.noteNumber
   local vel = metadata.velocity
+  local ch = metadata.channel
   local dataHex = metadata.data or ""
   local sysexDataHex = metadata.sysexData or ""
 
+  -- Telemetry logging for all MIDI events
+  if commandType == "controlChange" then
+    log(string.format("MIDI CC: #%s = %s (ch=%s)", tostring(cc), tostring(val), tostring(ch)))
+  elseif commandType == "noteOn" or commandType == "noteOff" then
+    log(string.format("MIDI %s: note=%s vel=%s (ch=%s)", commandType, tostring(note), tostring(vel), tostring(ch)))
+  elseif commandType == "systemExclusive" then
+    log(string.format("MIDI SysEx: len=%d data=%s", #dataHex, dataHex))
+  end
+
   -- 1. Check for Sustain Button (CC #25 default, or CC #54 / CC #64 fallback)
+  -- Sustain button is momentary (127 on press, 0 on release), typically on channel 15
   if commandType == "controlChange" and (cc == 25 or cc == 54 or cc == 64) then
-    if val and val > 0 then
-      sustainHeld = true
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
+    local isMomentary = (val == 0 or val == 127)
+    if (cc == 54 or cc == 64) or (cc == 25 and isMomentary) then
+      if val and val > 0 then
+        sustainHeld = true
+        computeActiveLayer()
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
+        end
+      else
+        sustainHeld = false
+        computeActiveLayer()
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
+        end
       end
-    else
-      sustainHeld = false
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
-      end
+      return true
     end
-    return true
   end
 
   -- 2. Check for Scene Button via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 40 40 7f/00 00 f7)
@@ -1883,18 +1945,27 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 3. Rotary Knobs (CC #14 to CC #21 on Channel 15 or any channel)
-  if commandType == "controlChange" and cc and cc >= 14 and cc <= 21 then
-    local knobIdx = cc - 13
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("knob_" .. knobIdx, val, true, activeLayer, { cc = cc, value = val })
+  -- 3. Rotary Knobs (8 knobs labelled by Korg Gadget defaults: Cutoff, Peak, Drive, Volume, ADSR)
+  if commandType == "controlChange" and cc then
+    local knobIdx = resolveKnobIndex(cc)
+    if knobIdx and knobIdx >= 1 and knobIdx <= 8 then
+      local knobName = KNOB_NAMES[knobIdx] or ("Knob " .. knobIdx)
+      log(string.format("Knob %d [%s] (CC #%d) = %d [offset=%d]", knobIdx, knobName, cc, val or 0, activeKnobOffset))
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("knob_" .. knobIdx, val, true, activeLayer, {
+          cc = cc,
+          value = val,
+          knob = knobIdx,
+          name = knobName
+        })
+      end
+      return false
     end
-    return false
   end
 
-  -- 4. KAOSS Touchpad (Touch X = CC #1 or CC #24; Touch Y = CC #2 or CC #26, or CC #20)
+  -- 4. KAOSS Touchpad (Touch X = CC #1 or CC #28; Touch Y = CC #2 or CC #29)
   if commandType == "controlChange" and cc then
-    if cc == 1 or cc == 24 or cc == 2 or cc == 26 or cc == 20 then
+    if cc == 1 or cc == 28 or cc == 2 or cc == 29 then
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("cc_" .. cc, val, true, activeLayer, { cc = cc, value = val })
       end
@@ -2023,6 +2094,9 @@ function nanoKey.connect(targetName)
     return false
   end
 
+  _G.activeWatchers = _G.activeWatchers or {}
+  _G.activeWatchers.nanoKeyMidiDevice = midiDevice
+
   midiDevice:callback(function(obj, devName, cmdType, desc, metadata)
     nanoKey.handleMidiEvent(cmdType, desc, metadata)
   end)
@@ -2036,6 +2110,8 @@ end
 
 function nanoKey.disconnect()
   if midiDevice then
+    _G.activeWatchers = _G.activeWatchers or {}
+    _G.activeWatchers.nanoKeyMidiDevice = nil
     midiDevice = nil
     log("Disconnected.")
     if hudRef and hudRef.updateNanoKeyControl then
@@ -2219,12 +2295,17 @@ end
 
 local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
-  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%s, %s, %s, %s, %s);",
-    hs.json.encode(controlId),
+  local extraJson = "null"
+  if type(extra) == "table" then
+    local ok, res = pcall(hs.json.encode, extra)
+    if ok and res then extraJson = res end
+  end
+  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%q, %s, %s, %q, %s);",
+    tostring(controlId or ""),
     value and tostring(value) or "null",
     pressed and "true" or "false",
-    hs.json.encode(layer or "base"),
-    extra and hs.json.encode(extra) or "null")
+    tostring(layer or "base"),
+    extraJson)
   safeEvaluateJS(js)
 end
 
@@ -2248,7 +2329,7 @@ local function setSurfaceView(surface)
     hs.settings.set("qwertyMidi_hudY", newY)
   end
 
-  safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%s);", hs.json.encode(surface)))
+  safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%q);", tostring(surface)))
 end
 
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
@@ -4706,6 +4787,13 @@ local HTML_UI_CONTENT = [[
     font-size: 7px;
     font-weight: 600;
     color: #d4a359;
+    line-height: 1;
+  }
+  .nk-knob-cc {
+    font-size: 6.5px;
+    font-weight: 600;
+    color: #7a7062;
+    line-height: 1;
   }
 
   /* Kaoss Touchpad Area */
@@ -5150,43 +5238,51 @@ local HTML_UI_CONTENT = [[
           <div class="nk-knobs-grid">
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K1 (14)</div>
+              <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
               <div class="nk-knob-val" id="nk-knob-val-1">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K2 (15)</div>
+              <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
               <div class="nk-knob-val" id="nk-knob-val-2">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K3 (16)</div>
+              <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
               <div class="nk-knob-val" id="nk-knob-val-3">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K4 (17)</div>
+              <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
               <div class="nk-knob-val" id="nk-knob-val-4">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K5 (18)</div>
+              <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
               <div class="nk-knob-val" id="nk-knob-val-5">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K6 (19)</div>
+              <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
               <div class="nk-knob-val" id="nk-knob-val-6">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K7 (20)</div>
+              <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
               <div class="nk-knob-val" id="nk-knob-val-7">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
             </div>
             <div class="nk-knob-item">
               <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
-              <div class="nk-knob-label">K8 (21)</div>
+              <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
               <div class="nk-knob-val" id="nk-knob-val-8">0</div>
+              <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
             </div>
           </div>
         </div>
@@ -7496,6 +7592,20 @@ window.updateKeyState = function(code, pressed, latched) {
     else delete el.dataset.physicallyPressed;
     el.classList.toggle('pressed', !!pressed || (el.classList.contains('arp-playing')));
     el.classList.toggle('latched-key', !!latched);
+
+    // Also illuminate chiclet key if in nanoKEY view
+    const noteEl = el.querySelector(':scope > .key-note') || el.querySelector('.key-note');
+    if (noteEl && noteEl.textContent) {
+      const noteTxt = noteEl.textContent.trim();
+      const nkKeys = document.querySelectorAll('.nk-key-white, .nk-key-black');
+      for (let i = 0; i < nkKeys.length; i++) {
+        const nameEl = nkKeys[i].querySelector('.nk-key-name');
+        if (nameEl && nameEl.textContent.trim() === noteTxt) {
+          nkKeys[i].classList.toggle('active', !!pressed);
+          break;
+        }
+      }
+    }
   }
 };
 
@@ -7596,6 +7706,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     const knobIdx = controlId.replace('knob_', '');
     const dial = document.getElementById('nk-knob-' + knobIdx);
     const valEl = document.getElementById('nk-knob-val-' + knobIdx);
+    const ccEl = document.getElementById('nk-knob-cc-' + knobIdx);
     if (dial && value !== null && value !== undefined) {
       const angle = -135 + (value / 127) * 270;
       dial.style.transform = 'rotate(' + angle.toFixed(1) + 'deg)';
@@ -7603,18 +7714,21 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     if (valEl && value !== null && value !== undefined) {
       valEl.textContent = value;
     }
+    if (ccEl && extra && extra.cc) {
+      ccEl.textContent = 'CC ' + extra.cc;
+    }
     return;
   }
 
-  // Kaoss Touchpad (cc_1, cc_2, cc_24, cc_26, cc_20)
-  if (controlId === 'cc_1' || controlId === 'cc_24') {
+  // Kaoss Touchpad (Touch X = CC 1 / CC 28; Touch Y = CC 2 / CC 29)
+  if (controlId === 'cc_1' || controlId === 'cc_28') {
     const cur = document.getElementById('nk-touch-cursor');
     const xEl = document.getElementById('nk-touch-x');
     if (cur && value !== null && value !== undefined) cur.style.left = (value / 127 * 100).toFixed(1) + '%';
     if (xEl && value !== null && value !== undefined) xEl.textContent = value;
     return;
   }
-  if (controlId === 'cc_2' || controlId === 'cc_26' || controlId === 'cc_20') {
+  if (controlId === 'cc_2' || controlId === 'cc_29') {
     const cur = document.getElementById('nk-touch-cursor');
     const yEl = document.getElementById('nk-touch-y');
     if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';
@@ -7636,12 +7750,20 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     return;
   }
 
-  // Keyboard Keys (key_48 .. key_72)
+  // Keyboard Keys (key_<note> with automatic octave folding into 48..72)
   if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
-    const note = controlId.replace('key_', '');
-    const key = document.getElementById('nk-key-' + note);
-    if (key) {
-      key.classList.toggle('active', !!pressed);
+    const rawNote = parseInt(controlId.replace('key_', ''), 10);
+    if (!isNaN(rawNote)) {
+      let key = document.getElementById('nk-key-' + rawNote);
+      if (!key) {
+        let mapped = rawNote;
+        while (mapped < 48) mapped += 12;
+        while (mapped > 72) mapped -= 12;
+        key = document.getElementById('nk-key-' + mapped);
+      }
+      if (key) {
+        key.classList.toggle('active', !!pressed);
+      }
     }
     return;
   }
