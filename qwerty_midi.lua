@@ -1833,13 +1833,34 @@ function nanoKey.setLayer(newLayer)
   end
 end
 
--- Map pad MIDI note numbers (36..43 standard drum notes) to 1..8
-local function noteToPadIndex(note)
-  if note and note >= 36 and note <= 43 then
+-- Map pad MIDI note numbers:
+-- Channel 2 (ch = 1): notes 64..71 (Korg nanoKEY Studio default pad mapping)
+-- Channel 10 (ch = 9): notes 36..43 (General MIDI drum kit standard)
+local function noteToPadIndex(note, ch)
+  if not note then return nil end
+  if ch == 1 and note >= 64 and note <= 71 then
+    return note - 63
+  elseif ch == 9 and note >= 36 and note <= 43 then
     return note - 35
   end
   return nil
 end
+
+-- Diatonic chord root note (C Major factory scale) to Pad 1..8
+local CHORD_ROOT_TO_PAD = {
+  [48] = 1, -- C3 -> Pad 1 (I Tonic)
+  [50] = 2, -- D3 -> Pad 2 (ii Supertonic)
+  [52] = 3, -- E3 -> Pad 3 (iii Mediant)
+  [53] = 4, -- F3 -> Pad 4 (IV Subdominant)
+  [55] = 5, -- G3 -> Pad 5 (V Dominant)
+  [57] = 6, -- A3 -> Pad 6 (vi Submediant)
+  [59] = 7, -- B3 -> Pad 7 (vii° Diminished)
+  [60] = 8, -- C4 -> Pad 8 (I Octave)
+}
+
+local recentChordNoteOns = {}
+local chordBurstTimer = nil
+local activeChordPad = nil
 
 local KNOB_NAMES = {
   [1] = "Cutoff",
@@ -1975,8 +1996,8 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 5. Pad Triggers (Channel 1 or notes 36..43, or drum channel 9)
-  local padIdx = noteToPadIndex(note)
+  -- 5. Pad Triggers (Channel 2: notes 64..71 default, or drum channel 10: notes 36..43)
+  local padIdx = noteToPadIndex(note, ch)
   if padIdx then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
@@ -2016,21 +2037,62 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { note = note, velocity = vel })
         end
       end
+      return true
     elseif isUp then
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note })
       end
+      return true
     end
   end
 
-  -- 6. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
+  -- 6. Chord Pad Burst Detection on Channel 1 (ch == 0)
+  -- When the hardware is in Chord Pad mode, hitting a pad emits 3-4 simultaneous notes on ch 0.
+  if ch == 0 and note then
+    if commandType == "noteOn" and vel and vel > 0 then
+      table.insert(recentChordNoteOns, { note = note, vel = vel })
+      if not chordBurstTimer then
+        chordBurstTimer = hs.timer.doAfter(0.005, function()
+          chordBurstTimer = nil
+          if #recentChordNoteOns >= 3 then
+            local minNote = 127
+            for _, n in ipairs(recentChordNoteOns) do
+              if n.note < minNote then minNote = n.note end
+            end
+            local rootInOctave = minNote
+            while rootInOctave < 48 do rootInOctave = rootInOctave + 12 end
+            while rootInOctave > 60 do rootInOctave = rootInOctave - 12 end
+            local chordPadIdx = CHORD_ROOT_TO_PAD[rootInOctave]
+            if chordPadIdx and hudRef and hudRef.updateNanoKeyControl then
+              activeChordPad = chordPadIdx
+              hudRef.updateNanoKeyControl("pad_" .. chordPadIdx, 100, true, activeLayer, { chord = true })
+            end
+          end
+          recentChordNoteOns = {}
+        end)
+      end
+    elseif commandType == "noteOff" or (commandType == "noteOn" and vel == 0) then
+      if activeChordPad then
+        local padToClear = activeChordPad
+        activeChordPad = nil
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("pad_" .. padToClear, 0, false, activeLayer, { chord = false })
+        end
+      end
+    end
+  end
+
+  -- 7. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
   if note and note >= 24 and note <= 108 then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
 
     if isDown then
       -- If Scene is held, keys can also trigger shortcuts
-      if activeLayer == "macro_scene" and note >= 48 and note <= 72 then
+      if activeLayer == "macro_scene" then
+        local macroNote = note
+        while macroNote < 48 do macroNote = macroNote + 12 end
+        while macroNote > 72 do macroNote = macroNote - 12 end
         local keyMacros = {
           [48] = "Preset 1", [49] = "Preset 2", [50] = "Preset 3", [51] = "Preset 4",
           [52] = "Preset 5", [53] = "Preset 6", [54] = "Preset 7", [55] = "Preset 8",
@@ -2040,7 +2102,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           [68] = "Redo", [69] = "Save Project", [70] = "Export Audio", [71] = "Metronome",
           [72] = "Panic All"
         }
-        local mName = keyMacros[note]
+        local mName = keyMacros[macroNote]
         if mName then
           macros.execute(mName)
           if hudRef and hudRef.updateNanoKeyControl then
@@ -2072,7 +2134,7 @@ function nanoKey.handleGuiAction(actionType, data)
     local note = tonumber(data.note)
     local isDown = (data.pressed == true)
     if note and midi then
-      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0)
+      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0, 0)
     end
     if hudRef and hudRef.updateNanoKeyControl and note then
       hudRef.updateNanoKeyControl("key_" .. note, isDown and 100 or 0, isDown, activeLayer, { note = note })
@@ -2098,12 +2160,12 @@ function nanoKey.handleGuiAction(actionType, data)
           if mName then macros.execute(mName) end
         else
           if midi then
-            midi.sendMidiNote("noteOn", 35 + padIdx, 100, 9)
+            midi.sendMidiNote("noteOn", 63 + padIdx, 100, 1)
           end
         end
       else
         if activeLayer == "base" and midi then
-          midi.sendMidiNote("noteOff", 35 + padIdx, 0, 9)
+          midi.sendMidiNote("noteOff", 63 + padIdx, 0, 1)
         end
       end
       if hudRef and hudRef.updateNanoKeyControl then
@@ -5657,34 +5719,34 @@ local HTML_UI_CONTENT = [[
       <!-- KEYBOARD SECTION: 25 Chiclet Keys (15 White, 10 Black) -->
       <div class="nk-keyboard-section">
         <div class="nk-white-keys">
-          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
-          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
-          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
-          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
-          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
-          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
-          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
-          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
-          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
-          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
-          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
-          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
-          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
-          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
-          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
+          <div class="nk-key-white" id="nk-key-36" data-note="36"><span class="nk-key-name">C2</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
+          <div class="nk-key-white" id="nk-key-38" data-note="38"><span class="nk-key-name">D2</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
+          <div class="nk-key-white" id="nk-key-40" data-note="40"><span class="nk-key-name">E2</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
+          <div class="nk-key-white" id="nk-key-41" data-note="41"><span class="nk-key-name">F2</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
+          <div class="nk-key-white" id="nk-key-43" data-note="43"><span class="nk-key-name">G2</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
+          <div class="nk-key-white" id="nk-key-45" data-note="45"><span class="nk-key-name">A2</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
+          <div class="nk-key-white" id="nk-key-47" data-note="47"><span class="nk-key-name">B2</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
+          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
+          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
+          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
+          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
+          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
+          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
+          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
+          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
         </div>
 
         <div class="nk-black-keys">
-          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 6.67%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">PRESET 2</span></div>
-          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 13.33%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">PRESET 4</span></div>
-          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 26.67%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">PRESET 7</span></div>
-          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 33.33%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">BROWSER</span></div>
-          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 40.00%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EDITOR</span></div>
-          <div class="nk-key-black" id="nk-key-61" data-note="61" style="left: 53.33%;"><span class="nk-key-name">C#4</span><span class="nk-key-macro">SCREENSHOT</span></div>
-          <div class="nk-key-black" id="nk-key-63" data-note="63" style="left: 60.00%;"><span class="nk-key-name">D#4</span><span class="nk-key-macro">VOL +</span></div>
-          <div class="nk-key-black" id="nk-key-66" data-note="66" style="left: 73.33%;"><span class="nk-key-name">F#4</span><span class="nk-key-macro">NEXT TRK</span></div>
-          <div class="nk-key-black" id="nk-key-68" data-note="68" style="left: 80.00%;"><span class="nk-key-name">G#4</span><span class="nk-key-macro">REDO</span></div>
-          <div class="nk-key-black" id="nk-key-70" data-note="70" style="left: 86.67%;"><span class="nk-key-name">A#4</span><span class="nk-key-macro">EXPORT</span></div>
+          <div class="nk-key-black" id="nk-key-37" data-note="37" style="left: 6.67%;"><span class="nk-key-name">C#2</span><span class="nk-key-macro">PRESET 2</span></div>
+          <div class="nk-key-black" id="nk-key-39" data-note="39" style="left: 13.33%;"><span class="nk-key-name">D#2</span><span class="nk-key-macro">PRESET 4</span></div>
+          <div class="nk-key-black" id="nk-key-42" data-note="42" style="left: 26.67%;"><span class="nk-key-name">F#2</span><span class="nk-key-macro">PRESET 7</span></div>
+          <div class="nk-key-black" id="nk-key-44" data-note="44" style="left: 33.33%;"><span class="nk-key-name">G#2</span><span class="nk-key-macro">BROWSER</span></div>
+          <div class="nk-key-black" id="nk-key-46" data-note="46" style="left: 40.00%;"><span class="nk-key-name">A#2</span><span class="nk-key-macro">EDITOR</span></div>
+          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 53.33%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">SCREENSHOT</span></div>
+          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 60.00%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">VOL +</span></div>
+          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 73.33%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">NEXT TRK</span></div>
+          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 80.00%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">REDO</span></div>
+          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 86.67%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EXPORT</span></div>
         </div>
       </div>
     </div>
@@ -8044,14 +8106,14 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
       }
 
       let mapped = rawNote;
-      while (mapped < 48) mapped += 12;
-      while (mapped > 72) mapped -= 12;
+      while (mapped < 36) mapped += 12;
+      while (mapped > 60) mapped -= 12;
 
       let isStillActive = false;
       for (const nStr in window._activeNanoKeyNotes) {
         let n = parseInt(nStr, 10);
-        while (n < 48) n += 12;
-        while (n > 72) n -= 12;
+        while (n < 36) n += 12;
+        while (n > 60) n -= 12;
         if (n === mapped) {
           isStillActive = true;
           break;

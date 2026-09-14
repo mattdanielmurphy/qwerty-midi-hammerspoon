@@ -76,13 +76,34 @@ function nanoKey.setLayer(newLayer)
   end
 end
 
--- Map pad MIDI note numbers (36..43 standard drum notes) to 1..8
-local function noteToPadIndex(note)
-  if note and note >= 36 and note <= 43 then
+-- Map pad MIDI note numbers:
+-- Channel 2 (ch = 1): notes 64..71 (Korg nanoKEY Studio default pad mapping)
+-- Channel 10 (ch = 9): notes 36..43 (General MIDI drum kit standard)
+local function noteToPadIndex(note, ch)
+  if not note then return nil end
+  if ch == 1 and note >= 64 and note <= 71 then
+    return note - 63
+  elseif ch == 9 and note >= 36 and note <= 43 then
     return note - 35
   end
   return nil
 end
+
+-- Diatonic chord root note (C Major factory scale) to Pad 1..8
+local CHORD_ROOT_TO_PAD = {
+  [48] = 1, -- C3 -> Pad 1 (I Tonic)
+  [50] = 2, -- D3 -> Pad 2 (ii Supertonic)
+  [52] = 3, -- E3 -> Pad 3 (iii Mediant)
+  [53] = 4, -- F3 -> Pad 4 (IV Subdominant)
+  [55] = 5, -- G3 -> Pad 5 (V Dominant)
+  [57] = 6, -- A3 -> Pad 6 (vi Submediant)
+  [59] = 7, -- B3 -> Pad 7 (vii° Diminished)
+  [60] = 8, -- C4 -> Pad 8 (I Octave)
+}
+
+local recentChordNoteOns = {}
+local chordBurstTimer = nil
+local activeChordPad = nil
 
 local KNOB_NAMES = {
   [1] = "Cutoff",
@@ -218,8 +239,8 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 5. Pad Triggers (Channel 1 or notes 36..43, or drum channel 9)
-  local padIdx = noteToPadIndex(note)
+  -- 5. Pad Triggers (Channel 2: notes 64..71 default, or drum channel 10: notes 36..43)
+  local padIdx = noteToPadIndex(note, ch)
   if padIdx then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
@@ -259,21 +280,62 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { note = note, velocity = vel })
         end
       end
+      return true
     elseif isUp then
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note })
       end
+      return true
     end
   end
 
-  -- 6. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
+  -- 6. Chord Pad Burst Detection on Channel 1 (ch == 0)
+  -- When the hardware is in Chord Pad mode, hitting a pad emits 3-4 simultaneous notes on ch 0.
+  if ch == 0 and note then
+    if commandType == "noteOn" and vel and vel > 0 then
+      table.insert(recentChordNoteOns, { note = note, vel = vel })
+      if not chordBurstTimer then
+        chordBurstTimer = hs.timer.doAfter(0.005, function()
+          chordBurstTimer = nil
+          if #recentChordNoteOns >= 3 then
+            local minNote = 127
+            for _, n in ipairs(recentChordNoteOns) do
+              if n.note < minNote then minNote = n.note end
+            end
+            local rootInOctave = minNote
+            while rootInOctave < 48 do rootInOctave = rootInOctave + 12 end
+            while rootInOctave > 60 do rootInOctave = rootInOctave - 12 end
+            local chordPadIdx = CHORD_ROOT_TO_PAD[rootInOctave]
+            if chordPadIdx and hudRef and hudRef.updateNanoKeyControl then
+              activeChordPad = chordPadIdx
+              hudRef.updateNanoKeyControl("pad_" .. chordPadIdx, 100, true, activeLayer, { chord = true })
+            end
+          end
+          recentChordNoteOns = {}
+        end)
+      end
+    elseif commandType == "noteOff" or (commandType == "noteOn" and vel == 0) then
+      if activeChordPad then
+        local padToClear = activeChordPad
+        activeChordPad = nil
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("pad_" .. padToClear, 0, false, activeLayer, { chord = false })
+        end
+      end
+    end
+  end
+
+  -- 7. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
   if note and note >= 24 and note <= 108 then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
 
     if isDown then
       -- If Scene is held, keys can also trigger shortcuts
-      if activeLayer == "macro_scene" and note >= 48 and note <= 72 then
+      if activeLayer == "macro_scene" then
+        local macroNote = note
+        while macroNote < 48 do macroNote = macroNote + 12 end
+        while macroNote > 72 do macroNote = macroNote - 12 end
         local keyMacros = {
           [48] = "Preset 1", [49] = "Preset 2", [50] = "Preset 3", [51] = "Preset 4",
           [52] = "Preset 5", [53] = "Preset 6", [54] = "Preset 7", [55] = "Preset 8",
@@ -283,7 +345,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           [68] = "Redo", [69] = "Save Project", [70] = "Export Audio", [71] = "Metronome",
           [72] = "Panic All"
         }
-        local mName = keyMacros[note]
+        local mName = keyMacros[macroNote]
         if mName then
           macros.execute(mName)
           if hudRef and hudRef.updateNanoKeyControl then
@@ -315,7 +377,7 @@ function nanoKey.handleGuiAction(actionType, data)
     local note = tonumber(data.note)
     local isDown = (data.pressed == true)
     if note and midi then
-      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0)
+      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0, 0)
     end
     if hudRef and hudRef.updateNanoKeyControl and note then
       hudRef.updateNanoKeyControl("key_" .. note, isDown and 100 or 0, isDown, activeLayer, { note = note })
@@ -341,12 +403,12 @@ function nanoKey.handleGuiAction(actionType, data)
           if mName then macros.execute(mName) end
         else
           if midi then
-            midi.sendMidiNote("noteOn", 35 + padIdx, 100, 9)
+            midi.sendMidiNote("noteOn", 63 + padIdx, 100, 1)
           end
         end
       else
         if activeLayer == "base" and midi then
-          midi.sendMidiNote("noteOff", 35 + padIdx, 0, 9)
+          midi.sendMidiNote("noteOff", 63 + padIdx, 0, 1)
         end
       end
       if hudRef and hudRef.updateNanoKeyControl then
