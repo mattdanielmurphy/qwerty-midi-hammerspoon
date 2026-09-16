@@ -142,9 +142,17 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     deltaY = scaledDelta
 
-    -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
-    if _G.activeWatchers.isHoveringScrollable then
+    -- Allow native webview scrolling when cursor is over settings window or hovering a scrollable HUD pane
+    if _G.activeWatchers.isHoveringSettings or _G.activeWatchers.isHoveringScrollable then
       return false
+    end
+
+    if _G.activeWatchers.settingsWebview and _G.activeWatchers.settingsWebview:isVisible() then
+      local mPos = hs.mouse.absolutePosition()
+      local sf = _G.activeWatchers.settingsWebview:frame()
+      if mPos.x >= sf.x and mPos.x <= (sf.x + sf.w) and mPos.y >= sf.y and mPos.y <= (sf.y + sf.h) then
+        return false
+      end
     end
 
     if deltaY ~= 0 then
@@ -5719,34 +5727,34 @@ local HTML_UI_CONTENT = [[
       <!-- KEYBOARD SECTION: 25 Chiclet Keys (15 White, 10 Black) -->
       <div class="nk-keyboard-section">
         <div class="nk-white-keys">
-          <div class="nk-key-white" id="nk-key-36" data-note="36"><span class="nk-key-name">C2</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
-          <div class="nk-key-white" id="nk-key-38" data-note="38"><span class="nk-key-name">D2</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
-          <div class="nk-key-white" id="nk-key-40" data-note="40"><span class="nk-key-name">E2</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
-          <div class="nk-key-white" id="nk-key-41" data-note="41"><span class="nk-key-name">F2</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
-          <div class="nk-key-white" id="nk-key-43" data-note="43"><span class="nk-key-name">G2</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
-          <div class="nk-key-white" id="nk-key-45" data-note="45"><span class="nk-key-name">A2</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
-          <div class="nk-key-white" id="nk-key-47" data-note="47"><span class="nk-key-name">B2</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
-          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
-          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
-          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
-          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
-          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
-          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
-          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
-          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
+          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
+          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
+          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
+          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
+          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
+          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
+          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
+          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
+          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
+          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
+          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
+          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
+          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
+          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
+          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
         </div>
 
         <div class="nk-black-keys">
-          <div class="nk-key-black" id="nk-key-37" data-note="37" style="left: 6.67%;"><span class="nk-key-name">C#2</span><span class="nk-key-macro">PRESET 2</span></div>
-          <div class="nk-key-black" id="nk-key-39" data-note="39" style="left: 13.33%;"><span class="nk-key-name">D#2</span><span class="nk-key-macro">PRESET 4</span></div>
-          <div class="nk-key-black" id="nk-key-42" data-note="42" style="left: 26.67%;"><span class="nk-key-name">F#2</span><span class="nk-key-macro">PRESET 7</span></div>
-          <div class="nk-key-black" id="nk-key-44" data-note="44" style="left: 33.33%;"><span class="nk-key-name">G#2</span><span class="nk-key-macro">BROWSER</span></div>
-          <div class="nk-key-black" id="nk-key-46" data-note="46" style="left: 40.00%;"><span class="nk-key-name">A#2</span><span class="nk-key-macro">EDITOR</span></div>
-          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 53.33%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">SCREENSHOT</span></div>
-          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 60.00%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">VOL +</span></div>
-          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 73.33%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">NEXT TRK</span></div>
-          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 80.00%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">REDO</span></div>
-          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 86.67%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EXPORT</span></div>
+          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 6.67%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">PRESET 2</span></div>
+          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 13.33%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">PRESET 4</span></div>
+          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 26.67%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">PRESET 7</span></div>
+          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 33.33%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">BROWSER</span></div>
+          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 40.00%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EDITOR</span></div>
+          <div class="nk-key-black" id="nk-key-61" data-note="61" style="left: 53.33%;"><span class="nk-key-name">C#4</span><span class="nk-key-macro">SCREENSHOT</span></div>
+          <div class="nk-key-black" id="nk-key-63" data-note="63" style="left: 60.00%;"><span class="nk-key-name">D#4</span><span class="nk-key-macro">VOL +</span></div>
+          <div class="nk-key-black" id="nk-key-66" data-note="66" style="left: 73.33%;"><span class="nk-key-name">F#4</span><span class="nk-key-macro">NEXT TRK</span></div>
+          <div class="nk-key-black" id="nk-key-68" data-note="68" style="left: 80.00%;"><span class="nk-key-name">G#4</span><span class="nk-key-macro">REDO</span></div>
+          <div class="nk-key-black" id="nk-key-70" data-note="70" style="left: 86.67%;"><span class="nk-key-name">A#4</span><span class="nk-key-macro">EXPORT</span></div>
         </div>
       </div>
     </div>
@@ -8106,14 +8114,14 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
       }
 
       let mapped = rawNote;
-      while (mapped < 36) mapped += 12;
-      while (mapped > 60) mapped -= 12;
+      while (mapped < 48) mapped += 12;
+      while (mapped > 72) mapped -= 12;
 
       let isStillActive = false;
       for (const nStr in window._activeNanoKeyNotes) {
         let n = parseInt(nStr, 10);
-        while (n < 36) n += 12;
-        while (n > 60) n -= 12;
+        while (n < 48) n += 12;
+        while (n > 72) n -= 12;
         if (n === mapped) {
           isStillActive = true;
           break;
@@ -8265,24 +8273,31 @@ local function generateSettingsHTML()
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
 
+    html, body {
+      width: 100%%;
+      height: 100%%;
+      background: transparent !important;
+      overflow: hidden;
+    }
+
     body {
       font-family: Georgia, serif;
-      background: #18140f;
       color: #e2d5c0;
       font-size: 15px;
-      overflow: hidden;
-      border-radius: 16px;
     }
 
     #panel {
+      position: relative;
       background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
       border: 1.5px solid rgba(212, 163, 89, 0.4);
       border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
       padding: 0;
-      height: 100vh;
+      width: 100%%;
+      height: 100%%;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
     /* ── Title bar ── */
@@ -8330,7 +8345,65 @@ local function generateSettingsHTML()
     #scroll-area {
       overflow-y: auto;
       flex: 1;
+      min-height: 0;
       padding: 18px 20px 20px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #scroll-area::-webkit-scrollbar {
+      width: 8px;
+    }
+    #scroll-area::-webkit-scrollbar-track {
+      background: rgba(20, 16, 10, 0.4);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb {
+      background: rgba(212, 163, 89, 0.35);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb:hover {
+      background: rgba(212, 163, 89, 0.65);
+    }
+
+    /* ── Window Resizers ── */
+    #resize-grip {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: nwse-resize;
+      opacity: 0.55;
+      transition: opacity 0.15s;
+      z-index: 999;
+      -webkit-app-region: no-drag;
+      pointer-events: auto;
+    }
+    #resize-grip:hover {
+      opacity: 1;
+    }
+    #resize-edge-r {
+      position: absolute;
+      top: 16px;
+      right: 0;
+      bottom: 16px;
+      width: 6px;
+      cursor: ew-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
+    }
+    #resize-edge-b {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 0;
+      height: 6px;
+      cursor: ns-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
     }
 
     /* ── Section ── */
@@ -8714,6 +8787,15 @@ local function generateSettingsHTML()
     </div>
 
   </div><!-- /scroll-area -->
+  <div id="resize-edge-r"></div>
+  <div id="resize-edge-b"></div>
+  <div id="resize-grip" title="Drag to resize">
+    <svg width="12" height="12" viewBox="0 0 12 12">
+      <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="6" x2="6" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="10" x2="10" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
 </div><!-- /panel -->
 
 <script>
@@ -8722,6 +8804,62 @@ local function generateSettingsHTML()
       window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
     }
   }
+
+  // Hover detection for native scroll passthrough
+  document.addEventListener('mouseenter', () => send('hoverSettings', true));
+  document.addEventListener('mouseleave', () => send('hoverSettings', false));
+
+  // Interactive Window Resizing
+  function setupResizers() {
+    const handleDrag = (startEv, mode) => {
+      startEv.preventDefault();
+      startEv.stopPropagation();
+      const startX = startEv.screenX;
+      const startY = startEv.screenY;
+      const startW = window.innerWidth;
+      const startH = window.innerHeight;
+
+      document.body.style.cursor = mode === 'corner' ? 'nwse-resize' : (mode === 'x' ? 'ew-resize' : 'ns-resize');
+
+      const onMove = (ev) => {
+        let newW = startW;
+        let newH = startH;
+        if (mode === 'corner' || mode === 'x') {
+          newW = Math.max(460, Math.min(1200, startW + (ev.screenX - startX)));
+        }
+        if (mode === 'corner' || mode === 'y') {
+          newH = Math.max(400, Math.min(1100, startH + (ev.screenY - startY)));
+        }
+        send('resizeWindow', { w: Math.round(newW), h: Math.round(newH) });
+      };
+
+      const onUp = () => {
+        document.body.style.cursor = '';
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        send('saveWindowSize', { w: window.innerWidth, h: window.innerHeight });
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    };
+
+    const grip = document.getElementById('resize-grip');
+    if (grip) grip.addEventListener('mousedown', (e) => handleDrag(e, 'corner'));
+    const edgeR = document.getElementById('resize-edge-r');
+    if (edgeR) edgeR.addEventListener('mousedown', (e) => handleDrag(e, 'x'));
+    const edgeB = document.getElementById('resize-edge-b');
+    if (edgeB) edgeB.addEventListener('mousedown', (e) => handleDrag(e, 'y'));
+  }
+  setupResizers();
+
+  window.addEventListener('resize', () => {
+    const canvasWrap = canvas.parentElement;
+    if (canvasWrap) {
+      canvas.width = canvasWrap.clientWidth;
+      drawPhysicsCanvas();
+    }
+  });
   function onSensitivity(v) {
     document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
     send('setSensitivity', parseFloat(v));
@@ -8988,10 +9126,28 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 0.5
       state.scrollInertiaCutoff = math.max(0.1, math.min(2.0, val))
       hs.settings.set("qwertyMidi_scrollInertiaCutoff", val)
+    elseif body.type == "hoverSettings" then
+      _G.activeWatchers.isHoveringSettings = (val == true)
+      return
+    elseif body.type == "resizeWindow" then
+      if _G.activeWatchers.settingsWebview and type(val) == "table" then
+        local curFrame = _G.activeWatchers.settingsWebview:frame()
+        local newW = math.max(460, math.min(1200, tonumber(val.w) or curFrame.w))
+        local newH = math.max(400, math.min(1100, tonumber(val.h) or curFrame.h))
+        _G.activeWatchers.settingsWebview:frame({ x = curFrame.x, y = curFrame.y, w = newW, h = newH })
+      end
+      return
+    elseif body.type == "saveWindowSize" then
+      if type(val) == "table" then
+        hs.settings.set("qwertyMidi_settingsW", tonumber(val.w))
+        hs.settings.set("qwertyMidi_settingsH", tonumber(val.h))
+      end
+      return
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
       end
+      _G.activeWatchers.isHoveringSettings = false
       return
     end
 
@@ -9000,15 +9156,20 @@ local function createSettingsWebview()
     hud.updateWebviewHud()
   end)
 
+  local savedW = hs.settings.get("qwertyMidi_settingsW") or 528
+  local savedH = hs.settings.get("qwertyMidi_settingsH") or 640
+  local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+  local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+
   local screen = hs.screen.mainScreen():frame()
-  local w, h = 528, 612
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
   local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
   wv:windowTitle("QWERTY MIDI Settings")
-  -- Borderless floating panel that sits above the HUD webview
-  wv:windowStyle({ "borderless", "nonactivating" })
+  -- Borderless transparent floating panel with rounded corners and resize capability
+  wv:windowStyle({ "borderless", "resizable", "nonactivating" })
+  wv:transparent(true)
   wv:level(hs.drawing.windowLevels.floating + 1)
   wv:allowTextEntry(true)
   wv:html(generateSettingsHTML())
@@ -9041,11 +9202,20 @@ local function toggleSettingsWindow()
 
   if wv:isVisible() then
     wv:hide()
+    _G.activeWatchers.isHoveringSettings = false
   else
+    local curFrame = wv:frame()
     local screen = hs.screen.mainScreen():frame()
-    local w, h = 528, 612
-    local x = math.floor(screen.x + (screen.w - w) / 2)
-    local y = math.floor(screen.y + (screen.h - h) / 2)
+    local savedW = hs.settings.get("qwertyMidi_settingsW") or curFrame.w or 528
+    local savedH = hs.settings.get("qwertyMidi_settingsH") or curFrame.h or 640
+    local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+    local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+    local x = curFrame.x
+    local y = curFrame.y
+    if x < screen.x or x > screen.x + screen.w - 50 or y < screen.y or y > screen.y + screen.h - 50 then
+      x = math.floor(screen.x + (screen.w - w) / 2)
+      y = math.floor(screen.y + (screen.h - h) / 2)
+    end
     wv:frame({ x = x, y = y, w = w, h = h })
 
     syncStateToWebview()

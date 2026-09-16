@@ -125,9 +125,17 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
 
     deltaY = scaledDelta
 
-    -- Allow native webview scrolling only when cursor is specifically over a scrollable pane in the HUD
-    if _G.activeWatchers.isHoveringScrollable then
+    -- Allow native webview scrolling when cursor is over settings window or hovering a scrollable HUD pane
+    if _G.activeWatchers.isHoveringSettings or _G.activeWatchers.isHoveringScrollable then
       return false
+    end
+
+    if _G.activeWatchers.settingsWebview and _G.activeWatchers.settingsWebview:isVisible() then
+      local mPos = hs.mouse.absolutePosition()
+      local sf = _G.activeWatchers.settingsWebview:frame()
+      if mPos.x >= sf.x and mPos.x <= (sf.x + sf.w) and mPos.y >= sf.y and mPos.y <= (sf.y + sf.h) then
+        return false
+      end
     end
 
     if deltaY ~= 0 then

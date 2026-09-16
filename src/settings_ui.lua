@@ -41,24 +41,31 @@ local function generateSettingsHTML()
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
 
+    html, body {
+      width: 100%%;
+      height: 100%%;
+      background: transparent !important;
+      overflow: hidden;
+    }
+
     body {
       font-family: Georgia, serif;
-      background: #18140f;
       color: #e2d5c0;
       font-size: 15px;
-      overflow: hidden;
-      border-radius: 16px;
     }
 
     #panel {
+      position: relative;
       background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
       border: 1.5px solid rgba(212, 163, 89, 0.4);
       border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
       padding: 0;
-      height: 100vh;
+      width: 100%%;
+      height: 100%%;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
 
     /* ── Title bar ── */
@@ -106,7 +113,65 @@ local function generateSettingsHTML()
     #scroll-area {
       overflow-y: auto;
       flex: 1;
+      min-height: 0;
       padding: 18px 20px 20px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #scroll-area::-webkit-scrollbar {
+      width: 8px;
+    }
+    #scroll-area::-webkit-scrollbar-track {
+      background: rgba(20, 16, 10, 0.4);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb {
+      background: rgba(212, 163, 89, 0.35);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb:hover {
+      background: rgba(212, 163, 89, 0.65);
+    }
+
+    /* ── Window Resizers ── */
+    #resize-grip {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: nwse-resize;
+      opacity: 0.55;
+      transition: opacity 0.15s;
+      z-index: 999;
+      -webkit-app-region: no-drag;
+      pointer-events: auto;
+    }
+    #resize-grip:hover {
+      opacity: 1;
+    }
+    #resize-edge-r {
+      position: absolute;
+      top: 16px;
+      right: 0;
+      bottom: 16px;
+      width: 6px;
+      cursor: ew-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
+    }
+    #resize-edge-b {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 0;
+      height: 6px;
+      cursor: ns-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
     }
 
     /* ── Section ── */
@@ -490,6 +555,15 @@ local function generateSettingsHTML()
     </div>
 
   </div><!-- /scroll-area -->
+  <div id="resize-edge-r"></div>
+  <div id="resize-edge-b"></div>
+  <div id="resize-grip" title="Drag to resize">
+    <svg width="12" height="12" viewBox="0 0 12 12">
+      <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="6" x2="6" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="10" x2="10" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
 </div><!-- /panel -->
 
 <script>
@@ -498,6 +572,62 @@ local function generateSettingsHTML()
       window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
     }
   }
+
+  // Hover detection for native scroll passthrough
+  document.addEventListener('mouseenter', () => send('hoverSettings', true));
+  document.addEventListener('mouseleave', () => send('hoverSettings', false));
+
+  // Interactive Window Resizing
+  function setupResizers() {
+    const handleDrag = (startEv, mode) => {
+      startEv.preventDefault();
+      startEv.stopPropagation();
+      const startX = startEv.screenX;
+      const startY = startEv.screenY;
+      const startW = window.innerWidth;
+      const startH = window.innerHeight;
+
+      document.body.style.cursor = mode === 'corner' ? 'nwse-resize' : (mode === 'x' ? 'ew-resize' : 'ns-resize');
+
+      const onMove = (ev) => {
+        let newW = startW;
+        let newH = startH;
+        if (mode === 'corner' || mode === 'x') {
+          newW = Math.max(460, Math.min(1200, startW + (ev.screenX - startX)));
+        }
+        if (mode === 'corner' || mode === 'y') {
+          newH = Math.max(400, Math.min(1100, startH + (ev.screenY - startY)));
+        }
+        send('resizeWindow', { w: Math.round(newW), h: Math.round(newH) });
+      };
+
+      const onUp = () => {
+        document.body.style.cursor = '';
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        send('saveWindowSize', { w: window.innerWidth, h: window.innerHeight });
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    };
+
+    const grip = document.getElementById('resize-grip');
+    if (grip) grip.addEventListener('mousedown', (e) => handleDrag(e, 'corner'));
+    const edgeR = document.getElementById('resize-edge-r');
+    if (edgeR) edgeR.addEventListener('mousedown', (e) => handleDrag(e, 'x'));
+    const edgeB = document.getElementById('resize-edge-b');
+    if (edgeB) edgeB.addEventListener('mousedown', (e) => handleDrag(e, 'y'));
+  }
+  setupResizers();
+
+  window.addEventListener('resize', () => {
+    const canvasWrap = canvas.parentElement;
+    if (canvasWrap) {
+      canvas.width = canvasWrap.clientWidth;
+      drawPhysicsCanvas();
+    }
+  });
   function onSensitivity(v) {
     document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
     send('setSensitivity', parseFloat(v));
@@ -764,10 +894,28 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 0.5
       state.scrollInertiaCutoff = math.max(0.1, math.min(2.0, val))
       hs.settings.set("qwertyMidi_scrollInertiaCutoff", val)
+    elseif body.type == "hoverSettings" then
+      _G.activeWatchers.isHoveringSettings = (val == true)
+      return
+    elseif body.type == "resizeWindow" then
+      if _G.activeWatchers.settingsWebview and type(val) == "table" then
+        local curFrame = _G.activeWatchers.settingsWebview:frame()
+        local newW = math.max(460, math.min(1200, tonumber(val.w) or curFrame.w))
+        local newH = math.max(400, math.min(1100, tonumber(val.h) or curFrame.h))
+        _G.activeWatchers.settingsWebview:frame({ x = curFrame.x, y = curFrame.y, w = newW, h = newH })
+      end
+      return
+    elseif body.type == "saveWindowSize" then
+      if type(val) == "table" then
+        hs.settings.set("qwertyMidi_settingsW", tonumber(val.w))
+        hs.settings.set("qwertyMidi_settingsH", tonumber(val.h))
+      end
+      return
     elseif body.type == "close" then
       if _G.activeWatchers.settingsWebview then
         _G.activeWatchers.settingsWebview:hide()
       end
+      _G.activeWatchers.isHoveringSettings = false
       return
     end
 
@@ -776,15 +924,20 @@ local function createSettingsWebview()
     hud.updateWebviewHud()
   end)
 
+  local savedW = hs.settings.get("qwertyMidi_settingsW") or 528
+  local savedH = hs.settings.get("qwertyMidi_settingsH") or 640
+  local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+  local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+
   local screen = hs.screen.mainScreen():frame()
-  local w, h = 528, 612
   local x = math.floor(screen.x + (screen.w - w) / 2)
   local y = math.floor(screen.y + (screen.h - h) / 2)
 
   local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
   wv:windowTitle("QWERTY MIDI Settings")
-  -- Borderless floating panel that sits above the HUD webview
-  wv:windowStyle({ "borderless", "nonactivating" })
+  -- Borderless transparent floating panel with rounded corners and resize capability
+  wv:windowStyle({ "borderless", "resizable", "nonactivating" })
+  wv:transparent(true)
   wv:level(hs.drawing.windowLevels.floating + 1)
   wv:allowTextEntry(true)
   wv:html(generateSettingsHTML())
@@ -817,11 +970,20 @@ local function toggleSettingsWindow()
 
   if wv:isVisible() then
     wv:hide()
+    _G.activeWatchers.isHoveringSettings = false
   else
+    local curFrame = wv:frame()
     local screen = hs.screen.mainScreen():frame()
-    local w, h = 528, 612
-    local x = math.floor(screen.x + (screen.w - w) / 2)
-    local y = math.floor(screen.y + (screen.h - h) / 2)
+    local savedW = hs.settings.get("qwertyMidi_settingsW") or curFrame.w or 528
+    local savedH = hs.settings.get("qwertyMidi_settingsH") or curFrame.h or 640
+    local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+    local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+    local x = curFrame.x
+    local y = curFrame.y
+    if x < screen.x or x > screen.x + screen.w - 50 or y < screen.y or y > screen.y + screen.h - 50 then
+      x = math.floor(screen.x + (screen.w - w) / 2)
+      y = math.floor(screen.y + (screen.h - h) / 2)
+    end
     wv:frame({ x = x, y = y, w = w, h = h })
 
     syncStateToWebview()
