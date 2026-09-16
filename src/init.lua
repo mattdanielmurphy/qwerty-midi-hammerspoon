@@ -314,6 +314,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
       _G.activeWatchers.midiScrollTap:start()
     end
+
+    if nanokey and nanokey.checkConnection then
+      pcall(function() nanokey.checkConnection() end)
+    end
     
     hud.pingWebview()
     local hb = hud.getLastHeartbeat()

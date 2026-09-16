@@ -47,6 +47,7 @@ local pendingActiveArpPitch = nil
 local hudUpdateScheduled = false
 local lastFrameScale = nil
 local _savedNormalHeight = nil
+local updateWebviewHud = nil
 
 state.activeSurface = state.activeSurface or hs.settings.get("qwertyMidi_activeSurface") or "qwerty"
 
@@ -83,6 +84,41 @@ local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
   safeEvaluateJS(js)
 end
 
+local function isNanokeyConnected()
+  if state.nanokeyConnected ~= nil then
+    return state.nanokeyConnected == true
+  end
+  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.isConnected then
+    return _G.activeWatchers.nanokey.isConnected() == true
+  end
+  return false
+end
+
+local function getDesiredBaseHeight()
+  return isNanokeyConnected() and 600 or 280
+end
+
+local function updateConnectionStatus(connected)
+  state.nanokeyConnected = (connected == true)
+  if _G.activeWatchers.midiWebview then
+    local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+    local NOTIF_BAND = math.floor(50 * effectiveScale)
+    local baseH = (connected == true) and 600 or 280
+    local targetH = math.floor(baseH * effectiveScale) + NOTIF_BAND
+    local curFrame = _G.activeWatchers.midiWebview:frame()
+    if curFrame.h ~= targetH then
+      local diffH = targetH - curFrame.h
+      local screen = hs.screen.mainScreen():frame()
+      local newY = math.max(screen.y, math.min(screen.y + screen.h - targetH, curFrame.y - diffH))
+      _G.activeWatchers.midiWebview:frame({ x = curFrame.x, y = newY, w = curFrame.w, h = targetH })
+      _G.activeWatchers.hudY = newY
+      hs.settings.set("qwertyMidi_hudY", newY)
+    end
+    safeEvaluateJS(string.format("if (window.setNanokeyConnected) window.setNanokeyConnected(%s);", connected and "true" or "false"))
+  end
+  updateWebviewHud()
+end
+
 local function setSurfaceView(surface)
   surface = surface or "qwerty"
   state.activeSurface = surface
@@ -93,7 +129,8 @@ local function setSurfaceView(surface)
     local curFrame = wv:frame()
     local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
     local NOTIF_BAND = math.floor(50 * effectiveScale)
-    local targetH = math.floor(((surface == "nanokey") and 380 or 280) * effectiveScale) + NOTIF_BAND
+    local baseH = getDesiredBaseHeight()
+    local targetH = math.floor(baseH * effectiveScale) + NOTIF_BAND
     
     local diffH = targetH - curFrame.h
     local screen = hs.screen.mainScreen():frame()
@@ -110,29 +147,25 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local baseW = 980
-  local baseH = (state.activeSurface == "nanokey") and 380 or 280
+  local baseH = getDesiredBaseHeight()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale) + NOTIF_BAND
 
-  if lastFrameScale ~= effectiveScale then
+  local curFrame = _G.activeWatchers.midiWebview:frame()
+  if curFrame.w ~= newW or curFrame.h ~= newH then
+    local screen = hs.screen.mainScreen():frame()
+    local cx = curFrame.x + (curFrame.w / 2)
+    local diffH = newH - curFrame.h
+    local nx = math.max(screen.x, math.min(screen.x + screen.w - newW, math.floor(cx - (newW / 2))))
+    local ny = math.max(screen.y, math.min(screen.y + screen.h - newH, curFrame.y - diffH))
+    _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+    _G.activeWatchers.hudX = nx
+    _G.activeWatchers.hudY = ny
+    hs.settings.set("qwertyMidi_hudX", nx)
+    hs.settings.set("qwertyMidi_hudY", ny)
     lastFrameScale = effectiveScale
-    local curFrame = _G.activeWatchers.midiWebview:frame()
-    if curFrame.w ~= newW or curFrame.h ~= newH then
-      local screen = hs.screen.mainScreen():frame()
-      local cx = curFrame.x + (curFrame.w / 2)
-      local cy = curFrame.y + (curFrame.h / 2)
-      local nx = math.floor(cx - (newW / 2))
-      local ny = math.floor(cy - (newH / 2))
-      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
-      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
-      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
-      _G.activeWatchers.hudX = nx
-      _G.activeWatchers.hudY = ny
-      hs.settings.set("qwertyMidi_hudX", nx)
-      hs.settings.set("qwertyMidi_hudY", ny)
-    end
   end
 
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
@@ -363,6 +396,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    nanokeyConnected = isNanokeyConnected(),
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
@@ -444,7 +478,7 @@ end
 local lastFullRenderTime = 0
 local renderScheduled = false
 
-local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
+updateWebviewHud = function(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
   if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
 
@@ -494,7 +528,7 @@ local function createMidiWebview()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local width = math.floor(980 * effectiveScale)
-  local baseH = (state.activeSurface == "nanokey") and 380 or 280
+  local baseH = getDesiredBaseHeight()
   local height = math.floor(baseH * effectiveScale) + NOTIF_BAND
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
@@ -1080,5 +1114,8 @@ return {
   getLastLatencyMs = function() return lastLatencyMs end,
   dumpMidiLogs = dumpMidiLogs,
   setSurfaceView = setSurfaceView,
-  updateNanoKeyControl = updateNanoKeyControl
+  updateNanoKeyControl = updateNanoKeyControl,
+  isNanokeyConnected = isNanokeyConnected,
+  getDesiredBaseHeight = getDesiredBaseHeight,
+  updateConnectionStatus = updateConnectionStatus
 }

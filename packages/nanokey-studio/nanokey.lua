@@ -450,40 +450,35 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
         local bpm = st.arpBpm or 120.0
         quantizer.queueNoteOn("nk_key_" .. note, { note }, vel, ch, bpm, quantMode, function(pitches, v, c)
-          if midi then
-            midi.sendMidiNote("noteOn", pitches[1], v, c)
-          end
+          -- Note: The nanoKEY hardware keys transmit Note On/Off directly to CoreMIDI/DAW.
+          -- We do NOT call midi.sendMidiNote here to prevent duplicate notes.
           if hudRef and hudRef.updateNanoKeyControl then
             hudRef.updateNanoKeyControl("key_" .. pitches[1], v, true, activeLayer, { note = pitches[1], velocity = v })
           end
         end)
-        return true -- Intercept hardware note to fire quantized on beat
       else
         if hudRef and hudRef.updateNanoKeyControl then
           hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
         end
-        return false -- Native hardware pass-through
       end
+      return false
     elseif isUp then
       local st = config and config.state or {}
       local quantMode = st.inputQuantizeMode or "Off"
 
       if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
         quantizer.queueNoteOff("nk_key_" .. note, function(pitches, c)
-          if midi then
-            midi.sendMidiNote("noteOff", pitches[1], 0, c)
-          end
+          -- Note: Hardware sends Note Off directly to CoreMIDI/DAW.
           if hudRef and hudRef.updateNanoKeyControl then
             hudRef.updateNanoKeyControl("key_" .. pitches[1], 0, false, activeLayer, { note = pitches[1] })
           end
         end)
-        return true
       else
         if hudRef and hudRef.updateNanoKeyControl then
           hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
         end
-        return false
       end
+      return false
     end
   end
 
@@ -685,6 +680,9 @@ function nanoKey.connect(targetName)
   if hudRef and hudRef.updateNanoKeyControl then
     hudRef.updateNanoKeyControl("connection", 1, true, activeLayer, { deviceName = foundName })
   end
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(true)
+  end
   return true
 end
 
@@ -698,11 +696,31 @@ function nanoKey.disconnect()
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("connection", 0, false, activeLayer, { deviceName = nil })
     end
+    if hudRef and hudRef.updateConnectionStatus then
+      hudRef.updateConnectionStatus(false)
+    end
   end
 end
 
 function nanoKey.isConnected()
   return midiDevice ~= nil
+end
+
+function nanoKey.checkConnection()
+  local devices = hs.midi.devices()
+  local found = false
+  for _, name in ipairs(devices) do
+    if string.find(string.lower(name), "nanokey") then
+      found = true
+      break
+    end
+  end
+  if found and not nanoKey.isConnected() then
+    nanoKey.connect()
+  elseif not found and nanoKey.isConnected() then
+    nanoKey.disconnect()
+  end
+  return nanoKey.isConnected()
 end
 
 function nanoKey.enableNativeMode()

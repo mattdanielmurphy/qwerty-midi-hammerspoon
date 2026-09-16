@@ -331,6 +331,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
       _G.activeWatchers.midiScrollTap:start()
     end
+
+    if nanokey and nanokey.checkConnection then
+      pcall(function() nanokey.checkConnection() end)
+    end
     
     hud.pingWebview()
     local hb = hud.getLastHeartbeat()
@@ -2544,40 +2548,35 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
         local bpm = st.arpBpm or 120.0
         quantizer.queueNoteOn("nk_key_" .. note, { note }, vel, ch, bpm, quantMode, function(pitches, v, c)
-          if midi then
-            midi.sendMidiNote("noteOn", pitches[1], v, c)
-          end
+          -- Note: The nanoKEY hardware keys transmit Note On/Off directly to CoreMIDI/DAW.
+          -- We do NOT call midi.sendMidiNote here to prevent duplicate notes.
           if hudRef and hudRef.updateNanoKeyControl then
             hudRef.updateNanoKeyControl("key_" .. pitches[1], v, true, activeLayer, { note = pitches[1], velocity = v })
           end
         end)
-        return true -- Intercept hardware note to fire quantized on beat
       else
         if hudRef and hudRef.updateNanoKeyControl then
           hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
         end
-        return false -- Native hardware pass-through
       end
+      return false
     elseif isUp then
       local st = config and config.state or {}
       local quantMode = st.inputQuantizeMode or "Off"
 
       if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
         quantizer.queueNoteOff("nk_key_" .. note, function(pitches, c)
-          if midi then
-            midi.sendMidiNote("noteOff", pitches[1], 0, c)
-          end
+          -- Note: Hardware sends Note Off directly to CoreMIDI/DAW.
           if hudRef and hudRef.updateNanoKeyControl then
             hudRef.updateNanoKeyControl("key_" .. pitches[1], 0, false, activeLayer, { note = pitches[1] })
           end
         end)
-        return true
       else
         if hudRef and hudRef.updateNanoKeyControl then
           hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
         end
-        return false
       end
+      return false
     end
   end
 
@@ -2779,6 +2778,9 @@ function nanoKey.connect(targetName)
   if hudRef and hudRef.updateNanoKeyControl then
     hudRef.updateNanoKeyControl("connection", 1, true, activeLayer, { deviceName = foundName })
   end
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(true)
+  end
   return true
 end
 
@@ -2792,11 +2794,31 @@ function nanoKey.disconnect()
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("connection", 0, false, activeLayer, { deviceName = nil })
     end
+    if hudRef and hudRef.updateConnectionStatus then
+      hudRef.updateConnectionStatus(false)
+    end
   end
 end
 
 function nanoKey.isConnected()
   return midiDevice ~= nil
+end
+
+function nanoKey.checkConnection()
+  local devices = hs.midi.devices()
+  local found = false
+  for _, name in ipairs(devices) do
+    if string.find(string.lower(name), "nanokey") then
+      found = true
+      break
+    end
+  end
+  if found and not nanoKey.isConnected() then
+    nanoKey.connect()
+  elseif not found and nanoKey.isConnected() then
+    nanoKey.disconnect()
+  end
+  return nanoKey.isConnected()
 end
 
 function nanoKey.enableNativeMode()
@@ -2977,6 +2999,7 @@ local pendingActiveArpPitch = nil
 local hudUpdateScheduled = false
 local lastFrameScale = nil
 local _savedNormalHeight = nil
+local updateWebviewHud = nil
 
 state.activeSurface = state.activeSurface or hs.settings.get("qwertyMidi_activeSurface") or "qwerty"
 
@@ -3013,6 +3036,41 @@ local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
   safeEvaluateJS(js)
 end
 
+local function isNanokeyConnected()
+  if state.nanokeyConnected ~= nil then
+    return state.nanokeyConnected == true
+  end
+  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.isConnected then
+    return _G.activeWatchers.nanokey.isConnected() == true
+  end
+  return false
+end
+
+local function getDesiredBaseHeight()
+  return isNanokeyConnected() and 600 or 280
+end
+
+local function updateConnectionStatus(connected)
+  state.nanokeyConnected = (connected == true)
+  if _G.activeWatchers.midiWebview then
+    local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
+    local NOTIF_BAND = math.floor(50 * effectiveScale)
+    local baseH = (connected == true) and 600 or 280
+    local targetH = math.floor(baseH * effectiveScale) + NOTIF_BAND
+    local curFrame = _G.activeWatchers.midiWebview:frame()
+    if curFrame.h ~= targetH then
+      local diffH = targetH - curFrame.h
+      local screen = hs.screen.mainScreen():frame()
+      local newY = math.max(screen.y, math.min(screen.y + screen.h - targetH, curFrame.y - diffH))
+      _G.activeWatchers.midiWebview:frame({ x = curFrame.x, y = newY, w = curFrame.w, h = targetH })
+      _G.activeWatchers.hudY = newY
+      hs.settings.set("qwertyMidi_hudY", newY)
+    end
+    safeEvaluateJS(string.format("if (window.setNanokeyConnected) window.setNanokeyConnected(%s);", connected and "true" or "false"))
+  end
+  updateWebviewHud()
+end
+
 local function setSurfaceView(surface)
   surface = surface or "qwerty"
   state.activeSurface = surface
@@ -3023,7 +3081,8 @@ local function setSurfaceView(surface)
     local curFrame = wv:frame()
     local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
     local NOTIF_BAND = math.floor(50 * effectiveScale)
-    local targetH = math.floor(((surface == "nanokey") and 380 or 280) * effectiveScale) + NOTIF_BAND
+    local baseH = getDesiredBaseHeight()
+    local targetH = math.floor(baseH * effectiveScale) + NOTIF_BAND
     
     local diffH = targetH - curFrame.h
     local screen = hs.screen.mainScreen():frame()
@@ -3040,29 +3099,25 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local baseW = 980
-  local baseH = (state.activeSurface == "nanokey") and 380 or 280
+  local baseH = getDesiredBaseHeight()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local newW = math.floor(baseW * effectiveScale)
   local newH = math.floor(baseH * effectiveScale) + NOTIF_BAND
 
-  if lastFrameScale ~= effectiveScale then
+  local curFrame = _G.activeWatchers.midiWebview:frame()
+  if curFrame.w ~= newW or curFrame.h ~= newH then
+    local screen = hs.screen.mainScreen():frame()
+    local cx = curFrame.x + (curFrame.w / 2)
+    local diffH = newH - curFrame.h
+    local nx = math.max(screen.x, math.min(screen.x + screen.w - newW, math.floor(cx - (newW / 2))))
+    local ny = math.max(screen.y, math.min(screen.y + screen.h - newH, curFrame.y - diffH))
+    _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
+    _G.activeWatchers.hudX = nx
+    _G.activeWatchers.hudY = ny
+    hs.settings.set("qwertyMidi_hudX", nx)
+    hs.settings.set("qwertyMidi_hudY", ny)
     lastFrameScale = effectiveScale
-    local curFrame = _G.activeWatchers.midiWebview:frame()
-    if curFrame.w ~= newW or curFrame.h ~= newH then
-      local screen = hs.screen.mainScreen():frame()
-      local cx = curFrame.x + (curFrame.w / 2)
-      local cy = curFrame.y + (curFrame.h / 2)
-      local nx = math.floor(cx - (newW / 2))
-      local ny = math.floor(cy - (newH / 2))
-      nx = math.max(screen.x, math.min(screen.x + screen.w - newW, nx))
-      ny = math.max(screen.y, math.min(screen.y + screen.h - newH, ny))
-      _G.activeWatchers.midiWebview:frame({ x = nx, y = ny, w = newW, h = newH })
-      _G.activeWatchers.hudX = nx
-      _G.activeWatchers.hudY = ny
-      hs.settings.set("qwertyMidi_hudX", nx)
-      hs.settings.set("qwertyMidi_hudY", ny)
-    end
   end
 
   hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
@@ -3293,6 +3348,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   local payload = {
+    nanokeyConnected = isNanokeyConnected(),
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
@@ -3374,7 +3430,7 @@ end
 local lastFullRenderTime = 0
 local renderScheduled = false
 
-local function updateWebviewHud(spotlightInfo, activeArpPitch, forceImmediate)
+updateWebviewHud = function(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
   if activeArpPitch ~= nil then pendingActiveArpPitch = activeArpPitch end
 
@@ -3424,7 +3480,7 @@ local function createMidiWebview()
   local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
   local NOTIF_BAND = math.floor(50 * effectiveScale)
   local width = math.floor(980 * effectiveScale)
-  local baseH = (state.activeSurface == "nanokey") and 380 or 280
+  local baseH = getDesiredBaseHeight()
   local height = math.floor(baseH * effectiveScale) + NOTIF_BAND
   local savedX = hs.settings.get("qwertyMidi_hudX")
   local savedY = hs.settings.get("qwertyMidi_hudY")
@@ -4010,7 +4066,10 @@ return {
   getLastLatencyMs = function() return lastLatencyMs end,
   dumpMidiLogs = dumpMidiLogs,
   setSurfaceView = setSurfaceView,
-  updateNanoKeyControl = updateNanoKeyControl
+  updateNanoKeyControl = updateNanoKeyControl,
+  isNanokeyConnected = isNanokeyConnected,
+  getDesiredBaseHeight = getDesiredBaseHeight,
+  updateConnectionStatus = updateConnectionStatus
 }
 
 end
@@ -4624,7 +4683,7 @@ local HTML_UI_CONTENT = [[
     display: flex;
     flex-direction: column;
     gap: 6px;
-    flex: 1;
+    flex-shrink: 0;
   }
 
   .keyboard-row {
@@ -5463,13 +5522,13 @@ local HTML_UI_CONTENT = [[
   }
 
   /* ── nanoKEY Studio Hardware Silhouette ── */
-  #hud-container.surface-nanokey {
-    height: 380px !important;
+  #hud-container.nanokey-connected {
+    height: 600px !important;
   }
   .nanokey-view {
     width: 100%;
-    flex: 1;
-    min-height: 0;
+    height: 310px;
+    min-height: 310px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -5481,6 +5540,8 @@ local HTML_UI_CONTENT = [[
     position: relative;
     user-select: none;
     box-sizing: border-box;
+    flex-shrink: 0;
+    margin-top: 8px;
   }
 
   /* Top Section: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) */
@@ -6124,9 +6185,9 @@ local HTML_UI_CONTENT = [[
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
-      <div class="surface-switcher" id="surface-switcher" title="Toggle Active Playing Surface">
-        <button class="surface-btn active" id="btn-surface-qwerty" onclick="setSurface('qwerty')">💻 QWERTY</button>
-        <button class="surface-btn" id="btn-surface-nanokey" onclick="setSurface('nanokey')">🎹 nanoKEY</button>
+      <div id="nanokey-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #4ade80; border-color: rgba(74, 222, 128, 0.4);" title="Korg nanoKEY Studio Connected">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.8); display: inline-block;"></span>
+        <span>🎹 nanoKEY</span>
       </div>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
@@ -8278,8 +8339,8 @@ local HTML_UI_CONTENT = [[
     try {
       if (!data) return;
 
-      if (data.activeSurface && window.currentSurface !== data.activeSurface) {
-        if (typeof setSurface === 'function') setSurface(data.activeSurface, false);
+      if (data.nanokeyConnected !== undefined) {
+        if (typeof setNanokeyConnected === 'function') setNanokeyConnected(data.nanokeyConnected);
       }
 
       renderCount++;
@@ -8706,42 +8767,47 @@ window.updateKeyState = function(code, pressed, latched) {
   }
 };
 
-/* ── Surface Switching & nanoKEY Hardware Telemetry ── */
-window.currentSurface = 'qwerty';
+/* ── Hardware Connection & Dynamic Surface Stacking ── */
+window.nanokeyConnected = false;
 
-window.setSurface = function(surface, notifyHost) {
-  surface = surface || 'qwerty';
-  window.currentSurface = surface;
+window.setNanokeyConnected = function(connected) {
+  window.nanokeyConnected = !!connected;
 
-  const btnQwerty = document.getElementById('btn-surface-qwerty');
-  const btnNanokey = document.getElementById('btn-surface-nanokey');
   const perfView = document.getElementById('performance-view');
   const nanoView = document.getElementById('nanokey-view');
   const hudContainer = document.getElementById('hud-container');
+  const badge = document.getElementById('nanokey-badge');
 
-  if (surface === 'nanokey') {
-    if (btnQwerty) btnQwerty.classList.remove('active');
-    if (btnNanokey) btnNanokey.classList.add('active');
-    if (perfView) perfView.style.display = 'none';
-    if (nanoView) nanoView.style.display = 'flex';
-    if (hudContainer) hudContainer.classList.add('surface-nanokey');
-  } else {
-    if (btnQwerty) btnQwerty.classList.add('active');
-    if (btnNanokey) btnNanokey.classList.remove('active');
-    if (perfView) perfView.style.display = 'flex';
-    if (nanoView) nanoView.style.display = 'none';
-    if (hudContainer) hudContainer.classList.remove('surface-nanokey');
+  if (perfView) {
+    perfView.style.display = 'flex';
   }
 
-  if (notifyHost !== false) {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'switchSurface', surface: surface });
+  if (nanoView) {
+    nanoView.style.display = connected ? 'flex' : 'none';
+  }
+
+  if (hudContainer) {
+    if (connected) {
+      hudContainer.classList.add('nanokey-connected');
+    } else {
+      hudContainer.classList.remove('nanokey-connected');
     }
   }
+
+  if (badge) {
+    badge.style.display = connected ? 'inline-flex' : 'none';
+  }
+
+  const dot = document.getElementById('nk-status-dot');
+  if (dot) dot.classList.toggle('connected', !!connected);
+};
+
+window.setSurface = function(surface, notifyHost) {
+  // Compatibility shim: QWERTY and nanoKEY are now stacked simultaneously when connected
 };
 
 window.onSurfaceChanged = function(surface) {
-  window.setSurface(surface, false);
+  // Compatibility shim
 };
 
 window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
@@ -8750,8 +8816,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
   if (!nkView) return;
 
   if (controlId === 'connection') {
-    const dot = document.getElementById('nk-status-dot');
-    if (dot) dot.classList.toggle('connected', !!pressed);
+    window.setNanokeyConnected(!!pressed);
     return;
   }
 

@@ -547,7 +547,7 @@ local HTML_UI_CONTENT = [[
     display: flex;
     flex-direction: column;
     gap: 6px;
-    flex: 1;
+    flex-shrink: 0;
   }
 
   .keyboard-row {
@@ -1386,13 +1386,13 @@ local HTML_UI_CONTENT = [[
   }
 
   /* ── nanoKEY Studio Hardware Silhouette ── */
-  #hud-container.surface-nanokey {
-    height: 380px !important;
+  #hud-container.nanokey-connected {
+    height: 600px !important;
   }
   .nanokey-view {
     width: 100%;
-    flex: 1;
-    min-height: 0;
+    height: 310px;
+    min-height: 310px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -1404,6 +1404,8 @@ local HTML_UI_CONTENT = [[
     position: relative;
     user-select: none;
     box-sizing: border-box;
+    flex-shrink: 0;
+    margin-top: 8px;
   }
 
   /* Top Section: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) */
@@ -2047,9 +2049,9 @@ local HTML_UI_CONTENT = [[
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
-      <div class="surface-switcher" id="surface-switcher" title="Toggle Active Playing Surface">
-        <button class="surface-btn active" id="btn-surface-qwerty" onclick="setSurface('qwerty')">💻 QWERTY</button>
-        <button class="surface-btn" id="btn-surface-nanokey" onclick="setSurface('nanokey')">🎹 nanoKEY</button>
+      <div id="nanokey-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #4ade80; border-color: rgba(74, 222, 128, 0.4);" title="Korg nanoKEY Studio Connected">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.8); display: inline-block;"></span>
+        <span>🎹 nanoKEY</span>
       </div>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
@@ -4201,8 +4203,8 @@ local HTML_UI_CONTENT = [[
     try {
       if (!data) return;
 
-      if (data.activeSurface && window.currentSurface !== data.activeSurface) {
-        if (typeof setSurface === 'function') setSurface(data.activeSurface, false);
+      if (data.nanokeyConnected !== undefined) {
+        if (typeof setNanokeyConnected === 'function') setNanokeyConnected(data.nanokeyConnected);
       }
 
       renderCount++;
@@ -4629,42 +4631,47 @@ window.updateKeyState = function(code, pressed, latched) {
   }
 };
 
-/* ── Surface Switching & nanoKEY Hardware Telemetry ── */
-window.currentSurface = 'qwerty';
+/* ── Hardware Connection & Dynamic Surface Stacking ── */
+window.nanokeyConnected = false;
 
-window.setSurface = function(surface, notifyHost) {
-  surface = surface || 'qwerty';
-  window.currentSurface = surface;
+window.setNanokeyConnected = function(connected) {
+  window.nanokeyConnected = !!connected;
 
-  const btnQwerty = document.getElementById('btn-surface-qwerty');
-  const btnNanokey = document.getElementById('btn-surface-nanokey');
   const perfView = document.getElementById('performance-view');
   const nanoView = document.getElementById('nanokey-view');
   const hudContainer = document.getElementById('hud-container');
+  const badge = document.getElementById('nanokey-badge');
 
-  if (surface === 'nanokey') {
-    if (btnQwerty) btnQwerty.classList.remove('active');
-    if (btnNanokey) btnNanokey.classList.add('active');
-    if (perfView) perfView.style.display = 'none';
-    if (nanoView) nanoView.style.display = 'flex';
-    if (hudContainer) hudContainer.classList.add('surface-nanokey');
-  } else {
-    if (btnQwerty) btnQwerty.classList.add('active');
-    if (btnNanokey) btnNanokey.classList.remove('active');
-    if (perfView) perfView.style.display = 'flex';
-    if (nanoView) nanoView.style.display = 'none';
-    if (hudContainer) hudContainer.classList.remove('surface-nanokey');
+  if (perfView) {
+    perfView.style.display = 'flex';
   }
 
-  if (notifyHost !== false) {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-      window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'switchSurface', surface: surface });
+  if (nanoView) {
+    nanoView.style.display = connected ? 'flex' : 'none';
+  }
+
+  if (hudContainer) {
+    if (connected) {
+      hudContainer.classList.add('nanokey-connected');
+    } else {
+      hudContainer.classList.remove('nanokey-connected');
     }
   }
+
+  if (badge) {
+    badge.style.display = connected ? 'inline-flex' : 'none';
+  }
+
+  const dot = document.getElementById('nk-status-dot');
+  if (dot) dot.classList.toggle('connected', !!connected);
+};
+
+window.setSurface = function(surface, notifyHost) {
+  // Compatibility shim: QWERTY and nanoKEY are now stacked simultaneously when connected
 };
 
 window.onSurfaceChanged = function(surface) {
-  window.setSurface(surface, false);
+  // Compatibility shim
 };
 
 window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
@@ -4673,8 +4680,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
   if (!nkView) return;
 
   if (controlId === 'connection') {
-    const dot = document.getElementById('nk-status-dot');
-    if (dot) dot.classList.toggle('connected', !!pressed);
+    window.setNanokeyConnected(!!pressed);
     return;
   }
 

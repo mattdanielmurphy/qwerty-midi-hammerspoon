@@ -11,6 +11,8 @@ return {
   probe = probe,
   connect = nanokey.connect,
   disconnect = nanokey.disconnect,
+  isConnected = nanokey.isConnected,
+  checkConnection = nanokey.checkConnection,
   setHud = nanokey.setHud,
   getLayer = nanokey.getLayer,
   setLayer = nanokey.setLayer
