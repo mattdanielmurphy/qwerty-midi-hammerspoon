@@ -1613,6 +1613,57 @@ local function getDiatonicPadChord(padIdx, state)
   }
 end
 
+--- Get scale guide information for a range of MIDI pitches (default 48..72 for nanoKEY Studio)
+-- @param root number 0..11
+-- @param scaleIdx number 1..9
+-- @param minPitch number (default 48)
+-- @param maxPitch number (default 72)
+-- @return table { pitches = { [pitch] = { inScale = bool, isRoot = bool, degree = number, roman = string, noteName = string } }, scaleName = string, rootName = string }
+local function getScaleGuideInfo(root, scaleIdx, minPitch, maxPitch)
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  minPitch = minPitch or 48
+  maxPitch = maxPitch or 72
+
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local rootName = NOTE_NAMES[(root % 12) + 1]
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°" }
+
+  local intervalToDegree = {}
+  for deg, intv in ipairs(intervals) do
+    intervalToDegree[intv] = deg
+  end
+
+  local pitches = {}
+  for p = minPitch, maxPitch do
+    local noteInOctave = p % 12
+    local semitonesFromRoot = (noteInOctave - root + 12) % 12
+    local isRoot = (semitonesFromRoot == 0)
+    local deg = intervalToDegree[semitonesFromRoot]
+    local inScale = (deg ~= nil)
+    local roman = deg and ROMAN_NUMERALS[deg] or ""
+    local noteName = noteNumToName(p)
+
+    pitches[tostring(p)] = {
+      pitch = p,
+      inScale = inScale,
+      isRoot = isRoot,
+      degree = deg or 0,
+      roman = roman,
+      noteName = noteName
+    }
+  end
+
+  return {
+    root = root,
+    rootName = rootName,
+    scaleIdx = scaleIdx,
+    scaleName = scale.name,
+    pitches = pitches
+  }
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
@@ -1623,7 +1674,8 @@ return {
   getTransposedPitch = getTransposedPitch,
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
-  getDiatonicPadChord = getDiatonicPadChord
+  getDiatonicPadChord = getDiatonicPadChord,
+  getScaleGuideInfo = getScaleGuideInfo
 }
 
 
@@ -2595,7 +2647,63 @@ function nanoKey.handleGuiAction(actionType, data)
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("btn_scene", sceneHeld and 127 or 0, sceneHeld, activeLayer)
     end
+  elseif actionType == "guide" then
+    local st = config and config.state or {}
+    if data.toggle then
+      st.scaleGuideEnabled = not st.scaleGuideEnabled
+    elseif data.enabled ~= nil then
+      st.scaleGuideEnabled = (data.enabled == true)
+    end
+    if config and config.saveSettings then config.saveSettings() end
+    nanoKey.syncScaleGuideLeds(st, true)
+    if hudRef and hudRef.updateNanoKeyControl then
+      hudRef.updateNanoKeyControl("btn_guide", st.scaleGuideEnabled and 127 or 0, st.scaleGuideEnabled, activeLayer)
+    end
   end
+end
+
+local lastLitScalePitches = {}
+
+function nanoKey.syncScaleGuideLeds(st, force)
+  st = st or (config and config.state) or {}
+  if not midiDevice then return end
+
+  local enabled = st.scaleGuideEnabled ~= false
+  local root = st.currentRoot or 0
+  local scaleIdx = st.currentScaleIdx or 1
+
+  if not enabled then
+    for p, _ in pairs(lastLitScalePitches) do
+      pcall(function()
+        midiDevice:sendCommand("noteOff", { note = tonumber(p), velocity = 0, channel = 0 })
+      end)
+    end
+    lastLitScalePitches = {}
+    return
+  end
+
+  local guideInfo = harmony and harmony.getScaleGuideInfo and harmony.getScaleGuideInfo(root, scaleIdx, 48, 72)
+  if not guideInfo or not guideInfo.pitches then return end
+
+  local newLitPitches = {}
+  for pStr, info in pairs(guideInfo.pitches) do
+    local p = tonumber(pStr)
+    if info.inScale then
+      newLitPitches[p] = true
+      if force or not lastLitScalePitches[p] then
+        pcall(function()
+          midiDevice:sendCommand("noteOn", { note = p, velocity = 127, channel = 0 })
+        end)
+      end
+    else
+      if lastLitScalePitches[p] then
+        pcall(function()
+          midiDevice:sendCommand("noteOff", { note = p, velocity = 0, channel = 0 })
+        end)
+      end
+    end
+  end
+  lastLitScalePitches = newLitPitches
 end
 
 function nanoKey.connect(targetName)
@@ -2634,6 +2742,7 @@ function nanoKey.connect(targetName)
   end)
 
   log("Connected! Listening for nanoKEY Studio performance, CC #25 Sustain, and Scene SysEx.")
+  nanoKey.syncScaleGuideLeds(nil, true)
   if hudRef and hudRef.updateNanoKeyControl then
     hudRef.updateNanoKeyControl("connection", 1, true, activeLayer, { deviceName = foundName })
   end
@@ -2642,6 +2751,7 @@ end
 
 function nanoKey.disconnect()
   if midiDevice then
+    nanoKey.syncScaleGuideLeds({ scaleGuideEnabled = false }, true)
     _G.activeWatchers = _G.activeWatchers or {}
     _G.activeWatchers.nanoKeyMidiDevice = nil
     midiDevice = nil
@@ -3140,6 +3250,15 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
   end
 
+  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+    if state.currentRoot ~= lastSyncedRoot or state.currentScaleIdx ~= lastSyncedScaleIdx or state.scaleGuideEnabled ~= lastSyncedScaleGuideEnabled then
+      lastSyncedRoot = state.currentRoot
+      lastSyncedScaleIdx = state.currentScaleIdx
+      lastSyncedScaleGuideEnabled = state.scaleGuideEnabled
+      pcall(function() _G.activeWatchers.nanokey.syncScaleGuideLeds(state) end)
+    end
+  end
+
   local payload = {
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
@@ -3187,6 +3306,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modWheel = modVal,
     zoomLevel = effectiveScale,
     spotlight = spotlightInfo,
+    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 72) or nil,
+    scaleGuideEnabled = state.scaleGuideEnabled ~= false,
     keys = keyUpdates
   }
 
@@ -3305,6 +3426,9 @@ local function createMidiWebview()
     elseif body.type == "setRoot" and body.root ~= nil then
       state.currentRoot = math.max(0, math.min(11, body.root))
       arpeggiator.updateLatchedArpNotes()
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
+      end
       local rootName = NOTE_NAMES[state.currentRoot + 1]
       local spot = {
         title = "ROOT NOTE",
@@ -3317,6 +3441,9 @@ local function createMidiWebview()
     elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
       state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
       arpeggiator.updateLatchedArpNotes()
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
+      end
       local scaleInfo = SCALES[state.currentScaleIdx]
       local spot = {
         title = "SCALE / MODE",
@@ -3605,6 +3732,14 @@ local function createMidiWebview()
       if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
         _G.activeWatchers.nanokey.handleGuiAction("scene", body)
       end
+    elseif body.type == "nanokeyGuide" or body.type == "toggleScaleGuide" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("guide", body)
+      else
+        state.scaleGuideEnabled = not state.scaleGuideEnabled
+        if config.saveSettings then config.saveSettings() end
+      end
+      updateWebviewHud()
     end
     config.saveSettings()
   end)
@@ -3888,6 +4023,10 @@ local function getDiatonicPadChord(padIdx)
   return harmony.getDiatonicPadChord(padIdx, state)
 end
 
+local function getScaleGuideInfo(minPitch, maxPitch)
+  return harmony.getScaleGuideInfo(state.currentRoot, state.currentScaleIdx, minPitch, maxPitch)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
@@ -3895,7 +4034,8 @@ return {
   getIntervalInfo = getIntervalInfo,
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
-  getDiatonicPadChord = getDiatonicPadChord
+  getDiatonicPadChord = getDiatonicPadChord,
+  getScaleGuideInfo = getScaleGuideInfo
 }
 
 
@@ -5821,6 +5961,48 @@ local HTML_UI_CONTENT = [[
   .scene-active .nk-key-degree {
     display: none;
   }
+
+  /* Scale Guide dynamic styles */
+  #nk-btn-scale-guide {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    transition: all 0.12s ease;
+  }
+  #nk-btn-scale-guide.active {
+    background: linear-gradient(180deg, #3d3527 0%, #282115 100%) !important;
+    border-color: #ffd700 !important;
+    color: #ffd700 !important;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.45) !important;
+  }
+  .scale-guide-active .nk-key-root {
+    border-color: #ffd700 !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.5), inset 0 1px 2px rgba(255, 215, 0, 0.35) !important;
+  }
+  .scale-guide-active .nk-key-root .nk-key-degree {
+    color: #ffd700 !important;
+    font-weight: 900;
+  }
+  .scale-guide-active .nk-key-root .nk-key-scale {
+    color: #ffe082 !important;
+    font-weight: 800;
+  }
+  .scale-guide-active .nk-key-in-scale {
+    border-color: rgba(212, 163, 89, 0.7) !important;
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
+  }
+  .scale-guide-active .nk-key-in-scale .nk-key-name {
+    color: #ffffff !important;
+  }
+  .scale-guide-active .nk-key-out-of-scale {
+    opacity: 0.32;
+    border-color: rgba(60, 55, 48, 0.35) !important;
+  }
+  .scale-guide-active .nk-key-out-of-scale .nk-key-degree {
+    opacity: 0;
+  }
+  .scale-guide-active .nk-key-out-of-scale .nk-key-scale {
+    opacity: 0;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -6174,7 +6356,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-btn-unit">
                 <div class="nk-btn-label">Scale Guide</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-scale-guide" title="Internal Hardware Function">GUIDE</button>
+                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Toggle Scale Guide & Hardware Key LEDs">GUIDE</button>
               </div>
             </div>
           </div>
@@ -8175,6 +8357,47 @@ local HTML_UI_CONTENT = [[
         }
       }
 
+      if (data.scaleGuide) {
+        const guide = data.scaleGuide;
+        const isEnabled = (data.scaleGuideEnabled !== false);
+        const btnGuide = document.getElementById('nk-btn-scale-guide');
+        if (btnGuide) {
+          btnGuide.classList.toggle('active', isEnabled);
+        }
+
+        const nkView = document.getElementById('nanokey-view');
+        if (nkView) {
+          nkView.classList.toggle('scale-guide-active', isEnabled);
+        }
+
+        const pitches = guide.pitches || (guide.scaleInfo && guide.scaleInfo.pitches);
+        if (pitches) {
+          for (const pStr in pitches) {
+            const p = parseInt(pStr, 10);
+            const info = pitches[pStr];
+            const keyEl = document.getElementById('nk-key-' + p);
+            if (keyEl) {
+              keyEl.classList.toggle('nk-key-root', isEnabled && !!info.isRoot);
+              keyEl.classList.toggle('nk-key-in-scale', isEnabled && !!info.inScale);
+              keyEl.classList.toggle('nk-key-out-of-scale', isEnabled && !info.inScale);
+
+              const degEl = keyEl.querySelector('.nk-key-degree');
+              if (degEl) {
+                degEl.textContent = isEnabled && info.inScale ? (info.isRoot ? 'ROOT' : info.roman) : (info.roman || '');
+              }
+              const scaleEl = keyEl.querySelector('.nk-key-scale');
+              if (scaleEl) {
+                if (isEnabled && info.isRoot) {
+                  scaleEl.textContent = (guide.scaleName || (guide.scaleInfo && guide.scaleInfo.scaleName) || '');
+                } else if (isEnabled && info.inScale) {
+                  scaleEl.textContent = (guide.rootName || (guide.scaleInfo && guide.scaleInfo.rootName) || '');
+                }
+              }
+            }
+          }
+        }
+      }
+
       if (data.bpmDisplay !== undefined) {
         const bpmVal = document.getElementById('bpm-value');
         if (bpmVal) {
@@ -8537,6 +8760,14 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     return;
   }
 
+  // Scale Guide button
+  if (controlId === 'btn_guide') {
+    const btnG = document.getElementById('nk-btn-scale-guide');
+    if (btnG) btnG.classList.toggle('active', !!pressed);
+    nkView.classList.toggle('scale-guide-active', !!pressed);
+    return;
+  }
+
   // Rotary Knobs (knob_1 .. knob_8)
   if (typeof controlId === 'string' && controlId.indexOf('knob_') === 0) {
     const knobIdx = controlId.replace('knob_', '');
@@ -8645,6 +8876,17 @@ document.addEventListener('DOMContentLoaded', () => {
       e.stopPropagation();
       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
         window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyScene', toggle: true });
+      }
+    });
+  }
+
+  // 2b. Scale Guide Button (Toggle Scale Guide & Hardware Key LEDs)
+  const btnScaleGuide = document.getElementById('nk-btn-scale-guide');
+  if (btnScaleGuide) {
+    btnScaleGuide.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyGuide', toggle: true });
       }
     });
   }
@@ -9892,7 +10134,8 @@ local state = {
   pressedKeys = {},
   sustainedPitches = {},
   spotlightInfo = nil,
-  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false)
+  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false),
+  scaleGuideEnabled = getSetting("scaleGuideEnabled", true)
 }
 
 local function saveSettings()
@@ -9920,6 +10163,7 @@ local function saveSettings()
 
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
+  hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
   hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
   hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
   hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)

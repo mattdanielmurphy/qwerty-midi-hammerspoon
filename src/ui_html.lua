@@ -1917,6 +1917,48 @@ local HTML_UI_CONTENT = [[
   .scene-active .nk-key-degree {
     display: none;
   }
+
+  /* Scale Guide dynamic styles */
+  #nk-btn-scale-guide {
+    cursor: pointer !important;
+    pointer-events: auto !important;
+    transition: all 0.12s ease;
+  }
+  #nk-btn-scale-guide.active {
+    background: linear-gradient(180deg, #3d3527 0%, #282115 100%) !important;
+    border-color: #ffd700 !important;
+    color: #ffd700 !important;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.45) !important;
+  }
+  .scale-guide-active .nk-key-root {
+    border-color: #ffd700 !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.5), inset 0 1px 2px rgba(255, 215, 0, 0.35) !important;
+  }
+  .scale-guide-active .nk-key-root .nk-key-degree {
+    color: #ffd700 !important;
+    font-weight: 900;
+  }
+  .scale-guide-active .nk-key-root .nk-key-scale {
+    color: #ffe082 !important;
+    font-weight: 800;
+  }
+  .scale-guide-active .nk-key-in-scale {
+    border-color: rgba(212, 163, 89, 0.7) !important;
+    box-shadow: 0 0 6px rgba(212, 163, 89, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
+  }
+  .scale-guide-active .nk-key-in-scale .nk-key-name {
+    color: #ffffff !important;
+  }
+  .scale-guide-active .nk-key-out-of-scale {
+    opacity: 0.32;
+    border-color: rgba(60, 55, 48, 0.35) !important;
+  }
+  .scale-guide-active .nk-key-out-of-scale .nk-key-degree {
+    opacity: 0;
+  }
+  .scale-guide-active .nk-key-out-of-scale .nk-key-scale {
+    opacity: 0;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -2270,7 +2312,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-btn-unit">
                 <div class="nk-btn-label">Scale Guide</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-scale-guide" title="Internal Hardware Function">GUIDE</button>
+                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Toggle Scale Guide & Hardware Key LEDs">GUIDE</button>
               </div>
             </div>
           </div>
@@ -4271,6 +4313,47 @@ local HTML_UI_CONTENT = [[
         }
       }
 
+      if (data.scaleGuide) {
+        const guide = data.scaleGuide;
+        const isEnabled = (data.scaleGuideEnabled !== false);
+        const btnGuide = document.getElementById('nk-btn-scale-guide');
+        if (btnGuide) {
+          btnGuide.classList.toggle('active', isEnabled);
+        }
+
+        const nkView = document.getElementById('nanokey-view');
+        if (nkView) {
+          nkView.classList.toggle('scale-guide-active', isEnabled);
+        }
+
+        const pitches = guide.pitches || (guide.scaleInfo && guide.scaleInfo.pitches);
+        if (pitches) {
+          for (const pStr in pitches) {
+            const p = parseInt(pStr, 10);
+            const info = pitches[pStr];
+            const keyEl = document.getElementById('nk-key-' + p);
+            if (keyEl) {
+              keyEl.classList.toggle('nk-key-root', isEnabled && !!info.isRoot);
+              keyEl.classList.toggle('nk-key-in-scale', isEnabled && !!info.inScale);
+              keyEl.classList.toggle('nk-key-out-of-scale', isEnabled && !info.inScale);
+
+              const degEl = keyEl.querySelector('.nk-key-degree');
+              if (degEl) {
+                degEl.textContent = isEnabled && info.inScale ? (info.isRoot ? 'ROOT' : info.roman) : (info.roman || '');
+              }
+              const scaleEl = keyEl.querySelector('.nk-key-scale');
+              if (scaleEl) {
+                if (isEnabled && info.isRoot) {
+                  scaleEl.textContent = (guide.scaleName || (guide.scaleInfo && guide.scaleInfo.scaleName) || '');
+                } else if (isEnabled && info.inScale) {
+                  scaleEl.textContent = (guide.rootName || (guide.scaleInfo && guide.scaleInfo.rootName) || '');
+                }
+              }
+            }
+          }
+        }
+      }
+
       if (data.bpmDisplay !== undefined) {
         const bpmVal = document.getElementById('bpm-value');
         if (bpmVal) {
@@ -4633,6 +4716,14 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     return;
   }
 
+  // Scale Guide button
+  if (controlId === 'btn_guide') {
+    const btnG = document.getElementById('nk-btn-scale-guide');
+    if (btnG) btnG.classList.toggle('active', !!pressed);
+    nkView.classList.toggle('scale-guide-active', !!pressed);
+    return;
+  }
+
   // Rotary Knobs (knob_1 .. knob_8)
   if (typeof controlId === 'string' && controlId.indexOf('knob_') === 0) {
     const knobIdx = controlId.replace('knob_', '');
@@ -4741,6 +4832,17 @@ document.addEventListener('DOMContentLoaded', () => {
       e.stopPropagation();
       if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
         window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyScene', toggle: true });
+      }
+    });
+  }
+
+  // 2b. Scale Guide Button (Toggle Scale Guide & Hardware Key LEDs)
+  const btnScaleGuide = document.getElementById('nk-btn-scale-guide');
+  if (btnScaleGuide) {
+    btnScaleGuide.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyGuide', toggle: true });
       }
     });
   }

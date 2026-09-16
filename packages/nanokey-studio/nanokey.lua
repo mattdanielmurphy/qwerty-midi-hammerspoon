@@ -573,7 +573,63 @@ function nanoKey.handleGuiAction(actionType, data)
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("btn_scene", sceneHeld and 127 or 0, sceneHeld, activeLayer)
     end
+  elseif actionType == "guide" then
+    local st = config and config.state or {}
+    if data.toggle then
+      st.scaleGuideEnabled = not st.scaleGuideEnabled
+    elseif data.enabled ~= nil then
+      st.scaleGuideEnabled = (data.enabled == true)
+    end
+    if config and config.saveSettings then config.saveSettings() end
+    nanoKey.syncScaleGuideLeds(st, true)
+    if hudRef and hudRef.updateNanoKeyControl then
+      hudRef.updateNanoKeyControl("btn_guide", st.scaleGuideEnabled and 127 or 0, st.scaleGuideEnabled, activeLayer)
+    end
   end
+end
+
+local lastLitScalePitches = {}
+
+function nanoKey.syncScaleGuideLeds(st, force)
+  st = st or (config and config.state) or {}
+  if not midiDevice then return end
+
+  local enabled = st.scaleGuideEnabled ~= false
+  local root = st.currentRoot or 0
+  local scaleIdx = st.currentScaleIdx or 1
+
+  if not enabled then
+    for p, _ in pairs(lastLitScalePitches) do
+      pcall(function()
+        midiDevice:sendCommand("noteOff", { note = tonumber(p), velocity = 0, channel = 0 })
+      end)
+    end
+    lastLitScalePitches = {}
+    return
+  end
+
+  local guideInfo = harmony and harmony.getScaleGuideInfo and harmony.getScaleGuideInfo(root, scaleIdx, 48, 72)
+  if not guideInfo or not guideInfo.pitches then return end
+
+  local newLitPitches = {}
+  for pStr, info in pairs(guideInfo.pitches) do
+    local p = tonumber(pStr)
+    if info.inScale then
+      newLitPitches[p] = true
+      if force or not lastLitScalePitches[p] then
+        pcall(function()
+          midiDevice:sendCommand("noteOn", { note = p, velocity = 127, channel = 0 })
+        end)
+      end
+    else
+      if lastLitScalePitches[p] then
+        pcall(function()
+          midiDevice:sendCommand("noteOff", { note = p, velocity = 0, channel = 0 })
+        end)
+      end
+    end
+  end
+  lastLitScalePitches = newLitPitches
 end
 
 function nanoKey.connect(targetName)
@@ -612,6 +668,7 @@ function nanoKey.connect(targetName)
   end)
 
   log("Connected! Listening for nanoKEY Studio performance, CC #25 Sustain, and Scene SysEx.")
+  nanoKey.syncScaleGuideLeds(nil, true)
   if hudRef and hudRef.updateNanoKeyControl then
     hudRef.updateNanoKeyControl("connection", 1, true, activeLayer, { deviceName = foundName })
   end
@@ -620,6 +677,7 @@ end
 
 function nanoKey.disconnect()
   if midiDevice then
+    nanoKey.syncScaleGuideLeds({ scaleGuideEnabled = false }, true)
     _G.activeWatchers = _G.activeWatchers or {}
     _G.activeWatchers.nanoKeyMidiDevice = nil
     midiDevice = nil

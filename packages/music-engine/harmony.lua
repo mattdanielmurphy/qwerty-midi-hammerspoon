@@ -178,6 +178,57 @@ local function getDiatonicPadChord(padIdx, state)
   }
 end
 
+--- Get scale guide information for a range of MIDI pitches (default 48..72 for nanoKEY Studio)
+-- @param root number 0..11
+-- @param scaleIdx number 1..9
+-- @param minPitch number (default 48)
+-- @param maxPitch number (default 72)
+-- @return table { pitches = { [pitch] = { inScale = bool, isRoot = bool, degree = number, roman = string, noteName = string } }, scaleName = string, rootName = string }
+local function getScaleGuideInfo(root, scaleIdx, minPitch, maxPitch)
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  minPitch = minPitch or 48
+  maxPitch = maxPitch or 72
+
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local rootName = NOTE_NAMES[(root % 12) + 1]
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°" }
+
+  local intervalToDegree = {}
+  for deg, intv in ipairs(intervals) do
+    intervalToDegree[intv] = deg
+  end
+
+  local pitches = {}
+  for p = minPitch, maxPitch do
+    local noteInOctave = p % 12
+    local semitonesFromRoot = (noteInOctave - root + 12) % 12
+    local isRoot = (semitonesFromRoot == 0)
+    local deg = intervalToDegree[semitonesFromRoot]
+    local inScale = (deg ~= nil)
+    local roman = deg and ROMAN_NUMERALS[deg] or ""
+    local noteName = noteNumToName(p)
+
+    pitches[tostring(p)] = {
+      pitch = p,
+      inScale = inScale,
+      isRoot = isRoot,
+      degree = deg or 0,
+      roman = roman,
+      noteName = noteName
+    }
+  end
+
+  return {
+    root = root,
+    rootName = rootName,
+    scaleIdx = scaleIdx,
+    scaleName = scale.name,
+    pitches = pitches
+  }
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
@@ -188,6 +239,7 @@ return {
   getTransposedPitch = getTransposedPitch,
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
-  getDiatonicPadChord = getDiatonicPadChord
+  getDiatonicPadChord = getDiatonicPadChord,
+  getScaleGuideInfo = getScaleGuideInfo
 }
 

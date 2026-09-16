@@ -353,6 +353,15 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
   end
 
+  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+    if state.currentRoot ~= lastSyncedRoot or state.currentScaleIdx ~= lastSyncedScaleIdx or state.scaleGuideEnabled ~= lastSyncedScaleGuideEnabled then
+      lastSyncedRoot = state.currentRoot
+      lastSyncedScaleIdx = state.currentScaleIdx
+      lastSyncedScaleGuideEnabled = state.scaleGuideEnabled
+      pcall(function() _G.activeWatchers.nanokey.syncScaleGuideLeds(state) end)
+    end
+  end
+
   local payload = {
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
@@ -400,6 +409,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modWheel = modVal,
     zoomLevel = effectiveScale,
     spotlight = spotlightInfo,
+    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 72) or nil,
+    scaleGuideEnabled = state.scaleGuideEnabled ~= false,
     keys = keyUpdates
   }
 
@@ -518,6 +529,9 @@ local function createMidiWebview()
     elseif body.type == "setRoot" and body.root ~= nil then
       state.currentRoot = math.max(0, math.min(11, body.root))
       arpeggiator.updateLatchedArpNotes()
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
+      end
       local rootName = NOTE_NAMES[state.currentRoot + 1]
       local spot = {
         title = "ROOT NOTE",
@@ -530,6 +544,9 @@ local function createMidiWebview()
     elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
       state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
       arpeggiator.updateLatchedArpNotes()
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
+        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
+      end
       local scaleInfo = SCALES[state.currentScaleIdx]
       local spot = {
         title = "SCALE / MODE",
@@ -818,6 +835,14 @@ local function createMidiWebview()
       if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
         _G.activeWatchers.nanokey.handleGuiAction("scene", body)
       end
+    elseif body.type == "nanokeyGuide" or body.type == "toggleScaleGuide" then
+      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
+        _G.activeWatchers.nanokey.handleGuiAction("guide", body)
+      else
+        state.scaleGuideEnabled = not state.scaleGuideEnabled
+        if config.saveSettings then config.saveSettings() end
+      end
+      updateWebviewHud()
     end
     config.saveSettings()
   end)

@@ -133,7 +133,8 @@ local state = {
   pressedKeys = {},
   sustainedPitches = {},
   spotlightInfo = nil,
-  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false)
+  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false),
+  scaleGuideEnabled = getSetting("scaleGuideEnabled", true)
 }
 
 local function saveSettings()
@@ -161,6 +162,7 @@ local function saveSettings()
 
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
+  hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
   hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
   hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
   hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)

@@ -38,6 +38,10 @@ local function getDiatonicPadChord(padIdx)
   return harmony.getDiatonicPadChord(padIdx, state)
 end
 
+local function getScaleGuideInfo(minPitch, maxPitch)
+  return harmony.getScaleGuideInfo(state.currentRoot, state.currentScaleIdx, minPitch, maxPitch)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
@@ -45,6 +49,7 @@ return {
   getIntervalInfo = getIntervalInfo,
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
-  getDiatonicPadChord = getDiatonicPadChord
+  getDiatonicPadChord = getDiatonicPadChord,
+  getScaleGuideInfo = getScaleGuideInfo
 }
 
