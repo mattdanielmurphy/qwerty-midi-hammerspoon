@@ -1842,33 +1842,31 @@ function nanoKey.setLayer(newLayer)
 end
 
 -- Map pad MIDI note numbers:
--- Channel 2 (ch = 1): notes 64..71 (Korg nanoKEY Studio default pad mapping)
--- Channel 10 (ch = 9): notes 36..43 (General MIDI drum kit standard)
+-- Dedicated pad channels: Channel 10 (ch = 9, General MIDI drum standard) or Channel 2 (ch = 1)
+-- Supports both KORG KONTROL Editor default GM drum notes and sequential note layouts:
+-- Row 2 (Pads 1..4): 36 (C2), 38 (D2), 42 (F#2), 46 (A#2)
+-- Row 1 (Pads 5..8): 43 (G2), 48 (C3), 50 (D3), 49 (C#3)
+local KORG_KONTROL_PAD_MAP = {
+  [36] = 1, [38] = 2, [42] = 3, [46] = 4,
+  [43] = 5, [48] = 6, [50] = 7, [49] = 8
+}
+
 local function noteToPadIndex(note, ch)
   if not note then return nil end
-  if ch == 1 and note >= 64 and note <= 71 then
-    return note - 63
-  elseif ch == 9 and note >= 36 and note <= 43 then
-    return note - 35
+  -- Channel 1 (ch = 0) is strictly reserved for keyboard keys — NEVER trigger pads
+  if ch == 0 then return nil end
+
+  if ch == 9 or ch == 1 then
+    if KORG_KONTROL_PAD_MAP[note] then
+      return KORG_KONTROL_PAD_MAP[note]
+    elseif note >= 36 and note <= 43 then
+      return note - 35
+    elseif note >= 64 and note <= 71 then
+      return note - 63
+    end
   end
   return nil
 end
-
--- Diatonic chord root note (C Major factory scale) to Pad 1..8
-local CHORD_ROOT_TO_PAD = {
-  [48] = 1, -- C3 -> Pad 1 (I Tonic)
-  [50] = 2, -- D3 -> Pad 2 (ii Supertonic)
-  [52] = 3, -- E3 -> Pad 3 (iii Mediant)
-  [53] = 4, -- F3 -> Pad 4 (IV Subdominant)
-  [55] = 5, -- G3 -> Pad 5 (V Dominant)
-  [57] = 6, -- A3 -> Pad 6 (vi Submediant)
-  [59] = 7, -- B3 -> Pad 7 (vii° Diminished)
-  [60] = 8, -- C4 -> Pad 8 (I Octave)
-}
-
-local recentChordNoteOns = {}
-local chordBurstTimer = nil
-local activeChordPad = nil
 
 local KNOB_NAMES = {
   [1] = "Cutoff",
@@ -2054,44 +2052,8 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 6. Chord Pad Burst Detection on Channel 1 (ch == 0)
-  -- When the hardware is in Chord Pad mode, hitting a pad emits 3-4 simultaneous notes on ch 0.
-  if ch == 0 and note then
-    if commandType == "noteOn" and vel and vel > 0 then
-      table.insert(recentChordNoteOns, { note = note, vel = vel })
-      if not chordBurstTimer then
-        chordBurstTimer = hs.timer.doAfter(0.005, function()
-          chordBurstTimer = nil
-          if #recentChordNoteOns >= 3 then
-            local minNote = 127
-            for _, n in ipairs(recentChordNoteOns) do
-              if n.note < minNote then minNote = n.note end
-            end
-            local rootInOctave = minNote
-            while rootInOctave < 48 do rootInOctave = rootInOctave + 12 end
-            while rootInOctave > 60 do rootInOctave = rootInOctave - 12 end
-            local chordPadIdx = CHORD_ROOT_TO_PAD[rootInOctave]
-            if chordPadIdx and hudRef and hudRef.updateNanoKeyControl then
-              activeChordPad = chordPadIdx
-              hudRef.updateNanoKeyControl("pad_" .. chordPadIdx, 100, true, activeLayer, { chord = true })
-            end
-          end
-          recentChordNoteOns = {}
-        end)
-      end
-    elseif commandType == "noteOff" or (commandType == "noteOn" and vel == 0) then
-      if activeChordPad then
-        local padToClear = activeChordPad
-        activeChordPad = nil
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("pad_" .. padToClear, 0, false, activeLayer, { chord = false })
-        end
-      end
-    end
-  end
-
-  -- 7. Keyboard Keys (Notes 24 to 108 = C1 to C8, octave-folded in GUI)
-  if note and note >= 24 and note <= 108 then
+  -- 6. Keyboard Keys on Channel 1 (ch == 0, Notes 24 to 108 = C1 to C8, octave-folded in GUI)
+  if ch == 0 and note and note >= 24 and note <= 108 then
     local isDown = (commandType == "noteOn" and vel and vel > 0)
     local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
 
