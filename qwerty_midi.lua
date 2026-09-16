@@ -49,6 +49,7 @@ _G.activeWatchers.sync = sync
 if nanokey then
   nanokey.setHud(hud)
   _G.activeWatchers.nanokey = nanokey
+  pcall(function() nanokey.connect("nanoKEY Studio") end)
 end
 
 function _G.toggleMidiMode(newState)
@@ -70,7 +71,7 @@ function _G.toggleMidiMode(newState)
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
-    if nanokey and nanokey.connect then
+    if nanokey and nanokey.connect and not nanokey.isConnected() then
       pcall(function() nanokey.connect("nanoKEY Studio") end)
     end
   else
@@ -85,9 +86,8 @@ function _G.toggleMidiMode(newState)
     state.sustainActive = false
     midi.sendMidiCC(64, 0)
     
-    if nanokey and nanokey.disconnect then
-      nanokey.disconnect()
-    end
+    -- Keep nanokey hardware driver connected so physical controller macros and playing remain active
+    -- Do not call nanokey.disconnect() here
 
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
@@ -1987,6 +1987,24 @@ local MACRO_HANDLERS = {
       if hud and hud.updateWebviewHud then hud.updateWebviewHud() end
     end
   end,
+  ["Toggle Scale Guide"] = function()
+    local config = __require("config")
+    local hud = __require("hud")
+    local nanokey = nil
+    pcall(function() nanokey = __require("nanokey") end)
+    if config and config.state then
+      config.state.scaleGuideEnabled = not (config.state.scaleGuideEnabled ~= false)
+      if config.saveSettings then config.saveSettings() end
+      if nanokey and nanokey.syncScaleGuideLeds then
+        nanokey.syncScaleGuideLeds(config.state, true)
+      end
+      if hud and hud.updateWebviewHud then
+        hud.updateWebviewHud()
+      end
+      local status = config.state.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
+      hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
+    end
+  end,
   ["Prev Track"] = function()
     hs.eventtap.keyStroke({}, "left")
   end,
@@ -2059,7 +2077,9 @@ function macros.execute(macroName)
   local handler = MACRO_HANDLERS[macroName]
   if handler then
     handler()
-    hs.alert.show("⚡ Macro: " .. macroName, 0.8)
+    if macroName ~= "Toggle Scale Guide" and macroName ~= "Scale Cycle" and macroName ~= "Panic All" and macroName ~= "Mute Mic" then
+      hs.alert.show("⚡ Macro: " .. macroName, 0.8)
+    end
     return true
   else
     print("[nanoKEY-Macro]: No handler defined for macro '" .. tostring(macroName) .. "'")
@@ -2261,8 +2281,12 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   -- Sustain button is momentary (127 on press, 0 on release). CC #64 avoids collision with Knob 6 (CC #25).
   if commandType == "controlChange" and (cc == 64 or cc == 54 or (cc == 25 and ch == 15 and (val == 0 or val == 127))) then
     if val and val > 0 then
+      local wasSustainHeld = sustainHeld
       sustainHeld = true
       computeActiveLayer()
+      if not wasSustainHeld and sceneHeld then
+        macros.execute("Toggle Scale Guide")
+      end
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
       end
@@ -2280,8 +2304,12 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   if commandType == "systemExclusive" then
     local fullHex = string.lower(dataHex .. sysexDataHex)
     if string.find(fullHex, "4140407f") then
+      local wasSceneHeld = sceneHeld
       sceneHeld = true
       computeActiveLayer()
+      if not wasSceneHeld and sustainHeld then
+        macros.execute("Toggle Scale Guide")
+      end
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("btn_scene", 127, true, activeLayer)
       end
@@ -2360,11 +2388,11 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
 
   if padIdx then
     if isDown then
-      -- Macro Layer 1: Sustain Held -> Transport & Window Management
+      -- Macro Layer 1: Sustain Held -> Transport & Window Management + Scale Guide
       if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
         local padSustainMacros = {
           [1] = "Play/Pause", [2] = "Record", [3] = "Rewind", [4] = "Forward",
-          [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Restore Win"
+          [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Toggle Scale Guide"
         }
         local mName = padSustainMacros[padIdx]
         if mName then
@@ -2378,7 +2406,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       elseif activeLayer == "macro_scene" then
         local padSceneMacros = {
           [1] = "Preset 1", [2] = "Preset 2", [3] = "Preset 3", [4] = "Preset 4",
-          [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Panic All"
+          [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Toggle Scale Guide"
         }
         local mName = padSceneMacros[padIdx]
         if mName then
@@ -2650,7 +2678,7 @@ function nanoKey.handleGuiAction(actionType, data)
   elseif actionType == "guide" then
     local st = config and config.state or {}
     if data.toggle then
-      st.scaleGuideEnabled = not st.scaleGuideEnabled
+      st.scaleGuideEnabled = not (st.scaleGuideEnabled ~= false)
     elseif data.enabled ~= nil then
       st.scaleGuideEnabled = (data.enabled == true)
     end
@@ -2659,6 +2687,11 @@ function nanoKey.handleGuiAction(actionType, data)
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("btn_guide", st.scaleGuideEnabled and 127 or 0, st.scaleGuideEnabled, activeLayer)
     end
+    if hudRef and hudRef.updateWebviewHud then
+      hudRef.updateWebviewHud()
+    end
+    local status = st.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
+    hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
   end
 end
 
@@ -5967,6 +6000,11 @@ local HTML_UI_CONTENT = [[
     cursor: pointer !important;
     pointer-events: auto !important;
     transition: all 0.12s ease;
+    min-width: 46px !important;
+    font-size: 6px !important;
+    padding: 0 3px !important;
+    white-space: nowrap !important;
+    letter-spacing: 0.2px !important;
   }
   #nk-btn-scale-guide.active {
     background: linear-gradient(180deg, #3d3527 0%, #282115 100%) !important;
@@ -6356,7 +6394,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-btn-unit">
                 <div class="nk-btn-label">Scale Guide</div>
-                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Toggle Scale Guide & Hardware Key LEDs">GUIDE</button>
+                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Scale Guide Mode (Sustain+Scene or Sustain+Pad 8 to toggle)">SCALE GUIDE</button>
               </div>
             </div>
           </div>

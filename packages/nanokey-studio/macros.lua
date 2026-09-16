@@ -56,6 +56,24 @@ local MACRO_HANDLERS = {
       if hud and hud.updateWebviewHud then hud.updateWebviewHud() end
     end
   end,
+  ["Toggle Scale Guide"] = function()
+    local config = require("config")
+    local hud = require("hud")
+    local nanokey = nil
+    pcall(function() nanokey = require("nanokey") end)
+    if config and config.state then
+      config.state.scaleGuideEnabled = not (config.state.scaleGuideEnabled ~= false)
+      if config.saveSettings then config.saveSettings() end
+      if nanokey and nanokey.syncScaleGuideLeds then
+        nanokey.syncScaleGuideLeds(config.state, true)
+      end
+      if hud and hud.updateWebviewHud then
+        hud.updateWebviewHud()
+      end
+      local status = config.state.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
+      hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
+    end
+  end,
   ["Prev Track"] = function()
     hs.eventtap.keyStroke({}, "left")
   end,
@@ -128,7 +146,9 @@ function macros.execute(macroName)
   local handler = MACRO_HANDLERS[macroName]
   if handler then
     handler()
-    hs.alert.show("⚡ Macro: " .. macroName, 0.8)
+    if macroName ~= "Toggle Scale Guide" and macroName ~= "Scale Cycle" and macroName ~= "Panic All" and macroName ~= "Mute Mic" then
+      hs.alert.show("⚡ Macro: " .. macroName, 0.8)
+    end
     return true
   else
     print("[nanoKEY-Macro]: No handler defined for macro '" .. tostring(macroName) .. "'")

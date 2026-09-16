@@ -1923,6 +1923,11 @@ local HTML_UI_CONTENT = [[
     cursor: pointer !important;
     pointer-events: auto !important;
     transition: all 0.12s ease;
+    min-width: 46px !important;
+    font-size: 6px !important;
+    padding: 0 3px !important;
+    white-space: nowrap !important;
+    letter-spacing: 0.2px !important;
   }
   #nk-btn-scale-guide.active {
     background: linear-gradient(180deg, #3d3527 0%, #282115 100%) !important;
@@ -2312,7 +2317,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-btn-unit">
                 <div class="nk-btn-label">Scale Guide</div>
-                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Toggle Scale Guide & Hardware Key LEDs">GUIDE</button>
+                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Scale Guide Mode (Sustain+Scene or Sustain+Pad 8 to toggle)">SCALE GUIDE</button>
               </div>
             </div>
           </div>

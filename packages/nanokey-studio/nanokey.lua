@@ -187,8 +187,12 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   -- Sustain button is momentary (127 on press, 0 on release). CC #64 avoids collision with Knob 6 (CC #25).
   if commandType == "controlChange" and (cc == 64 or cc == 54 or (cc == 25 and ch == 15 and (val == 0 or val == 127))) then
     if val and val > 0 then
+      local wasSustainHeld = sustainHeld
       sustainHeld = true
       computeActiveLayer()
+      if not wasSustainHeld and sceneHeld then
+        macros.execute("Toggle Scale Guide")
+      end
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
       end
@@ -206,8 +210,12 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
   if commandType == "systemExclusive" then
     local fullHex = string.lower(dataHex .. sysexDataHex)
     if string.find(fullHex, "4140407f") then
+      local wasSceneHeld = sceneHeld
       sceneHeld = true
       computeActiveLayer()
+      if not wasSceneHeld and sustainHeld then
+        macros.execute("Toggle Scale Guide")
+      end
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("btn_scene", 127, true, activeLayer)
       end
@@ -286,11 +294,11 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
 
   if padIdx then
     if isDown then
-      -- Macro Layer 1: Sustain Held -> Transport & Window Management
+      -- Macro Layer 1: Sustain Held -> Transport & Window Management + Scale Guide
       if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
         local padSustainMacros = {
           [1] = "Play/Pause", [2] = "Record", [3] = "Rewind", [4] = "Forward",
-          [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Restore Win"
+          [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Toggle Scale Guide"
         }
         local mName = padSustainMacros[padIdx]
         if mName then
@@ -304,7 +312,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       elseif activeLayer == "macro_scene" then
         local padSceneMacros = {
           [1] = "Preset 1", [2] = "Preset 2", [3] = "Preset 3", [4] = "Preset 4",
-          [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Panic All"
+          [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Toggle Scale Guide"
         }
         local mName = padSceneMacros[padIdx]
         if mName then
@@ -576,7 +584,7 @@ function nanoKey.handleGuiAction(actionType, data)
   elseif actionType == "guide" then
     local st = config and config.state or {}
     if data.toggle then
-      st.scaleGuideEnabled = not st.scaleGuideEnabled
+      st.scaleGuideEnabled = not (st.scaleGuideEnabled ~= false)
     elseif data.enabled ~= nil then
       st.scaleGuideEnabled = (data.enabled == true)
     end
@@ -585,6 +593,11 @@ function nanoKey.handleGuiAction(actionType, data)
     if hudRef and hudRef.updateNanoKeyControl then
       hudRef.updateNanoKeyControl("btn_guide", st.scaleGuideEnabled and 127 or 0, st.scaleGuideEnabled, activeLayer)
     end
+    if hudRef and hudRef.updateWebviewHud then
+      hudRef.updateWebviewHud()
+    end
+    local status = st.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
+    hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
   end
 end
 

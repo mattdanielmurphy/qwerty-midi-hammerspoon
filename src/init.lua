@@ -32,6 +32,7 @@ _G.activeWatchers.sync = sync
 if nanokey then
   nanokey.setHud(hud)
   _G.activeWatchers.nanokey = nanokey
+  pcall(function() nanokey.connect("nanoKEY Studio") end)
 end
 
 function _G.toggleMidiMode(newState)
@@ -53,7 +54,7 @@ function _G.toggleMidiMode(newState)
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
-    if nanokey and nanokey.connect then
+    if nanokey and nanokey.connect and not nanokey.isConnected() then
       pcall(function() nanokey.connect("nanoKEY Studio") end)
     end
   else
@@ -68,9 +69,8 @@ function _G.toggleMidiMode(newState)
     state.sustainActive = false
     midi.sendMidiCC(64, 0)
     
-    if nanokey and nanokey.disconnect then
-      nanokey.disconnect()
-    end
+    -- Keep nanokey hardware driver connected so physical controller macros and playing remain active
+    -- Do not call nanokey.disconnect() here
 
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
