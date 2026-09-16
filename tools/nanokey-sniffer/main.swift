@@ -446,7 +446,7 @@ Target Buttons (\(targetButtons.count) total):
     func displaySummaryTable() {
         print("\nSUMMARY TABLE OF TESTED BUTTONS:")
         print("-----------------------------------------------------------------------------------------------------------------------------")
-        print(String(format: "%-16s | %-8s | %-14s | %-32s | %s", "Button Name", "Active?", "Command Type", "Raw Packet Hex", "Interpretation"))
+        print(String(format: "%-16@ | %-8@ | %-14@ | %-32@ | %@", "Button Name", "Active?", "Command Type", "Raw Packet Hex", "Interpretation"))
         print("-----------------------------------------------------------------------------------------------------------------------------")
         
         for res in recordedResults {
@@ -455,7 +455,7 @@ Target Buttons (\(targetButtons.count) total):
             let rawHex = res.packets.first?.rawHex ?? "(none)"
             let interp = res.packets.first?.interpretation ?? "Internal MCU only"
             
-            print(String(format: "%-16s | %-8s | %-14s | %-32s | %s", res.displayName, activeStr, typeStr, rawHex, interp))
+            print(String(format: "%-16@ | %-8@ | %-14@ | %-32@ | %@", res.displayName, activeStr, typeStr, rawHex, interp))
         }
         print("-----------------------------------------------------------------------------------------------------------------------------\n")
     }
