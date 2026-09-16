@@ -1842,13 +1842,12 @@ function nanoKey.setLayer(newLayer)
 end
 
 -- Map pad MIDI note numbers:
--- Dedicated pad channels: Channel 10 (ch = 9, General MIDI drum standard) or Channel 2 (ch = 1)
--- Supports both KORG KONTROL Editor default GM drum notes and sequential note layouts:
--- Row 2 (Pads 1..4): 36 (C2), 38 (D2), 42 (F#2), 46 (A#2)
--- Row 1 (Pads 5..8): 43 (G2), 48 (C3), 50 (D3), 49 (C#3)
+-- Pre-assigned Korg nanoKEY Studio hardware Pad map:
+-- Row 1 (Top: Pads 1..4): Arp Type (43), Arp Range (48), Key Sync (50), Wireless (49)
+-- Row 2 (Bottom: Pads 5..8): Gate Type - (36), Gate Type + (38), Scale - (42), Scale + (46)
 local KORG_KONTROL_PAD_MAP = {
-  [36] = 1, [38] = 2, [42] = 3, [46] = 4,
-  [43] = 5, [48] = 6, [50] = 7, [49] = 8
+  [43] = 1, [48] = 2, [50] = 3, [49] = 4,
+  [36] = 5, [38] = 6, [42] = 7, [46] = 8
 }
 
 local function noteToPadIndex(note, ch)
@@ -1869,20 +1868,20 @@ local function noteToPadIndex(note, ch)
 end
 
 -- Support CC-mapped pads on any channel (including Global / Channel 1):
--- CC 80..87: General Purpose Controllers 5–8 / Undefined (recommended standard)
--- CC 102..109: Undefined MIDI CCs
--- CC 112..119: Undefined MIDI CCs
--- CC 36..43: Matching GM drum note numbers as CCs
+-- Hardware pre-assigned CCs: 43 (Pad 1), 48 (Pad 2), 50 (Pad 3), 49 (Pad 4),
+--                            36 (Pad 5), 38 (Pad 6), 42 (Pad 7), 46 (Pad 8)
+-- Contiguous fallback ranges: CC 80..87, CC 102..109, CC 112..119
 local function ccToPadIndex(cc)
   if not cc then return nil end
+  if KORG_KONTROL_PAD_MAP[cc] then
+    return KORG_KONTROL_PAD_MAP[cc]
+  end
   if cc >= 80 and cc <= 87 then
     return cc - 79
   elseif cc >= 102 and cc <= 109 then
     return cc - 101
   elseif cc >= 112 and cc <= 119 then
     return cc - 111
-  elseif cc >= 36 and cc <= 43 then
-    return cc - 35
   end
   return nil
 end
@@ -1898,36 +1897,29 @@ local KNOB_NAMES = {
   [8] = "Release"
 }
 
--- Adaptive knob base offset (defaults to 16, so CC 17 -> Knob 1, CC 24 -> Knob 8)
-local activeKnobOffset = 16
+-- Pre-assigned knob base offset: CC 20..27 (20->Knob 1 .. 27->Knob 8)
+local activeKnobOffset = 19
 
 local function resolveKnobIndex(cc)
-  if not cc then return nil end
-  -- Auto-detect hardware offset:
-  if cc == 16 then
-    -- Hardware is using 16..23 (offset +2 from 14..21): 16->1, 17->2, ..., 23->8
-    activeKnobOffset = 15
-    return 1
-  elseif cc >= 25 and cc <= 27 then
-    -- Hardware is using Korg Gadget factory scene (20..27): 20->1, ..., 27->8
+  if not cc or cc == 19 then return nil end
+  -- Pre-assigned hardware default (CC 20..27):
+  if cc >= 20 and cc <= 27 then
     activeKnobOffset = 19
     return cc - 19
+  end
+
+  -- Auto-detect alternative hardware offsets if explicitly using them:
+  if cc >= 16 and cc <= 18 then
+    activeKnobOffset = 15
+    return cc - 15
+  elseif cc >= 14 and cc <= 15 then
+    activeKnobOffset = 13
+    return cc - 13
   end
 
   local idx = cc - activeKnobOffset
   if idx >= 1 and idx <= 8 then
     return idx
-  end
-
-  -- Fallback heuristics:
-  if cc >= 17 and cc <= 24 then
-    return cc - 16
-  elseif cc >= 16 and cc <= 23 then
-    return cc - 15
-  elseif cc >= 20 and cc <= 27 then
-    return cc - 19
-  elseif cc >= 14 and cc <= 21 then
-    return cc - 13
   end
   return nil
 end
@@ -1951,26 +1943,23 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     log(string.format("MIDI SysEx: len=%d data=%s", #dataHex, dataHex))
   end
 
-  -- 1. Check for Sustain Button (CC #25 default, or CC #54 / CC #64 fallback)
-  -- Sustain button is momentary (127 on press, 0 on release), typically on channel 15
-  if commandType == "controlChange" and (cc == 25 or cc == 54 or cc == 64) then
-    local isMomentary = (val == 0 or val == 127)
-    if (cc == 54 or cc == 64) or (cc == 25 and isMomentary) then
-      if val and val > 0 then
-        sustainHeld = true
-        computeActiveLayer()
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
-        end
-      else
-        sustainHeld = false
-        computeActiveLayer()
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
-        end
+  -- 1. Check for Sustain Button (CC #64 pre-assigned/standard, or CC #54 fallback, or CC #25 on channel 15)
+  -- Sustain button is momentary (127 on press, 0 on release). CC #64 avoids collision with Knob 6 (CC #25).
+  if commandType == "controlChange" and (cc == 64 or cc == 54 or (cc == 25 and ch == 15 and (val == 0 or val == 127))) then
+    if val and val > 0 then
+      sustainHeld = true
+      computeActiveLayer()
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
       end
-      return true
+    else
+      sustainHeld = false
+      computeActiveLayer()
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
+      end
     end
+    return true
   end
 
   -- 2. Check for Scene Button via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 40 40 7f/00 00 f7)
@@ -1993,7 +1982,17 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 3. Rotary Knobs (8 knobs labelled by Korg Gadget defaults: Cutoff, Peak, Drive, Volume, ADSR)
+  -- 3. KAOSS Touchpad (Touch X = CC #1 or CC #28; Touch Y = CC #19 or CC #2 or CC #29)
+  if commandType == "controlChange" and cc then
+    if cc == 1 or cc == 28 or cc == 19 or cc == 2 or cc == 29 then
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("cc_" .. cc, val, true, activeLayer, { cc = cc, value = val })
+      end
+      return false
+    end
+  end
+
+  -- 4. Rotary Knobs (8 knobs labelled by Korg Gadget defaults: Cutoff, Peak, Drive, Volume, ADSR)
   if commandType == "controlChange" and cc then
     local knobIdx = resolveKnobIndex(cc)
     if knobIdx and knobIdx >= 1 and knobIdx <= 8 then
@@ -2006,16 +2005,6 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           knob = knobIdx,
           name = knobName
         })
-      end
-      return false
-    end
-  end
-
-  -- 4. KAOSS Touchpad (Touch X = CC #1 or CC #28; Touch Y = CC #2 or CC #29)
-  if commandType == "controlChange" and cc then
-    if cc == 1 or cc == 28 or cc == 2 or cc == 29 then
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("cc_" .. cc, val, true, activeLayer, { cc = cc, value = val })
       end
       return false
     end
@@ -5503,49 +5492,49 @@ local HTML_UI_CONTENT = [[
                 <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
                 <div class="nk-knob-val" id="nk-knob-val-1">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 20</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
                 <div class="nk-knob-val" id="nk-knob-val-2">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 21</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
                 <div class="nk-knob-val" id="nk-knob-val-3">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 22</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
                 <div class="nk-knob-val" id="nk-knob-val-4">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 23</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
                 <div class="nk-knob-val" id="nk-knob-val-5">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 24</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
                 <div class="nk-knob-val" id="nk-knob-val-6">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 25</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
                 <div class="nk-knob-val" id="nk-knob-val-7">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 26</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
                 <div class="nk-knob-val" id="nk-knob-val-8">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 27</div>
               </div>
             </div>
           </div>
@@ -5616,7 +5605,7 @@ local HTML_UI_CONTENT = [[
             <div class="nk-pads-grid">
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Arp Type</div>
-                <div class="nk-pad" id="nk-pad-1" data-pad="1">
+                <div class="nk-pad" id="nk-pad-1" data-pad="1" data-cc="43" title="PAD 1 — Arp Type (CC #43)">
                   <span class="nk-pad-name">PAD 1</span>
                   <span class="nk-pad-chord">CHORD 1</span>
                   <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
@@ -5624,7 +5613,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Arp Range</div>
-                <div class="nk-pad" id="nk-pad-2" data-pad="2">
+                <div class="nk-pad" id="nk-pad-2" data-pad="2" data-cc="48" title="PAD 2 — Arp Range (CC #48)">
                   <span class="nk-pad-name">PAD 2</span>
                   <span class="nk-pad-chord">CHORD 2</span>
                   <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
@@ -5632,7 +5621,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Key Sync</div>
-                <div class="nk-pad" id="nk-pad-3" data-pad="3">
+                <div class="nk-pad" id="nk-pad-3" data-pad="3" data-cc="50" title="PAD 3 — Key Sync (CC #50)">
                   <span class="nk-pad-name">PAD 3</span>
                   <span class="nk-pad-chord">CHORD 3</span>
                   <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
@@ -5640,7 +5629,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Wireless</div>
-                <div class="nk-pad" id="nk-pad-4" data-pad="4">
+                <div class="nk-pad" id="nk-pad-4" data-pad="4" data-cc="49" title="PAD 4 — Wireless (CC #49)">
                   <span class="nk-pad-name">PAD 4</span>
                   <span class="nk-pad-chord">CHORD 4</span>
                   <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
@@ -5648,7 +5637,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Gate Type -</div>
-                <div class="nk-pad" id="nk-pad-5" data-pad="5">
+                <div class="nk-pad" id="nk-pad-5" data-pad="5" data-cc="36" title="PAD 5 — Gate Type - (CC #36)">
                   <span class="nk-pad-name">PAD 5</span>
                   <span class="nk-pad-chord">CHORD 5</span>
                   <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
@@ -5656,7 +5645,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Gate Type +</div>
-                <div class="nk-pad" id="nk-pad-6" data-pad="6">
+                <div class="nk-pad" id="nk-pad-6" data-pad="6" data-cc="38" title="PAD 6 — Gate Type + (CC #38)">
                   <span class="nk-pad-name">PAD 6</span>
                   <span class="nk-pad-chord">CHORD 6</span>
                   <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
@@ -5664,7 +5653,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Scale -</div>
-                <div class="nk-pad" id="nk-pad-7" data-pad="7">
+                <div class="nk-pad" id="nk-pad-7" data-pad="7" data-cc="42" title="PAD 7 — Scale - (CC #42)">
                   <span class="nk-pad-name">PAD 7</span>
                   <span class="nk-pad-chord">CHORD 7</span>
                   <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
@@ -5672,7 +5661,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Scale +</div>
-                <div class="nk-pad" id="nk-pad-8" data-pad="8">
+                <div class="nk-pad" id="nk-pad-8" data-pad="8" data-cc="46" title="PAD 8 — Scale + (CC #46)">
                   <span class="nk-pad-name">PAD 8</span>
                   <span class="nk-pad-chord">CHORD 8</span>
                   <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
@@ -8078,7 +8067,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     if (xEl && value !== null && value !== undefined) xEl.textContent = value;
     return;
   }
-  if (controlId === 'cc_2' || controlId === 'cc_29') {
+  if (controlId === 'cc_2' || controlId === 'cc_29' || controlId === 'cc_19') {
     const cur = document.getElementById('nk-touch-cursor');
     const yEl = document.getElementById('nk-touch-y');
     if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';

@@ -2050,49 +2050,49 @@ local HTML_UI_CONTENT = [[
                 <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
                 <div class="nk-knob-val" id="nk-knob-val-1">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 17</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 20</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
                 <div class="nk-knob-val" id="nk-knob-val-2">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 18</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 21</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
                 <div class="nk-knob-val" id="nk-knob-val-3">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 19</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 22</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
                 <div class="nk-knob-val" id="nk-knob-val-4">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 20</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 23</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
                 <div class="nk-knob-val" id="nk-knob-val-5">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 21</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 24</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
                 <div class="nk-knob-val" id="nk-knob-val-6">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 22</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 25</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
                 <div class="nk-knob-val" id="nk-knob-val-7">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 23</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 26</div>
               </div>
               <div class="nk-knob-item">
                 <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
                 <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
                 <div class="nk-knob-val" id="nk-knob-val-8">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 24</div>
+                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 27</div>
               </div>
             </div>
           </div>
@@ -2163,7 +2163,7 @@ local HTML_UI_CONTENT = [[
             <div class="nk-pads-grid">
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Arp Type</div>
-                <div class="nk-pad" id="nk-pad-1" data-pad="1">
+                <div class="nk-pad" id="nk-pad-1" data-pad="1" data-cc="43" title="PAD 1 — Arp Type (CC #43)">
                   <span class="nk-pad-name">PAD 1</span>
                   <span class="nk-pad-chord">CHORD 1</span>
                   <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
@@ -2171,7 +2171,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Arp Range</div>
-                <div class="nk-pad" id="nk-pad-2" data-pad="2">
+                <div class="nk-pad" id="nk-pad-2" data-pad="2" data-cc="48" title="PAD 2 — Arp Range (CC #48)">
                   <span class="nk-pad-name">PAD 2</span>
                   <span class="nk-pad-chord">CHORD 2</span>
                   <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
@@ -2179,7 +2179,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Key Sync</div>
-                <div class="nk-pad" id="nk-pad-3" data-pad="3">
+                <div class="nk-pad" id="nk-pad-3" data-pad="3" data-cc="50" title="PAD 3 — Key Sync (CC #50)">
                   <span class="nk-pad-name">PAD 3</span>
                   <span class="nk-pad-chord">CHORD 3</span>
                   <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
@@ -2187,7 +2187,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Wireless</div>
-                <div class="nk-pad" id="nk-pad-4" data-pad="4">
+                <div class="nk-pad" id="nk-pad-4" data-pad="4" data-cc="49" title="PAD 4 — Wireless (CC #49)">
                   <span class="nk-pad-name">PAD 4</span>
                   <span class="nk-pad-chord">CHORD 4</span>
                   <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
@@ -2195,7 +2195,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Gate Type -</div>
-                <div class="nk-pad" id="nk-pad-5" data-pad="5">
+                <div class="nk-pad" id="nk-pad-5" data-pad="5" data-cc="36" title="PAD 5 — Gate Type - (CC #36)">
                   <span class="nk-pad-name">PAD 5</span>
                   <span class="nk-pad-chord">CHORD 5</span>
                   <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
@@ -2203,7 +2203,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Gate Type +</div>
-                <div class="nk-pad" id="nk-pad-6" data-pad="6">
+                <div class="nk-pad" id="nk-pad-6" data-pad="6" data-cc="38" title="PAD 6 — Gate Type + (CC #38)">
                   <span class="nk-pad-name">PAD 6</span>
                   <span class="nk-pad-chord">CHORD 6</span>
                   <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
@@ -2211,7 +2211,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Scale -</div>
-                <div class="nk-pad" id="nk-pad-7" data-pad="7">
+                <div class="nk-pad" id="nk-pad-7" data-pad="7" data-cc="42" title="PAD 7 — Scale - (CC #42)">
                   <span class="nk-pad-name">PAD 7</span>
                   <span class="nk-pad-chord">CHORD 7</span>
                   <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
@@ -2219,7 +2219,7 @@ local HTML_UI_CONTENT = [[
               </div>
               <div class="nk-pad-cell">
                 <div class="nk-pad-hdr">Scale +</div>
-                <div class="nk-pad" id="nk-pad-8" data-pad="8">
+                <div class="nk-pad" id="nk-pad-8" data-pad="8" data-cc="46" title="PAD 8 — Scale + (CC #46)">
                   <span class="nk-pad-name">PAD 8</span>
                   <span class="nk-pad-chord">CHORD 8</span>
                   <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
@@ -4625,7 +4625,7 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
     if (xEl && value !== null && value !== undefined) xEl.textContent = value;
     return;
   }
-  if (controlId === 'cc_2' || controlId === 'cc_29') {
+  if (controlId === 'cc_2' || controlId === 'cc_29' || controlId === 'cc_19') {
     const cur = document.getElementById('nk-touch-cursor');
     const yEl = document.getElementById('nk-touch-y');
     if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';
