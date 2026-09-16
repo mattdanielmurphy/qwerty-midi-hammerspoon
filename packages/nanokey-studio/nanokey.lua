@@ -197,7 +197,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     return true
   end
 
-  -- 2. Check for Scene Button via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 40 40 7f/00 00 f7)
+  -- 2. Check for Scene Button and Function Buttons via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 ...)
   if commandType == "systemExclusive" then
     local fullHex = string.lower(dataHex .. sysexDataHex)
     if string.find(fullHex, "4140407f") then
@@ -212,6 +212,18 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       computeActiveLayer()
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("btn_scene", 0, false, activeLayer)
+      end
+      return true
+    elseif string.find(fullHex, "414001") then
+      log("SysEx Native Button: Octave Up / Scale Increment (+1)")
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("btn_oct_up", 127, true, activeLayer)
+      end
+      return true
+    elseif string.find(fullHex, "414000") then
+      log("SysEx Native Button: Octave Down / Scale Decrement (-1)")
+      if hudRef and hudRef.updateNanoKeyControl then
+        hudRef.updateNanoKeyControl("btn_oct_down", 127, true, activeLayer)
       end
       return true
     end
@@ -484,6 +496,35 @@ end
 
 function nanoKey.isConnected()
   return midiDevice ~= nil
+end
+
+function nanoKey.enableNativeMode()
+  if midiDevice and midiDevice.sendSysex then
+    log("Sending Korg Native Mode SysEx Handshake...")
+    midiDevice:sendSysex("f07e7f0601f7")
+    hs.timer.doAfter(0.1, function()
+      if midiDevice and midiDevice.sendSysex then
+        midiDevice:sendSysex("f0424000013601000012f7")
+      end
+    end)
+    hs.timer.doAfter(0.25, function()
+      if midiDevice and midiDevice.sendSysex then
+        midiDevice:sendSysex("f042400001360200000001f7")
+        log("Native Mode SysEx Handshake dispatched.")
+      end
+    end)
+    return true
+  end
+  return false
+end
+
+function nanoKey.disableNativeMode()
+  if midiDevice and midiDevice.sendSysex then
+    midiDevice:sendSysex("f042400001360200000000f7")
+    log("Restored factory normal mode.")
+    return true
+  end
+  return false
 end
 
 -- Auto-reconnect watcher

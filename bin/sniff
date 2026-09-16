@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$DIR/.." && pwd)"
+
+# Ensure compiled binary exists
+if [ ! -f "$PROJECT_ROOT/bin/nanokey-button-sniffer" ]; then
+  echo "Compiling nanokey-button-sniffer..."
+  swiftc -O "$PROJECT_ROOT/tools/nanokey-sniffer/main.swift" -o "$PROJECT_ROOT/bin/nanokey-button-sniffer"
+fi
+
+exec "$PROJECT_ROOT/bin/nanokey-button-sniffer" "$@"
