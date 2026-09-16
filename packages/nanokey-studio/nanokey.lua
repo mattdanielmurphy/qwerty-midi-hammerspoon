@@ -1,9 +1,12 @@
--- packages/nanokey-studio/nanokey.lua
--- Hardware driver and layer manager for Korg nanoKEY Studio in Hammerspoon.
-
 local macros = require("macros")
 local midi = nil
 pcall(function() midi = require("midi") end)
+local harmony = nil
+pcall(function() harmony = require("harmony") end)
+local quantizer = nil
+pcall(function() quantizer = require("quantizer") end)
+local config = nil
+pcall(function() config = require("config") end)
 
 local nanoKey = {}
 local midiDevice = nil
@@ -12,6 +15,8 @@ local sustainHeld = false
 local sceneHeld = false
 local hudRef = nil
 local onStateChangeCallback = nil
+local activePadChords = {}
+
 
 local function log(msg)
   local line = os.date("%H:%M:%S") .. " [nanoKEY Studio]: " .. tostring(msg)
@@ -310,13 +315,89 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           return true
         end
       else
-        -- Base Performance mode pad hit
+        -- Base Performance mode pad hit: Send Diatonic Chord to MIDI output
+        local st = config and config.state or {}
+        local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
+        local ch = st.bottomRowChannel or 0
+        local bpm = st.arpBpm or 120.0
+        local quantMode = st.inputQuantizeMode or "Off"
+
+        activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
+
+        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
+          quantizer.queueNoteOn("nk_pad_" .. padIdx, chordInfo.pitches, padVel, ch, bpm, quantMode, function(pitches, vel, channel)
+            if midi then
+              for _, p in ipairs(pitches) do
+                midi.sendMidiNote("noteOn", p, vel, channel)
+              end
+            end
+            if hudRef and hudRef.updateNanoKeyControl then
+              for _, p in ipairs(pitches) do
+                hudRef.updateNanoKeyControl("key_" .. p, vel, true, activeLayer, { fromPad = padIdx })
+              end
+            end
+          end)
+        else
+          if midi then
+            for _, p in ipairs(chordInfo.pitches) do
+              midi.sendMidiNote("noteOn", p, padVel, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(chordInfo.pitches) do
+              hudRef.updateNanoKeyControl("key_" .. p, padVel, true, activeLayer, { fromPad = padIdx })
+            end
+          end
+        end
+
         if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { note = note, cc = cc, velocity = padVel })
+          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, {
+            note = note,
+            cc = cc,
+            velocity = padVel,
+            chord = chordInfo.name,
+            roman = chordInfo.roman,
+            pitches = chordInfo.pitches
+          })
         end
       end
       return true
     elseif isUp then
+      if activeLayer == "base" then
+        local saved = activePadChords[padIdx]
+        local pitchesToRelease = saved and saved.pitches or {}
+        local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
+        local st = config and config.state or {}
+        local quantMode = st.inputQuantizeMode or "Off"
+
+        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
+          quantizer.queueNoteOff("nk_pad_" .. padIdx, function(pitches, channel)
+            if midi then
+              for _, p in ipairs(pitches) do
+                midi.sendMidiNote("noteOff", p, 0, channel)
+              end
+            end
+            if hudRef and hudRef.updateNanoKeyControl then
+              for _, p in ipairs(pitches) do
+                hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+              end
+            end
+          end)
+        else
+          if midi then
+            for _, p in ipairs(pitchesToRelease) do
+              midi.sendMidiNote("noteOff", p, 0, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(pitchesToRelease) do
+              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+            end
+          end
+        end
+        activePadChords[padIdx] = nil
+      end
+
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note, cc = cc })
       end
@@ -355,15 +436,46 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       end
 
       -- Base performance key down
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
+      local st = config and config.state or {}
+      local quantMode = st.inputQuantizeMode or "Off"
+
+      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
+        local bpm = st.arpBpm or 120.0
+        quantizer.queueNoteOn("nk_key_" .. note, { note }, vel, ch, bpm, quantMode, function(pitches, v, c)
+          if midi then
+            midi.sendMidiNote("noteOn", pitches[1], v, c)
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            hudRef.updateNanoKeyControl("key_" .. pitches[1], v, true, activeLayer, { note = pitches[1], velocity = v })
+          end
+        end)
+        return true -- Intercept hardware note to fire quantized on beat
+      else
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
+        end
+        return false -- Native hardware pass-through
       end
-      return false
     elseif isUp then
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
+      local st = config and config.state or {}
+      local quantMode = st.inputQuantizeMode or "Off"
+
+      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
+        quantizer.queueNoteOff("nk_key_" .. note, function(pitches, c)
+          if midi then
+            midi.sendMidiNote("noteOff", pitches[1], 0, c)
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            hudRef.updateNanoKeyControl("key_" .. pitches[1], 0, false, activeLayer, { note = pitches[1] })
+          end
+        end)
+        return true
+      else
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
+        end
+        return false
       end
-      return false
     end
   end
 
@@ -401,13 +513,37 @@ function nanoKey.handleGuiAction(actionType, data)
           local mName = padSceneMacros[padIdx]
           if mName then macros.execute(mName) end
         else
+          local st = config and config.state or {}
+          local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
+          local ch = st.bottomRowChannel or 0
+          activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
           if midi then
-            midi.sendMidiNote("noteOn", 63 + padIdx, 100, 1)
+            for _, p in ipairs(chordInfo.pitches) do
+              midi.sendMidiNote("noteOn", p, 100, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(chordInfo.pitches) do
+              hudRef.updateNanoKeyControl("key_" .. p, 100, true, activeLayer, { fromPad = padIdx })
+            end
           end
         end
       else
-        if activeLayer == "base" and midi then
-          midi.sendMidiNote("noteOff", 63 + padIdx, 0, 1)
+        if activeLayer == "base" then
+          local saved = activePadChords[padIdx]
+          local pitchesToRelease = saved and saved.pitches or {}
+          local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
+          if midi then
+            for _, p in ipairs(pitchesToRelease) do
+              midi.sendMidiNote("noteOff", p, 0, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(pitchesToRelease) do
+              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+            end
+          end
+          activePadChords[padIdx] = nil
         end
       end
       if hudRef and hudRef.updateNanoKeyControl then

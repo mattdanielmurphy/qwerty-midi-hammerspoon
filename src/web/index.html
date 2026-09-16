@@ -1979,9 +1979,18 @@
         <option value="18">1/64T</option>
       </select>
       <select id="arp-quantize-select" class="badge-small" title="Arp Note Change Quantization">
-        <option value="None">SYNC: OFF</option>
-        <option value="Beat">SYNC: BEAT</option>
-        <option value="Bar">SYNC: BAR</option>
+        <option value="None">ARP SYNC: OFF</option>
+        <option value="Beat">ARP SYNC: BEAT</option>
+        <option value="Bar">ARP SYNC: BAR</option>
+      </select>
+      <select id="input-quantize-select" class="badge-small" title="Real-Time Input Quantization Grid">
+        <option value="Off">QUANT: OFF</option>
+        <option value="1/1">QUANT: 1/1</option>
+        <option value="1/2">QUANT: 1/2</option>
+        <option value="1/4">QUANT: 1/4</option>
+        <option value="1/8">QUANT: 1/8</option>
+        <option value="1/16">QUANT: 1/16</option>
+        <option value="1/32">QUANT: 1/32</option>
       </select>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
@@ -3607,6 +3616,18 @@
       });
     }
 
+    const inputQuantizeSelect = document.getElementById('input-quantize-select');
+    if (inputQuantizeSelect) {
+      inputQuantizeSelect.addEventListener('change', (e) => {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'setInputQuantize',
+            value: e.target.value
+          });
+        }
+      });
+    }
+
     // BPM Editor handlers
     let hasBpmDragged = false;
     const bpmValue = document.getElementById('bpm-value');
@@ -4235,6 +4256,20 @@
         if (arpQuantSelect) arpQuantSelect.value = data.arpQuantizeMode;
       }
 
+      if (data.inputQuantizeMode !== undefined) {
+        const inQuantSelect = document.getElementById('input-quantize-select');
+        if (inQuantSelect) inQuantSelect.value = data.inputQuantizeMode;
+      }
+
+      if (data.padChords && Array.isArray(data.padChords)) {
+        for (let i = 1; i <= 8; i++) {
+          const padChordEl = document.querySelector('#nk-pad-' + i + ' .nk-pad-chord');
+          if (padChordEl && data.padChords[i - 1]) {
+            padChordEl.textContent = data.padChords[i - 1];
+          }
+        }
+      }
+
       if (data.bpmDisplay !== undefined) {
         const bpmVal = document.getElementById('bpm-value');
         if (bpmVal) {
@@ -4641,6 +4676,10 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
       if (pressed) {
         pad.classList.add('fired');
         setTimeout(() => pad.classList.remove('fired'), 120);
+      }
+      if (extra && extra.chord) {
+        const chordEl = pad.querySelector('.nk-pad-chord');
+        if (chordEl) chordEl.textContent = extra.chord;
       }
     }
     return;

@@ -20,6 +20,11 @@ local function generateSettingsHTML()
   local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
   bpmSel[tostring(bpmStep)] = "selected"
 
+  -- Build input quantize selected states
+  local inputQuant = state.inputQuantizeMode or "Off"
+  local quantSel = { ["Off"]="", ["1/1"]="", ["1/2"]="", ["1/4"]="", ["1/8"]="", ["1/16"]="" }
+  quantSel[inputQuant] = "selected"
+
   -- Build zoom selected states
   local zoomSel = {}
   for _, v in ipairs({0.8, 1.0, 1.2, 1.4}) do
@@ -443,6 +448,21 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
+          <strong>Input Quantization</strong>
+          <span>Real-time snapping for keys &amp; pads</span>
+        </div>
+        <select id="inputQuantize" onchange="send('setInputQuantize', this.value)">
+          <option value="Off" %s>OFF (Instant)</option>
+          <option value="1/1" %s>1/1 (Whole Note)</option>
+          <option value="1/2" %s>1/2 (Half Note)</option>
+          <option value="1/4" %s>1/4 (Quarter Note)</option>
+          <option value="1/8" %s>1/8 (Eighth Note)</option>
+          <option value="1/16" %s>1/16 (Sixteenth Note)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
           <strong>Sync to Logic Pro</strong>
           <span>Auto-match BPM with active session</span>
         </div>
@@ -726,6 +746,10 @@ local function generateSettingsHTML()
       var el = document.getElementById('bpmStepSize');
       if (el) el.value = String(s.bpmStepSize);
     }
+    if (s.inputQuantizeMode !== undefined) {
+      var el = document.getElementById('inputQuantize');
+      if (el) el.value = String(s.inputQuantizeMode);
+    }
     if (s.logicSyncEnabled !== undefined) {
       var el = document.getElementById('logicSync');
       if (el) el.checked = !!s.logicSyncEnabled;
@@ -795,6 +819,8 @@ local function generateSettingsHTML()
     curveFmt, curveFmt,
     -- bpm step selects
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
+    -- input quantize selects
+    quantSel["Off"], quantSel["1/1"], quantSel["1/2"], quantSel["1/4"], quantSel["1/8"], quantSel["1/16"],
     -- logic sync checked
     logicSync and "checked" or "",
     -- ui
@@ -829,6 +855,11 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 10
       state.bpmStepSize = val
       hs.settings.set("qwertyMidi_bpmStepSize", val)
+    elseif act == "setInputQuantize" then
+      local val = tostring(body.value or "Off")
+      state.inputQuantizeMode = val
+      hs.settings.set("qwertyMidi_inputQuantizeMode", val)
+      pcall(function() require("hud").updateWebviewHud() end)
     elseif act == "setGatePercent" then
       state.arpGatePercent = val
       hs.settings.set("qwertyMidi_arpGatePercent", val)
@@ -950,6 +981,7 @@ local function syncStateToWebview()
   if not _G.activeWatchers.settingsWebview then return end
   local s = {
     bpmStepSize = state.bpmStepSize or 10,
+    inputQuantizeMode = state.inputQuantizeMode or "Off",
     logicSyncEnabled = state.logicSyncEnabled,
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,

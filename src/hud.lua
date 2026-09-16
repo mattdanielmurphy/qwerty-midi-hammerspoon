@@ -370,6 +370,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
+    inputQuantizeMode = state.inputQuantizeMode or "Off",
+    padChords = {
+      transposer.getDiatonicPadChord(1).name,
+      transposer.getDiatonicPadChord(2).name,
+      transposer.getDiatonicPadChord(3).name,
+      transposer.getDiatonicPadChord(4).name,
+      transposer.getDiatonicPadChord(5).name,
+      transposer.getDiatonicPadChord(6).name,
+      transposer.getDiatonicPadChord(7).name,
+      transposer.getDiatonicPadChord(8).name
+    },
     stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
     rootIdx = state.currentRoot,
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
@@ -548,6 +559,17 @@ local function createMidiWebview()
         value = string.upper(body.value),
         subtext = "Note Change Quantization",
         targetId = "arp-quantize-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setInputQuantize" and body.value ~= nil then
+      state.inputQuantizeMode = body.value
+      hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
+      local spot = {
+        title = "INPUT QUANTIZE",
+        value = string.upper(body.value),
+        subtext = "Live Input Quantization Grid",
+        targetId = "input-quantize-select",
         color = "#d4a359"
       }
       updateWebviewHud(spot)

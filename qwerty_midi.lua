@@ -1549,6 +1549,70 @@ local function getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
   return pitches
 end
 
+--- Compute diatonic chord pitches and name for nanoKEY Studio pads (1..8)
+-- @param padIdx number (1..8)
+-- @param state table controller state
+-- @return table { pitches = {...}, name = string, roman = string }
+local function getDiatonicPadChord(padIdx, state)
+  state = state or {}
+  padIdx = math.max(1, math.min(8, padIdx or 1))
+
+  local scaleIdx = state.currentScaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local numIntervals = #intervals
+  local root = state.currentRoot or 0
+  local octaveShift = state.octaveShift or 0
+
+  local chordList = state.CHORDS or CHORDS
+  local chordDef = chordList[state.chordIdx or 1] or chordList[1]
+  local offsets = chordDef.offsets or { 0, 2, 4 }
+
+  local degree = padIdx - 1
+  local baseOctave = 48 -- C3 foundation
+
+  local pitches = {}
+  local degreeRootPitch = nil
+
+  for i, off in ipairs(offsets) do
+    local step = degree + off
+    local octOffset = math.floor(step / numIntervals)
+    local idxInScale = (step % numIntervals) + 1
+    local targetInterval = intervals[idxInScale]
+    local pitch = baseOctave + (octOffset * 12) + root + targetInterval + octaveShift
+    table.insert(pitches, pitch)
+    if i == 1 then degreeRootPitch = pitch end
+  end
+
+  -- Determine chord name and quality
+  local rootName = NOTE_NAMES[((degreeRootPitch or baseOctave) % 12) + 1]
+  local quality = ""
+  if #pitches >= 3 then
+    local thirdInterval = (pitches[2] - pitches[1]) % 12
+    local fifthInterval = (pitches[3] - pitches[1]) % 12
+    if thirdInterval == 3 and fifthInterval == 7 then
+      quality = "m"
+    elseif thirdInterval == 4 and fifthInterval == 7 then
+      quality = ""
+    elseif thirdInterval == 3 and fifthInterval == 6 then
+      quality = "dim"
+    elseif thirdInterval == 4 and fifthInterval == 8 then
+      quality = "aug"
+    end
+  end
+
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°", "I" }
+  local roman = ROMAN_NUMERALS[padIdx] or tostring(padIdx)
+  local fullName = rootName .. quality .. (padIdx == 8 and " (8va)" or "")
+
+  return {
+    pitches = pitches,
+    name = fullName,
+    roman = roman,
+    rootPitch = degreeRootPitch
+  }
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
@@ -1558,8 +1622,10 @@ return {
   getIntervalInfo = getIntervalInfo,
   getTransposedPitch = getTransposedPitch,
   getTransposedChordPitches = getTransposedChordPitches,
-  getChordPitches = getTransposedChordPitches
+  getChordPitches = getTransposedChordPitches,
+  getDiatonicPadChord = getDiatonicPadChord
 }
+
 
 end
 
@@ -1616,6 +1682,197 @@ return {
   bpmToIntervalSeconds = bpmToIntervalSeconds,
   getGateDurationSeconds = getGateDurationSeconds
 }
+
+end
+
+__modules["quantizer"] = function()
+-- packages/music-engine/quantizer.lua
+-- Real-time input quantization engine for MIDI keys, pads, and chords.
+
+local quantizer = {}
+
+local QUANTIZE_FACTORS = {
+  ["Off"]  = nil,
+  ["None"] = nil,
+  ["1/1"]  = 4.0,     -- Whole note
+  ["1/2"]  = 2.0,     -- Half note
+  ["1/4"]  = 1.0,     -- Quarter note
+  ["1/8"]  = 0.5,     -- Eighth note
+  ["1/16"] = 0.25,    -- Sixteenth note
+  ["1/32"] = 0.125    -- Thirty-second note
+}
+
+local gridReferenceTime = hs.timer.absoluteTime() / 1e9
+local pendingEvents = {} -- [eventId] = { pitches = {}, channel = 0, vel = 100, onFired = false, released = false, timer = ... }
+local activePlayingNotes = {} -- [pitch_ch] = count of held instances
+
+function quantizer.resetGrid()
+  gridReferenceTime = hs.timer.absoluteTime() / 1e9
+end
+
+function quantizer.getQuantizeFactors()
+  return QUANTIZE_FACTORS
+end
+
+--- Calculate delay in seconds until the next quantized grid tick.
+-- @param bpm number
+-- @param mode string (e.g. "1/4", "1/8", "1/16", "Off")
+-- @return number delay in seconds (0 if Off or on-beat)
+function quantizer.calculateDelay(bpm, mode)
+  if not mode or mode == "Off" or mode == "None" then
+    return 0
+  end
+  local factor = QUANTIZE_FACTORS[mode]
+  if not factor then
+    return 0
+  end
+
+  local clampedBpm = math.max(20.0, math.min(999.0, bpm or 120.0))
+  local quarterSec = 60.0 / clampedBpm
+  local stepDuration = quarterSec * factor
+
+  local now = hs.timer.absoluteTime() / 1e9
+  local elapsed = (now - gridReferenceTime) % stepDuration
+  local timeToNext = stepDuration - elapsed
+
+  -- Tolerance window:
+  -- If struck within 12ms before the beat, consider it on the beat now
+  if timeToNext <= 0.012 then
+    return 0
+  end
+  -- If struck within 20ms after the beat, catch up immediately (prevent full step lag)
+  if elapsed <= 0.020 then
+    return 0
+  end
+
+  return timeToNext
+end
+
+--- Schedule or immediately execute a Note On / Chord event through quantization.
+-- @param eventId string unique identifier (e.g. "pad_1" or "key_48")
+-- @param pitches table list of MIDI note numbers e.g. {48, 52, 55}
+-- @param vel number velocity (1..127)
+-- @param ch number MIDI channel (0..15)
+-- @param bpm number active BPM
+-- @param mode string quantize mode ("Off", "1/4", "1/8", etc.)
+-- @param onTrigger function(pitches, vel, ch) callback executed when note fires
+function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
+  if type(pitches) == "number" then
+    pitches = { pitches }
+  end
+  ch = ch or 0
+  vel = vel or 100
+
+  -- Cancel any previous pending event for this ID
+  if pendingEvents[eventId] and pendingEvents[eventId].timer then
+    pcall(function() pendingEvents[eventId].timer:stop() end)
+    pendingEvents[eventId] = nil
+  end
+
+  local delay = quantizer.calculateDelay(bpm, mode)
+
+  if delay <= 0 then
+    -- Immediate playback (No quantization or landed on grid)
+    pendingEvents[eventId] = {
+      pitches = pitches,
+      channel = ch,
+      vel = vel,
+      onFired = true,
+      released = false
+    }
+    for _, p in ipairs(pitches) do
+      local key = p .. "_" .. ch
+      activePlayingNotes[key] = (activePlayingNotes[key] or 0) + 1
+    end
+    if onTrigger then onTrigger(pitches, vel, ch) end
+    return 0
+  else
+    -- Quantized schedule
+    local ev = {
+      pitches = pitches,
+      channel = ch,
+      vel = vel,
+      onFired = false,
+      released = false
+    }
+    pendingEvents[eventId] = ev
+
+    ev.timer = hs.timer.doAfter(delay, function()
+      ev.timer = nil
+      ev.onFired = true
+
+      for _, p in ipairs(pitches) do
+        local key = p .. "_" .. ch
+        activePlayingNotes[key] = (activePlayingNotes[key] or 0) + 1
+      end
+
+      if onTrigger then onTrigger(pitches, vel, ch) end
+
+      -- If the user already released the key/pad before the grid arrived (staccato tap),
+      -- hold for minimum musical gate duration, then trigger release.
+      if ev.released then
+        local factor = QUANTIZE_FACTORS[mode] or 1.0
+        local clampedBpm = math.max(20.0, math.min(999.0, bpm or 120.0))
+        local stepSec = (60.0 / clampedBpm) * factor
+        local gateTime = math.max(0.060, stepSec * 0.6) -- 60% of step or min 60ms
+
+        hs.timer.doAfter(gateTime, function()
+          if ev.onRelease then ev.onRelease(pitches, ch) end
+          for _, p in ipairs(pitches) do
+            local key = p .. "_" .. ch
+            if activePlayingNotes[key] then
+              activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+            end
+          end
+          pendingEvents[eventId] = nil
+        end)
+      end
+    end)
+
+    return delay
+  end
+end
+
+--- Handle Note Off for a quantized event.
+-- @param eventId string unique identifier
+-- @param onRelease function(pitches, ch) callback executed to send noteOff
+function quantizer.queueNoteOff(eventId, onRelease)
+  local ev = pendingEvents[eventId]
+  if not ev then return end
+
+  ev.released = true
+  ev.onRelease = onRelease
+
+  if ev.onFired then
+    -- Note has already fired on the grid, release it immediately
+    if onRelease then onRelease(ev.pitches, ev.channel) end
+    for _, p in ipairs(ev.pitches) do
+      local key = p .. "_" .. ev.channel
+      if activePlayingNotes[key] then
+        activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+      end
+    end
+    pendingEvents[eventId] = nil
+  else
+    -- Note hasn't fired yet! When timer fires, the staccato gate logic in queueNoteOn will release it.
+  end
+end
+
+--- Panic / clean all pending quantized events
+function quantizer.panic(onReleaseAll)
+  for eventId, ev in pairs(pendingEvents) do
+    if ev.timer then
+      pcall(function() ev.timer:stop() end)
+    end
+    if ev.onFired and onReleaseAll then
+      pcall(function() onReleaseAll(ev.pitches, ev.channel) end)
+    end
+  end
+  pendingEvents = {}
+  activePlayingNotes = {}
+end
+
+return quantizer
 
 end
 
@@ -1763,12 +2020,15 @@ return macros
 end
 
 __modules["nanokey"] = function()
--- packages/nanokey-studio/nanokey.lua
--- Hardware driver and layer manager for Korg nanoKEY Studio in Hammerspoon.
-
 local macros = __require("macros")
 local midi = nil
 pcall(function() midi = __require("midi") end)
+local harmony = nil
+pcall(function() harmony = __require("harmony") end)
+local quantizer = nil
+pcall(function() quantizer = __require("quantizer") end)
+local config = nil
+pcall(function() config = __require("config") end)
 
 local nanoKey = {}
 local midiDevice = nil
@@ -1777,6 +2037,8 @@ local sustainHeld = false
 local sceneHeld = false
 local hudRef = nil
 local onStateChangeCallback = nil
+local activePadChords = {}
+
 
 local function log(msg)
   local line = os.date("%H:%M:%S") .. " [nanoKEY Studio]: " .. tostring(msg)
@@ -2075,13 +2337,89 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
           return true
         end
       else
-        -- Base Performance mode pad hit
+        -- Base Performance mode pad hit: Send Diatonic Chord to MIDI output
+        local st = config and config.state or {}
+        local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
+        local ch = st.bottomRowChannel or 0
+        local bpm = st.arpBpm or 120.0
+        local quantMode = st.inputQuantizeMode or "Off"
+
+        activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
+
+        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
+          quantizer.queueNoteOn("nk_pad_" .. padIdx, chordInfo.pitches, padVel, ch, bpm, quantMode, function(pitches, vel, channel)
+            if midi then
+              for _, p in ipairs(pitches) do
+                midi.sendMidiNote("noteOn", p, vel, channel)
+              end
+            end
+            if hudRef and hudRef.updateNanoKeyControl then
+              for _, p in ipairs(pitches) do
+                hudRef.updateNanoKeyControl("key_" .. p, vel, true, activeLayer, { fromPad = padIdx })
+              end
+            end
+          end)
+        else
+          if midi then
+            for _, p in ipairs(chordInfo.pitches) do
+              midi.sendMidiNote("noteOn", p, padVel, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(chordInfo.pitches) do
+              hudRef.updateNanoKeyControl("key_" .. p, padVel, true, activeLayer, { fromPad = padIdx })
+            end
+          end
+        end
+
         if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { note = note, cc = cc, velocity = padVel })
+          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, {
+            note = note,
+            cc = cc,
+            velocity = padVel,
+            chord = chordInfo.name,
+            roman = chordInfo.roman,
+            pitches = chordInfo.pitches
+          })
         end
       end
       return true
     elseif isUp then
+      if activeLayer == "base" then
+        local saved = activePadChords[padIdx]
+        local pitchesToRelease = saved and saved.pitches or {}
+        local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
+        local st = config and config.state or {}
+        local quantMode = st.inputQuantizeMode or "Off"
+
+        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
+          quantizer.queueNoteOff("nk_pad_" .. padIdx, function(pitches, channel)
+            if midi then
+              for _, p in ipairs(pitches) do
+                midi.sendMidiNote("noteOff", p, 0, channel)
+              end
+            end
+            if hudRef and hudRef.updateNanoKeyControl then
+              for _, p in ipairs(pitches) do
+                hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+              end
+            end
+          end)
+        else
+          if midi then
+            for _, p in ipairs(pitchesToRelease) do
+              midi.sendMidiNote("noteOff", p, 0, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(pitchesToRelease) do
+              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+            end
+          end
+        end
+        activePadChords[padIdx] = nil
+      end
+
       if hudRef and hudRef.updateNanoKeyControl then
         hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note, cc = cc })
       end
@@ -2120,15 +2458,46 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
       end
 
       -- Base performance key down
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
+      local st = config and config.state or {}
+      local quantMode = st.inputQuantizeMode or "Off"
+
+      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
+        local bpm = st.arpBpm or 120.0
+        quantizer.queueNoteOn("nk_key_" .. note, { note }, vel, ch, bpm, quantMode, function(pitches, v, c)
+          if midi then
+            midi.sendMidiNote("noteOn", pitches[1], v, c)
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            hudRef.updateNanoKeyControl("key_" .. pitches[1], v, true, activeLayer, { note = pitches[1], velocity = v })
+          end
+        end)
+        return true -- Intercept hardware note to fire quantized on beat
+      else
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
+        end
+        return false -- Native hardware pass-through
       end
-      return false
     elseif isUp then
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
+      local st = config and config.state or {}
+      local quantMode = st.inputQuantizeMode or "Off"
+
+      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
+        quantizer.queueNoteOff("nk_key_" .. note, function(pitches, c)
+          if midi then
+            midi.sendMidiNote("noteOff", pitches[1], 0, c)
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            hudRef.updateNanoKeyControl("key_" .. pitches[1], 0, false, activeLayer, { note = pitches[1] })
+          end
+        end)
+        return true
+      else
+        if hudRef and hudRef.updateNanoKeyControl then
+          hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
+        end
+        return false
       end
-      return false
     end
   end
 
@@ -2166,13 +2535,37 @@ function nanoKey.handleGuiAction(actionType, data)
           local mName = padSceneMacros[padIdx]
           if mName then macros.execute(mName) end
         else
+          local st = config and config.state or {}
+          local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
+          local ch = st.bottomRowChannel or 0
+          activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
           if midi then
-            midi.sendMidiNote("noteOn", 63 + padIdx, 100, 1)
+            for _, p in ipairs(chordInfo.pitches) do
+              midi.sendMidiNote("noteOn", p, 100, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(chordInfo.pitches) do
+              hudRef.updateNanoKeyControl("key_" .. p, 100, true, activeLayer, { fromPad = padIdx })
+            end
           end
         end
       else
-        if activeLayer == "base" and midi then
-          midi.sendMidiNote("noteOff", 63 + padIdx, 0, 1)
+        if activeLayer == "base" then
+          local saved = activePadChords[padIdx]
+          local pitchesToRelease = saved and saved.pitches or {}
+          local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
+          if midi then
+            for _, p in ipairs(pitchesToRelease) do
+              midi.sendMidiNote("noteOff", p, 0, ch)
+            end
+          end
+          if hudRef and hudRef.updateNanoKeyControl then
+            for _, p in ipairs(pitchesToRelease) do
+              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
+            end
+          end
+          activePadChords[padIdx] = nil
         end
       end
       if hudRef and hudRef.updateNanoKeyControl then
@@ -2764,6 +3157,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpDirectionIdx = state.arpDirectionIdx,
     arpRateIdx = state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
+    inputQuantizeMode = state.inputQuantizeMode or "Off",
+    padChords = {
+      transposer.getDiatonicPadChord(1).name,
+      transposer.getDiatonicPadChord(2).name,
+      transposer.getDiatonicPadChord(3).name,
+      transposer.getDiatonicPadChord(4).name,
+      transposer.getDiatonicPadChord(5).name,
+      transposer.getDiatonicPadChord(6).name,
+      transposer.getDiatonicPadChord(7).name,
+      transposer.getDiatonicPadChord(8).name
+    },
     stackedKeyLabelsInPerformanceMode = state.stackedKeyLabelsInPerformanceMode == true,
     rootIdx = state.currentRoot,
     arpGatePercent = math.floor((state.arpGatePercent or 80.0) + 0.5),
@@ -2942,6 +3346,17 @@ local function createMidiWebview()
         value = string.upper(body.value),
         subtext = "Note Change Quantization",
         targetId = "arp-quantize-select",
+        color = "#d4a359"
+      }
+      updateWebviewHud(spot)
+    elseif body.type == "setInputQuantize" and body.value ~= nil then
+      state.inputQuantizeMode = body.value
+      hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
+      local spot = {
+        title = "INPUT QUANTIZE",
+        value = string.upper(body.value),
+        subtext = "Live Input Quantization Grid",
+        targetId = "input-quantize-select",
         color = "#d4a359"
       }
       updateWebviewHud(spot)
@@ -3469,14 +3884,20 @@ local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
   return harmony.getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
 end
 
+local function getDiatonicPadChord(padIdx)
+  return harmony.getDiatonicPadChord(padIdx, state)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
   noteNumToName = noteNumToName,
   getIntervalInfo = getIntervalInfo,
   getTransposedChordPitches = getTransposedChordPitches,
-  getChordPitches = getTransposedChordPitches
+  getChordPitches = getTransposedChordPitches,
+  getDiatonicPadChord = getDiatonicPadChord
 }
+
 
 end
 
@@ -5463,9 +5884,18 @@ local HTML_UI_CONTENT = [[
         <option value="18">1/64T</option>
       </select>
       <select id="arp-quantize-select" class="badge-small" title="Arp Note Change Quantization">
-        <option value="None">SYNC: OFF</option>
-        <option value="Beat">SYNC: BEAT</option>
-        <option value="Bar">SYNC: BAR</option>
+        <option value="None">ARP SYNC: OFF</option>
+        <option value="Beat">ARP SYNC: BEAT</option>
+        <option value="Bar">ARP SYNC: BAR</option>
+      </select>
+      <select id="input-quantize-select" class="badge-small" title="Real-Time Input Quantization Grid">
+        <option value="Off">QUANT: OFF</option>
+        <option value="1/1">QUANT: 1/1</option>
+        <option value="1/2">QUANT: 1/2</option>
+        <option value="1/4">QUANT: 1/4</option>
+        <option value="1/8">QUANT: 1/8</option>
+        <option value="1/16">QUANT: 1/16</option>
+        <option value="1/32">QUANT: 1/32</option>
       </select>
       <div id="bpm-editor" class="bpm-editor">
         <button id="bpm-down" class="bpm-arrow-btn">&#9662;</button>
@@ -7091,6 +7521,18 @@ local HTML_UI_CONTENT = [[
       });
     }
 
+    const inputQuantizeSelect = document.getElementById('input-quantize-select');
+    if (inputQuantizeSelect) {
+      inputQuantizeSelect.addEventListener('change', (e) => {
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({
+            type: 'setInputQuantize',
+            value: e.target.value
+          });
+        }
+      });
+    }
+
     // BPM Editor handlers
     let hasBpmDragged = false;
     const bpmValue = document.getElementById('bpm-value');
@@ -7719,6 +8161,20 @@ local HTML_UI_CONTENT = [[
         if (arpQuantSelect) arpQuantSelect.value = data.arpQuantizeMode;
       }
 
+      if (data.inputQuantizeMode !== undefined) {
+        const inQuantSelect = document.getElementById('input-quantize-select');
+        if (inQuantSelect) inQuantSelect.value = data.inputQuantizeMode;
+      }
+
+      if (data.padChords && Array.isArray(data.padChords)) {
+        for (let i = 1; i <= 8; i++) {
+          const padChordEl = document.querySelector('#nk-pad-' + i + ' .nk-pad-chord');
+          if (padChordEl && data.padChords[i - 1]) {
+            padChordEl.textContent = data.padChords[i - 1];
+          }
+        }
+      }
+
       if (data.bpmDisplay !== undefined) {
         const bpmVal = document.getElementById('bpm-value');
         if (bpmVal) {
@@ -8126,6 +8582,10 @@ window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
         pad.classList.add('fired');
         setTimeout(() => pad.classList.remove('fired'), 120);
       }
+      if (extra && extra.chord) {
+        const chordEl = pad.querySelector('.nk-pad-chord');
+        if (chordEl) chordEl.textContent = extra.chord;
+      }
     }
     return;
   }
@@ -8279,6 +8739,11 @@ local function generateSettingsHTML()
   -- Build BPM step selected states
   local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
   bpmSel[tostring(bpmStep)] = "selected"
+
+  -- Build input quantize selected states
+  local inputQuant = state.inputQuantizeMode or "Off"
+  local quantSel = { ["Off"]="", ["1/1"]="", ["1/2"]="", ["1/4"]="", ["1/8"]="", ["1/16"]="" }
+  quantSel[inputQuant] = "selected"
 
   -- Build zoom selected states
   local zoomSel = {}
@@ -8703,6 +9168,21 @@ local function generateSettingsHTML()
 
       <div class="row">
         <div class="row-label">
+          <strong>Input Quantization</strong>
+          <span>Real-time snapping for keys &amp; pads</span>
+        </div>
+        <select id="inputQuantize" onchange="send('setInputQuantize', this.value)">
+          <option value="Off" %s>OFF (Instant)</option>
+          <option value="1/1" %s>1/1 (Whole Note)</option>
+          <option value="1/2" %s>1/2 (Half Note)</option>
+          <option value="1/4" %s>1/4 (Quarter Note)</option>
+          <option value="1/8" %s>1/8 (Eighth Note)</option>
+          <option value="1/16" %s>1/16 (Sixteenth Note)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
           <strong>Sync to Logic Pro</strong>
           <span>Auto-match BPM with active session</span>
         </div>
@@ -8986,6 +9466,10 @@ local function generateSettingsHTML()
       var el = document.getElementById('bpmStepSize');
       if (el) el.value = String(s.bpmStepSize);
     }
+    if (s.inputQuantizeMode !== undefined) {
+      var el = document.getElementById('inputQuantize');
+      if (el) el.value = String(s.inputQuantizeMode);
+    }
     if (s.logicSyncEnabled !== undefined) {
       var el = document.getElementById('logicSync');
       if (el) el.checked = !!s.logicSyncEnabled;
@@ -9055,6 +9539,8 @@ local function generateSettingsHTML()
     curveFmt, curveFmt,
     -- bpm step selects
     bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
+    -- input quantize selects
+    quantSel["Off"], quantSel["1/1"], quantSel["1/2"], quantSel["1/4"], quantSel["1/8"], quantSel["1/16"],
     -- logic sync checked
     logicSync and "checked" or "",
     -- ui
@@ -9089,6 +9575,11 @@ local function createSettingsWebview()
       local val = tonumber(body.value) or 10
       state.bpmStepSize = val
       hs.settings.set("qwertyMidi_bpmStepSize", val)
+    elseif act == "setInputQuantize" then
+      local val = tostring(body.value or "Off")
+      state.inputQuantizeMode = val
+      hs.settings.set("qwertyMidi_inputQuantizeMode", val)
+      pcall(function() __require("hud").updateWebviewHud() end)
     elseif act == "setGatePercent" then
       state.arpGatePercent = val
       hs.settings.set("qwertyMidi_arpGatePercent", val)
@@ -9210,6 +9701,7 @@ local function syncStateToWebview()
   if not _G.activeWatchers.settingsWebview then return end
   local s = {
     bpmStepSize = state.bpmStepSize or 10,
+    inputQuantizeMode = state.inputQuantizeMode or "Off",
     logicSyncEnabled = state.logicSyncEnabled,
     arpGatePercent = state.arpGatePercent or 80,
     zoomLevel = state.zoomLevel or 1.0,
@@ -9345,6 +9837,7 @@ local state = {
   },
   arpGatePercent = getSetting("arpGatePercent", 80.0),
   arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
+  inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
@@ -9438,6 +9931,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
   hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
+  hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
   hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
   hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
@@ -10113,6 +10607,7 @@ local config = __require("config")
 local midi = __require("midi")
 local transposer = __require("transposer")
 local arpeggiator = __require("arpeggiator")
+local quantizer = __require("quantizer")
 local hud = __require("hud")
 
 local state = config.state
@@ -11292,9 +11787,15 @@ local function handleKeyDown(code)
     if isArpNote then 
       for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
     else 
-      for _, p in ipairs(chordPitches) do
-        midi.sendMidiNote("noteOn", p, transposer.getEffectiveRowVelocity(isTop), ch)
-      end
+      local quantMode = state.inputQuantizeMode or "Off"
+      local bpm = state.arpBpm or 120.0
+      local vel = transposer.getEffectiveRowVelocity(isTop)
+
+      quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
+        for _, p in ipairs(pitches) do
+          midi.sendMidiNote("noteOn", p, v, channel)
+        end
+      end)
     end
     hud.updateWebviewHud()
     return true
@@ -11338,14 +11839,17 @@ local function handleKeyUp(code)
           break
         end
       end
-      for _, playedPitch in ipairs(pitches) do
-        if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
-          state.sustainedPitches = state.sustainedPitches or {}
-          table.insert(state.sustainedPitches, { pitch = playedPitch, channel = keyChannel })
-        else
-          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+
+      quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
+        for _, playedPitch in ipairs(releasedPitches or pitches) do
+          if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
+            state.sustainedPitches = state.sustainedPitches or {}
+            table.insert(state.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel })
+          else
+            midi.sendMidiNote("noteOff", playedPitch, 0, channel or keyChannel)
+          end
         end
-      end
+      end)
     end
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)

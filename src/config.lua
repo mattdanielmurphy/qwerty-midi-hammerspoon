@@ -78,6 +78,7 @@ local state = {
   },
   arpGatePercent = getSetting("arpGatePercent", 80.0),
   arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
+  inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
@@ -171,6 +172,7 @@ local function saveSettings()
   hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
   hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
   hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
+  hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
   hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
   hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
   hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)

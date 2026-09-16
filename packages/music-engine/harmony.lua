@@ -114,6 +114,70 @@ local function getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
   return pitches
 end
 
+--- Compute diatonic chord pitches and name for nanoKEY Studio pads (1..8)
+-- @param padIdx number (1..8)
+-- @param state table controller state
+-- @return table { pitches = {...}, name = string, roman = string }
+local function getDiatonicPadChord(padIdx, state)
+  state = state or {}
+  padIdx = math.max(1, math.min(8, padIdx or 1))
+
+  local scaleIdx = state.currentScaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local numIntervals = #intervals
+  local root = state.currentRoot or 0
+  local octaveShift = state.octaveShift or 0
+
+  local chordList = state.CHORDS or CHORDS
+  local chordDef = chordList[state.chordIdx or 1] or chordList[1]
+  local offsets = chordDef.offsets or { 0, 2, 4 }
+
+  local degree = padIdx - 1
+  local baseOctave = 48 -- C3 foundation
+
+  local pitches = {}
+  local degreeRootPitch = nil
+
+  for i, off in ipairs(offsets) do
+    local step = degree + off
+    local octOffset = math.floor(step / numIntervals)
+    local idxInScale = (step % numIntervals) + 1
+    local targetInterval = intervals[idxInScale]
+    local pitch = baseOctave + (octOffset * 12) + root + targetInterval + octaveShift
+    table.insert(pitches, pitch)
+    if i == 1 then degreeRootPitch = pitch end
+  end
+
+  -- Determine chord name and quality
+  local rootName = NOTE_NAMES[((degreeRootPitch or baseOctave) % 12) + 1]
+  local quality = ""
+  if #pitches >= 3 then
+    local thirdInterval = (pitches[2] - pitches[1]) % 12
+    local fifthInterval = (pitches[3] - pitches[1]) % 12
+    if thirdInterval == 3 and fifthInterval == 7 then
+      quality = "m"
+    elseif thirdInterval == 4 and fifthInterval == 7 then
+      quality = ""
+    elseif thirdInterval == 3 and fifthInterval == 6 then
+      quality = "dim"
+    elseif thirdInterval == 4 and fifthInterval == 8 then
+      quality = "aug"
+    end
+  end
+
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°", "I" }
+  local roman = ROMAN_NUMERALS[padIdx] or tostring(padIdx)
+  local fullName = rootName .. quality .. (padIdx == 8 and " (8va)" or "")
+
+  return {
+    pitches = pitches,
+    name = fullName,
+    roman = roman,
+    rootPitch = degreeRootPitch
+  }
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
@@ -123,5 +187,7 @@ return {
   getIntervalInfo = getIntervalInfo,
   getTransposedPitch = getTransposedPitch,
   getTransposedChordPitches = getTransposedChordPitches,
-  getChordPitches = getTransposedChordPitches
+  getChordPitches = getTransposedChordPitches,
+  getDiatonicPadChord = getDiatonicPadChord
 }
+

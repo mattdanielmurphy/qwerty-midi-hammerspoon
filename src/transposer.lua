@@ -34,11 +34,17 @@ local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
   return harmony.getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
 end
 
+local function getDiatonicPadChord(padIdx)
+  return harmony.getDiatonicPadChord(padIdx, state)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
   noteNumToName = noteNumToName,
   getIntervalInfo = getIntervalInfo,
   getTransposedChordPitches = getTransposedChordPitches,
-  getChordPitches = getTransposedChordPitches
+  getChordPitches = getTransposedChordPitches,
+  getDiatonicPadChord = getDiatonicPadChord
 }
+

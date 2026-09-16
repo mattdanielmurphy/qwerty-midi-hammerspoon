@@ -2,6 +2,7 @@ local config = require("config")
 local midi = require("midi")
 local transposer = require("transposer")
 local arpeggiator = require("arpeggiator")
+local quantizer = require("quantizer")
 local hud = require("hud")
 
 local state = config.state
@@ -1181,9 +1182,15 @@ local function handleKeyDown(code)
     if isArpNote then 
       for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
     else 
-      for _, p in ipairs(chordPitches) do
-        midi.sendMidiNote("noteOn", p, transposer.getEffectiveRowVelocity(isTop), ch)
-      end
+      local quantMode = state.inputQuantizeMode or "Off"
+      local bpm = state.arpBpm or 120.0
+      local vel = transposer.getEffectiveRowVelocity(isTop)
+
+      quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
+        for _, p in ipairs(pitches) do
+          midi.sendMidiNote("noteOn", p, v, channel)
+        end
+      end)
     end
     hud.updateWebviewHud()
     return true
@@ -1227,14 +1234,17 @@ local function handleKeyUp(code)
           break
         end
       end
-      for _, playedPitch in ipairs(pitches) do
-        if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
-          state.sustainedPitches = state.sustainedPitches or {}
-          table.insert(state.sustainedPitches, { pitch = playedPitch, channel = keyChannel })
-        else
-          midi.sendMidiNote("noteOff", playedPitch, 0, keyChannel)
+
+      quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
+        for _, playedPitch in ipairs(releasedPitches or pitches) do
+          if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
+            state.sustainedPitches = state.sustainedPitches or {}
+            table.insert(state.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel })
+          else
+            midi.sendMidiNote("noteOff", playedPitch, 0, channel or keyChannel)
+          end
         end
-      end
+      end)
     end
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
