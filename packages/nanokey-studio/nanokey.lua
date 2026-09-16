@@ -88,7 +88,7 @@ local KORG_KONTROL_PAD_MAP = {
 
 local function noteToPadIndex(note, ch)
   if not note then return nil end
-  -- Channel 1 (ch = 0) is strictly reserved for keyboard keys — NEVER trigger pads
+  -- Channel 1 (ch = 0) is strictly reserved for keyboard keys — NEVER trigger pads via note
   if ch == 0 then return nil end
 
   if ch == 9 or ch == 1 then
@@ -99,6 +99,25 @@ local function noteToPadIndex(note, ch)
     elseif note >= 64 and note <= 71 then
       return note - 63
     end
+  end
+  return nil
+end
+
+-- Support CC-mapped pads on any channel (including Global / Channel 1):
+-- CC 80..87: General Purpose Controllers 5–8 / Undefined (recommended standard)
+-- CC 102..109: Undefined MIDI CCs
+-- CC 112..119: Undefined MIDI CCs
+-- CC 36..43: Matching GM drum note numbers as CCs
+local function ccToPadIndex(cc)
+  if not cc then return nil end
+  if cc >= 80 and cc <= 87 then
+    return cc - 79
+  elseif cc >= 102 and cc <= 109 then
+    return cc - 101
+  elseif cc >= 112 and cc <= 119 then
+    return cc - 111
+  elseif cc >= 36 and cc <= 43 then
+    return cc - 35
   end
   return nil
 end
@@ -237,12 +256,29 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
     end
   end
 
-  -- 5. Pad Triggers (Channel 2: notes 64..71 default, or drum channel 10: notes 36..43)
-  local padIdx = noteToPadIndex(note, ch)
-  if padIdx then
-    local isDown = (commandType == "noteOn" and vel and vel > 0)
-    local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
+  -- 5. Pad Triggers (Control Change on any channel e.g. CC 80..87, or Note on Ch 2 / Ch 10)
+  local padIdx = nil
+  local isDown = false
+  local isUp = false
+  local padVel = 100
 
+  if commandType == "controlChange" and cc then
+    padIdx = ccToPadIndex(cc)
+    if padIdx then
+      isDown = (val and val > 0)
+      isUp = (val == 0 or val == nil)
+      padVel = (val and val > 0) and val or 100
+    end
+  elseif (commandType == "noteOn" or commandType == "noteOff") and note then
+    padIdx = noteToPadIndex(note, ch)
+    if padIdx then
+      isDown = (commandType == "noteOn" and vel and vel > 0)
+      isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
+      padVel = vel or 100
+    end
+  end
+
+  if padIdx then
     if isDown then
       -- Macro Layer 1: Sustain Held -> Transport & Window Management
       if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
@@ -254,7 +290,7 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
         if mName then
           macros.execute(mName)
           if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { macro = mName })
+            hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { macro = mName, cc = cc, note = note })
           end
           return true
         end
@@ -268,20 +304,20 @@ function nanoKey.handleMidiEvent(commandType, description, metadata)
         if mName then
           macros.execute(mName)
           if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { macro = mName })
+            hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { macro = mName, cc = cc, note = note })
           end
           return true
         end
       else
         -- Base Performance mode pad hit
         if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("pad_" .. padIdx, vel, true, activeLayer, { note = note, velocity = vel })
+          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { note = note, cc = cc, velocity = padVel })
         end
       end
       return true
     elseif isUp then
       if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note })
+        hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note, cc = cc })
       end
       return true
     end
