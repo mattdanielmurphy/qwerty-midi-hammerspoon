@@ -702,6 +702,18 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-bpmedit, .key-pad.ctrl-rand, .key-pad.ctrl-panic, .key-pad.ctrl-reset { border-color: rgba(150, 140, 130, 0.4); }
   .key-pad.ctrl-bpmedit .key-note, .key-pad.ctrl-rand .key-note, .key-pad.ctrl-panic .key-note, .key-pad.ctrl-reset .key-note { color: #b5aba0; font-weight: 500; }
 
+  .key-pad.ctrl-track { border-color: rgba(60, 200, 230, 0.5); }
+  .key-pad.ctrl-track .key-note { color: #64d8f0; font-weight: 600; }
+
+  .key-pad.ctrl-lock { border-color: rgba(255, 180, 50, 0.55); }
+  .key-pad.ctrl-lock .key-note { color: #ffb833; font-weight: 600; }
+
+  .key-pad.ctrl-mute { border-color: rgba(235, 90, 100, 0.5); }
+  .key-pad.ctrl-mute .key-note { color: #f0707a; font-weight: 600; }
+
+  .key-pad.ctrl-solo { border-color: rgba(255, 215, 0, 0.55); }
+  .key-pad.ctrl-solo .key-note { color: #ffd700; font-weight: 600; }
+
   .key-pad.dummy-pad {
     opacity: 0.45;
     cursor: default;
@@ -4465,7 +4477,9 @@ local HTML_UI_CONTENT = [[
           if (el) {
             const noteEl = el.querySelector(':scope > .key-note');
             if (noteEl) {
-              if (shiftModeActive && (currentWorkingLayout || {})[code]) {
+              if (k.displayNote !== undefined && k.displayNote !== '') {
+                noteEl.textContent = k.displayNote;
+              } else if (shiftModeActive && (currentWorkingLayout || {})[code]) {
                 const binding = currentWorkingLayout[code];
                 noteEl.textContent = binding.shiftName || binding.shiftAction || binding.name || k.note || '';
               } else if (data.shiftHeld && k.shiftNote !== undefined) {

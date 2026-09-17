@@ -143,6 +143,308 @@ local function setSurfaceView(surface)
   safeEvaluateJS(string.format("if (window.onSurfaceChanged) window.onSurfaceChanged(%q);", tostring(surface)))
 end
 
+local PROPOSED_LAYOUT_MAP = {
+  -- HOME ROW CONTROLS:
+  [48] = { -- Tab
+    base            = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
+    shift           = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
+    opt             = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
+    shift_opt       = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
+    ctrl            = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
+    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
+    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
+    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",   action = "resetAll" },
+  },
+  [0] = { -- A
+    base            = { name = "Arp",         class = "ctrl-arp",     action = "arpToggle" },
+    shift           = { name = "Latch",       class = "ctrl-arp",     action = "arpLatchToggle" },
+    opt             = { name = "Arp Link",    class = "ctrl-arptop",  action = "arpLinkToggle" },
+    shift_opt       = { name = "Split Arp",   class = "ctrl-arpbot",  action = "splitArpToggle" },
+    ctrl            = { name = "Bypass",      class = "ctrl-arp",     action = "arpBypassToggle" },
+    shift_ctrl      = { name = "Bypass",      class = "ctrl-arp",     action = "arpBypassToggle" },
+    ctrl_opt        = { name = "Pattern +",   class = "ctrl-arpdir",  action = "arpDirUp" },
+    ctrl_opt_shift  = { name = "Pattern -",   class = "ctrl-arpdir",  action = "arpDirDown" },
+  },
+  [1] = { -- S
+    base            = { name = "Random",      class = "ctrl-rand",    action = "randomScale" },
+    shift           = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
+    opt             = { name = "Rand Root",   class = "ctrl-root",    action = "randomRoot" },
+    shift_opt       = { name = "Rand Mode",   class = "ctrl-mode",    action = "randomMode" },
+    ctrl            = { name = "Reset All",   class = "ctrl-reset",   action = "resetAll" },
+    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
+    ctrl_opt        = { name = "Rand Rhy",    class = "ctrl-rand",    action = "randomRhythm" },
+    ctrl_opt_shift  = { name = "Rand All",    class = "ctrl-rand",    action = "randomAll" },
+  },
+  [2] = { -- D (Consolidated Octave)
+    base            = { name = "Oct +",       class = "ctrl-oct",     action = "octaveUp" },
+    shift           = { name = "Oct -",       class = "ctrl-oct",     action = "octaveDown" },
+    opt             = { name = "TopOct +",    class = "ctrl-topoct",  action = "topOctUp" },
+    shift_opt       = { name = "TopOct -",    class = "ctrl-topoct",  action = "topOctDown" },
+    ctrl            = { name = "BotOct +",    class = "ctrl-oct",     action = "botOctUp" },
+    shift_ctrl      = { name = "BotOct -",    class = "ctrl-oct",     action = "botOctDown" },
+    ctrl_opt        = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    ctrl_opt_shift  = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+  },
+  [3] = { -- F (NEW FREED KEY: Master Arp & Track Loop Lock)
+    base            = { name = "Arp Latch",   class = "ctrl-lock",    action = "arpLatchToggle" },
+    shift           = { name = "Lock Loop",   class = "ctrl-lock",    action = "lockLoop" },
+    opt             = { name = "Lock & Swap", class = "ctrl-lock",    action = "lockAndSwap" },
+    shift_opt       = { name = "Lock 4 Trk",  class = "ctrl-lock",    action = "lockAllTracks" },
+    ctrl            = { name = "Stop Loops",  class = "ctrl-mute",    action = "stopLoops" },
+    shift_ctrl      = { name = "Stop All",    class = "ctrl-mute",    action = "panic" },
+    ctrl_opt        = { name = "Freeze All",  class = "ctrl-lock",    action = "freezeAll" },
+    ctrl_opt_shift  = { name = "Clear All",   class = "ctrl-mute",    action = "resetAll" },
+  },
+  [5] = { -- G (Consolidated Mode)
+    base            = { name = "Mode +",      class = "ctrl-mode",    action = "modeUp" },
+    shift           = { name = "Mode -",      class = "ctrl-mode",    action = "modeDown" },
+    opt             = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
+    shift_opt       = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
+    ctrl            = { name = "Major",       class = "ctrl-mode",    action = "modeSetMajor" },
+    shift_ctrl      = { name = "Aeolian",     class = "ctrl-mode",    action = "modeSetAeolian" },
+    ctrl_opt        = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+    ctrl_opt_shift  = { name = "Locrian 🌑",  class = "ctrl-mode",    action = "modeSetLocrian" },
+  },
+  [4] = { -- H (Consolidated Root)
+    base            = { name = "Root +",      class = "ctrl-root",    action = "rootUp" },
+    shift           = { name = "Root -",      class = "ctrl-root",    action = "rootDown" },
+    opt             = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
+    shift_opt       = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
+    ctrl            = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
+    shift_ctrl      = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
+    ctrl_opt        = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+    ctrl_opt_shift  = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
+  },
+  [38] = { -- J (Consolidated Transpose)
+    base            = { name = "Trnsp +1",    class = "ctrl-trnsp",   action = "trnspStep1Up" },
+    shift           = { name = "Trnsp -1",    class = "ctrl-trnsp",   action = "trnspStep1Down" },
+    opt             = { name = "Trnsp +2",    class = "ctrl-trnsp",   action = "trnspStep2Up" },
+    shift_opt       = { name = "Trnsp -2",    class = "ctrl-trnsp",   action = "trnspStep2Down" },
+    ctrl_opt        = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
+    ctrl_opt_shift  = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
+    ctrl            = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    shift_ctrl      = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
+  },
+  [40] = { -- K (NEW FREED KEY: Bottom Row Track Focus & Mute - Tracks 1 & 2)
+    base            = { name = "Bot 1⇄2",     class = "ctrl-track",   action = "botTrackToggle" },
+    shift           = { name = "Bot Lock",    class = "ctrl-lock",    action = "botTrackLock" },
+    opt             = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
+    shift_opt       = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
+    ctrl            = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
+    shift_ctrl      = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
+    ctrl_opt        = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
+    ctrl_opt_shift  = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
+  },
+  [37] = { -- L (NEW FREED KEY: Top Row Track Focus & Mute - Tracks 3 & 4)
+    base            = { name = "Top 3⇄4",     class = "ctrl-track",   action = "topTrackToggle" },
+    shift           = { name = "Top Lock",    class = "ctrl-lock",    action = "topTrackLock" },
+    opt             = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
+    shift_opt       = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
+    ctrl            = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
+    shift_ctrl      = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
+    ctrl_opt        = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
+    ctrl_opt_shift  = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
+  },
+  [41] = { -- ; (NEW FREED KEY: Master Track Selector & Performance Mix)
+    base            = { name = "Trk Focus",   class = "ctrl-track",   action = "trackFocusCycle" },
+    shift           = { name = "All Mute",    class = "ctrl-mute",    action = "allMuteToggle" },
+    opt             = { name = "Top Vol +",   class = "ctrl-vol",     action = "topVolUp" },
+    shift_opt       = { name = "Top Vol -",   class = "ctrl-vol",     action = "topVolDown" },
+    ctrl            = { name = "Bot Vol +",   class = "ctrl-vol",     action = "botVolUp" },
+    shift_ctrl      = { name = "Bot Vol -",   class = "ctrl-vol",     action = "botVolDown" },
+    ctrl_opt        = { name = "Mix Reset",   class = "ctrl-vol",     action = "mixReset" },
+    ctrl_opt_shift  = { name = "Master Mute", class = "ctrl-mute",    action = "allMuteToggle" },
+  },
+  [39] = { -- ' (Chord)
+    base            = { name = "Chord",       class = "ctrl-mode",    action = "chordToggle" },
+    shift           = { name = "Chord +",     class = "ctrl-mode",    action = "chordUp" },
+    opt             = { name = "Voicing +",   class = "ctrl-mode",    action = "voicingUp" },
+    shift_opt       = { name = "Voicing -",   class = "ctrl-mode",    action = "voicingDown" },
+    ctrl            = { name = "Inversion +", class = "ctrl-mode",    action = "inversionUp" },
+    shift_ctrl      = { name = "Inversion -", class = "ctrl-mode",    action = "inversionDown" },
+    ctrl_opt        = { name = "Power 1-5",   class = "ctrl-mode",    action = "chordPower" },
+    ctrl_opt_shift  = { name = "Triad",       class = "ctrl-mode",    action = "chordTriad" },
+  },
+
+  -- NUMBER ROW CONTROLS:
+  [18] = { -- 1
+    base            = { name = "Trk 1: Bass", class = "ctrl-track",   action = "trkSelect1" },
+    shift           = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
+    opt             = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
+    shift_opt       = { name = "Trk 1 Lock",  class = "ctrl-lock",    action = "trkLock1" },
+    ctrl            = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
+    shift_ctrl      = { name = "Trk 1 Clear", class = "ctrl-mute",    action = "trkClear1" },
+    ctrl_opt        = { name = "Trk 1 Focus", class = "ctrl-track",   action = "trkFocus1" },
+    ctrl_opt_shift  = { name = "Trk 1 Panic", class = "ctrl-panic",   action = "panic" },
+  },
+  [19] = { -- 2
+    base            = { name = "Trk 2: Chords", class = "ctrl-track", action = "trkSelect2" },
+    shift           = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
+    opt             = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
+    shift_opt       = { name = "Trk 2 Lock",  class = "ctrl-lock",    action = "trkLock2" },
+    ctrl            = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
+    shift_ctrl      = { name = "Trk 2 Clear", class = "ctrl-mute",    action = "trkClear2" },
+    ctrl_opt        = { name = "Trk 2 Focus", class = "ctrl-track",   action = "trkFocus2" },
+    ctrl_opt_shift  = { name = "Trk 2 Panic", class = "ctrl-panic",   action = "panic" },
+  },
+  [20] = { -- 3
+    base            = { name = "Trk 3: Lead", class = "ctrl-track",   action = "trkSelect3" },
+    shift           = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
+    opt             = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
+    shift_opt       = { name = "Trk 3 Lock",  class = "ctrl-lock",    action = "trkLock3" },
+    ctrl            = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
+    shift_ctrl      = { name = "Trk 3 Clear", class = "ctrl-mute",    action = "trkClear3" },
+    ctrl_opt        = { name = "Trk 3 Focus", class = "ctrl-track",   action = "trkFocus3" },
+    ctrl_opt_shift  = { name = "Trk 3 Panic", class = "ctrl-panic",   action = "panic" },
+  },
+  [21] = { -- 4
+    base            = { name = "Trk 4: Arp",  class = "ctrl-track",   action = "trkSelect4" },
+    shift           = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
+    opt             = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
+    shift_opt       = { name = "Trk 4 Lock",  class = "ctrl-lock",    action = "trkLock4" },
+    ctrl            = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
+    shift_ctrl      = { name = "Trk 4 Clear", class = "ctrl-mute",    action = "trkClear4" },
+    ctrl_opt        = { name = "Trk 4 Focus", class = "ctrl-track",   action = "trkFocus4" },
+    ctrl_opt_shift  = { name = "Trk 4 Panic", class = "ctrl-panic",   action = "panic" },
+  },
+  [23] = { -- 5
+    base            = { name = "Dir +",       class = "ctrl-arpdir",  action = "arpDirUp" },
+    shift           = { name = "Dir -",       class = "ctrl-arpdir",  action = "arpDirDown" },
+    opt             = { name = "Random Dir",  class = "ctrl-arpdir",  action = "arpDirRandom" },
+    shift_opt       = { name = "Converge",    class = "ctrl-arpdir",  action = "arpDirConverge" },
+    ctrl            = { name = "Up / Down",   class = "ctrl-arpdir",  action = "arpDirUpDown" },
+    shift_ctrl      = { name = "Down / Up",   class = "ctrl-arpdir",  action = "arpDirDownUp" },
+    ctrl_opt        = { name = "Diverge",     class = "ctrl-arpdir",  action = "arpDirDiverge" },
+    ctrl_opt_shift  = { name = "Dir Reset",   class = "ctrl-arpdir",  action = "arpDirReset" },
+  },
+  [22] = { -- 6
+    base            = { name = "Rate +",      class = "ctrl-arprate", action = "arpRateUp" },
+    shift           = { name = "Rate -",      class = "ctrl-arprate", action = "arpRateDown" },
+    opt             = { name = "Triplet Rate", class = "ctrl-arprate", action = "arpRateTriplet" },
+    shift_opt       = { name = "Straight Rate", class = "ctrl-arprate", action = "arpRateStraight" },
+    ctrl            = { name = "1/16th",      class = "ctrl-arprate", action = "arpRate16th" },
+    shift_ctrl      = { name = "1/8th",       class = "ctrl-arprate", action = "arpRate8th" },
+    ctrl_opt        = { name = "1/32nd",      class = "ctrl-arprate", action = "arpRate32nd" },
+    ctrl_opt_shift  = { name = "1/4th",       class = "ctrl-arprate", action = "arpRate4th" },
+  },
+  [26] = { -- 7
+    base            = { name = "Gate +",      class = "ctrl-arpgate", action = "arpGateUp" },
+    shift           = { name = "Gate -",      class = "ctrl-arpgate", action = "arpGateDown" },
+    opt             = { name = "Staccato 25%", class = "ctrl-arpgate", action = "arpGateStaccato" },
+    shift_opt       = { name = "Legato 100%", class = "ctrl-arpgate", action = "arpGateLegato" },
+    ctrl            = { name = "Overlap 120%", class = "ctrl-arpgate", action = "arpGateOverlap" },
+    shift_ctrl      = { name = "Gate 80%",    class = "ctrl-arpgate", action = "arpGate80" },
+    ctrl_opt        = { name = "Gate 50%",    class = "ctrl-arpgate", action = "arpGate50" },
+    ctrl_opt_shift  = { name = "Gate Reset",  class = "ctrl-arpgate", action = "arpGateReset" },
+  },
+  [28] = { -- 8
+    base            = { name = "Arp Link",    class = "ctrl-arptop",  action = "arpLinkToggle" },
+    shift           = { name = "Split Arp",   class = "ctrl-arpbot",  action = "splitArpToggle" },
+    opt             = { name = "Sync BPM",    class = "ctrl-bpm",     action = "syncBpmToggle" },
+    shift_opt       = { name = "Free Clock",  class = "ctrl-bpm",     action = "freeClockToggle" },
+    ctrl            = { name = "Top Boost +", class = "ctrl-vol",     action = "topBoostUp" },
+    shift_ctrl      = { name = "Top Boost -", class = "ctrl-vol",     action = "topBoostDown" },
+    ctrl_opt        = { name = "Clock /2",    class = "ctrl-bpm",     action = "clockDiv2" },
+    ctrl_opt_shift  = { name = "Clock x2",    class = "ctrl-bpm",     action = "clockMul2" },
+  },
+  [25] = { -- 9
+    base            = { name = "Rel +",       class = "ctrl-rel",     action = "relUp" },
+    shift           = { name = "Rel -",       class = "ctrl-rel",     action = "relDown" },
+    opt             = { name = "Rel Max",     class = "ctrl-rel",     action = "relMax" },
+    shift_opt       = { name = "Rel Min",     class = "ctrl-rel",     action = "relMin" },
+    ctrl            = { name = "Rel Default", class = "ctrl-rel",     action = "relDefault" },
+    shift_ctrl      = { name = "Rel 50%",     class = "ctrl-rel",     action = "rel50" },
+    ctrl_opt        = { name = "Rel 75%",     class = "ctrl-rel",     action = "rel75" },
+    ctrl_opt_shift  = { name = "Rel 25%",     class = "ctrl-rel",     action = "rel25" },
+  },
+  [29] = { -- 0
+    base            = { name = "Vol +",       class = "ctrl-vol",     action = "volUp" },
+    shift           = { name = "Vol -",       class = "ctrl-vol",     action = "volDown" },
+    opt             = { name = "Mod CC1 +",   class = "ctrl-modw",    action = "modWheelUp" },
+    shift_opt       = { name = "Mod CC1 -",   class = "ctrl-modw",    action = "modWheelDown" },
+    ctrl            = { name = "Vol 100%",    class = "ctrl-vol",     action = "vol100" },
+    shift_ctrl      = { name = "Vol 75%",     class = "ctrl-vol",     action = "vol75" },
+    ctrl_opt        = { name = "Mod Max",     class = "ctrl-modw",    action = "modMax" },
+    ctrl_opt_shift  = { name = "Mod 0",       class = "ctrl-modw",    action = "mod0" },
+  },
+  [27] = { -- -
+    base            = { name = "BPM -",       class = "ctrl-bpm",     action = "bpmDown" },
+    shift           = { name = "Zoom -",      class = "ctrl-zoom",    action = "zoomDown" },
+    opt             = { name = "BPM -10",     class = "ctrl-bpm",     action = "bpmDown10" },
+    shift_opt       = { name = "BPM -20",     class = "ctrl-bpm",     action = "bpmDown20" },
+    ctrl            = { name = "BPM = 120",   class = "ctrl-bpm",     action = "bpm120" },
+    shift_ctrl      = { name = "BPM = 90",    class = "ctrl-bpm",     action = "bpm90" },
+    ctrl_opt        = { name = "BPM = 70",    class = "ctrl-bpm",     action = "bpm70" },
+    ctrl_opt_shift  = { name = "BPM Min",     class = "ctrl-bpm",     action = "bpmMin" },
+  },
+  [24] = { -- =
+    base            = { name = "BPM +",       class = "ctrl-bpm",     action = "bpmUp" },
+    shift           = { name = "Zoom +",      class = "ctrl-zoom",    action = "zoomUp" },
+    opt             = { name = "BPM +10",     class = "ctrl-bpm",     action = "bpmUp10" },
+    shift_opt       = { name = "BPM +20",     class = "ctrl-bpm",     action = "bpmUp20" },
+    ctrl            = { name = "Tap Tempo",   class = "ctrl-bpm",     action = "tapTempo" },
+    shift_ctrl      = { name = "BPM = 140",   class = "ctrl-bpm",     action = "bpm140" },
+    ctrl_opt        = { name = "BPM = 160",   class = "ctrl-bpm",     action = "bpm160" },
+    ctrl_opt_shift  = { name = "BPM Max",     class = "ctrl-bpm",     action = "bpmMax" },
+  }
+}
+
+local function getProposedActionDef(code)
+  local s = state.shiftHeld == true
+  local a = state.altHeld == true
+  local c = state.ctrlHeld == true
+  local activeLayer = "base"
+  if c and a and s then activeLayer = "ctrl_opt_shift"
+  elseif c and a then activeLayer = "ctrl_opt"
+  elseif c and s then activeLayer = "shift_ctrl"
+  elseif a and s then activeLayer = "shift_opt"
+  elseif c then activeLayer = "ctrl"
+  elseif a then activeLayer = "opt"
+  elseif s then activeLayer = "shift"
+  end
+
+  local layerTable = PROPOSED_LAYOUT_MAP[code]
+  if layerTable then
+    return layerTable[activeLayer] or layerTable.base
+  end
+  return nil
+end
+
+local function getProposedActionSpotlight(code)
+  local s = state.shiftHeld == true
+  local a = state.altHeld == true
+  local c = state.ctrlHeld == true
+  local activeLayer = "base"
+  if c and a and s then activeLayer = "ctrl_opt_shift"
+  elseif c and a then activeLayer = "ctrl_opt"
+  elseif c and s then activeLayer = "shift_ctrl"
+  elseif a and s then activeLayer = "shift_opt"
+  elseif c then activeLayer = "ctrl"
+  elseif a then activeLayer = "opt"
+  elseif s then activeLayer = "shift"
+  end
+
+  local layerTable = PROPOSED_LAYOUT_MAP[code]
+  if layerTable then
+    local layerDef = layerTable[activeLayer] or layerTable.base
+    if layerDef then
+      local layerDisplayNames = {
+        base = "BASE", shift = "SHIFT", opt = "OPTION", shift_opt = "SHIFT+OPT",
+        ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT"
+      }
+      return {
+        title = "PROPOSED ACTION",
+        value = layerDef.name,
+        subtext = "Modifier Layer: " .. (layerDisplayNames[activeLayer] or "BASE"),
+        targetId = "key-" .. code,
+        color = "#64d8f0"
+      }
+    end
+  end
+  return nil
+end
+
+
 local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
@@ -181,11 +483,29 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local susStr = state.sustainActive and "SUS: ON" or ""
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
 
+  local s = state.shiftHeld == true
+  local a = state.altHeld == true
+  local c = state.ctrlHeld == true
+  local activeLayer = "base"
+  if c and a and s then activeLayer = "ctrl_opt_shift"
+  elseif c and a then activeLayer = "ctrl_opt"
+  elseif c and s then activeLayer = "shift_ctrl"
+  elseif a and s then activeLayer = "shift_opt"
+  elseif c then activeLayer = "ctrl"
+  elseif a then activeLayer = "opt"
+  elseif s then activeLayer = "shift"
+  end
+
+  local layerDisplayNames = {
+    base = "BASE", shift = "SHIFT", opt = "OPTION", shift_opt = "SHIFT+OPT",
+    ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT"
+  }
+
   local statusParts = {}
+  table.insert(statusParts, "LAYER: [" .. (layerDisplayNames[activeLayer] or "BASE") .. "]")
   if trnspStr ~= "" then table.insert(statusParts, trnspStr) end
   if susStr ~= "" then table.insert(statusParts, susStr) end
   if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
-  if shiftStr ~= "" then table.insert(statusParts, shiftStr) end
   local statusStr = table.concat(statusParts, "  •  ")
 
   local botOctNum = math.floor((octVal + (tonumber(state.bottomRowOctaveOffset) or 0)) / 12)
@@ -377,6 +697,20 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     }
   end
 
+  -- Overlay Proposed Layout actions and names based on active modifier layer
+  for propCode, layerTable in pairs(PROPOSED_LAYOUT_MAP) do
+    local strCode = tostring(propCode)
+    local layerDef = layerTable[activeLayer] or layerTable.base
+    if layerDef then
+      keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
+      keyUpdates[strCode].displayNote = layerDef.name
+      keyUpdates[strCode].note = layerDef.name
+      if layerDef.class then
+        keyUpdates[strCode].typeClass = layerDef.class
+      end
+    end
+  end
+
   local modVal = state.ccStates[1] or 0
 
   local bpmDisplayStr
@@ -402,6 +736,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeSelectHeld = state.modeSelectHeld == true,
     keys = keyUpdates,
     shiftHeld = state.shiftHeld,
+    altHeld = state.altHeld == true,
+    ctrlHeld = state.ctrlHeld == true,
+    activeLayer = activeLayer,
     uiActionKeyHue = state.uiActionKeyHue,
     uiActionKeySat = state.uiActionKeySat,
     uiActionKeyLight = state.uiActionKeyLight,
@@ -1117,5 +1454,8 @@ return {
   updateNanoKeyControl = updateNanoKeyControl,
   isNanokeyConnected = isNanokeyConnected,
   getDesiredBaseHeight = getDesiredBaseHeight,
-  updateConnectionStatus = updateConnectionStatus
+  updateConnectionStatus = updateConnectionStatus,
+  getProposedActionSpotlight = getProposedActionSpotlight,
+  getProposedActionDef = getProposedActionDef,
+  PROPOSED_LAYOUT_MAP = PROPOSED_LAYOUT_MAP
 }

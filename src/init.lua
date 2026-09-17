@@ -28,6 +28,10 @@ arpeggiator.setHudModule(hud)
 hud.setControlsModule(controls)
 sync.init(config, hud)
 _G.activeWatchers.sync = sync
+_G.activeWatchers.hud = hud
+_G.activeWatchers.state = state
+_G.activeWatchers.controls = controls
+
 
 if nanokey then
   nanokey.setHud(hud)
@@ -62,13 +66,13 @@ function _G.toggleMidiMode(newState)
     if controls.stopAllControlRepeats then
       controls.stopAllControlRepeats()
     end
-    -- Stop arpeggiator and reset sustain to prevent stuck notes on disable
-    if arpeggiator and arpeggiator.stopArpTimer then
-      arpeggiator.stopArpTimer()
-    end
+    -- Reset sustain to prevent stuck notes on disable
     state.sustainActive = false
     midi.sendMidiCC(64, 0)
     
+    -- NOTE: Arpeggiator continues running in background when window is closed,
+    -- allowing autonomous multi-track background playback until explicit panic or stop.
+
     -- Keep nanokey hardware driver connected so physical controller macros and playing remain active
     -- Do not call nanokey.disconnect() here
 
@@ -118,12 +122,7 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
       local timeSinceTouch = (hs.timer.absoluteTime() - (_G.activeWatchers.lastActiveTouchTime or 0)) / 1e6
       if timeSinceTouch > maxInertiaMs then return true end
       if math.abs(scaledDelta) < inertiaCutoff then return true end
-
-      if initGain == 0 then return true end
-      scaledDelta = scaledDelta * initGain * decay
     end
-
-    deltaY = scaledDelta
 
     -- Allow native webview scrolling when cursor is over settings window or hovering a scrollable HUD pane
     if _G.activeWatchers.isHoveringSettings or _G.activeWatchers.isHoveringScrollable then
@@ -262,13 +261,23 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
         return true
       end
 
-      if flags.cmd or flags.alt or flags.ctrl or flags.capslock then
+      -- Allow shift, alt (option), ctrl, and their combinations for macro layers!
+      -- Pass cmd and capslock through to macOS for system hotkeys (Cmd+Tab, Cmd+Q, etc.)
+      if flags.cmd or flags.capslock then
         return false
       end
 
-      local isShiftNow = flags.shift
-      if isShiftNow ~= state.shiftHeld then
+      local isShiftNow = flags.shift == true
+      local isAltNow = flags.alt == true
+      local isCtrlNow = flags.ctrl == true
+
+      local flagsChanged = (isShiftNow ~= (state.shiftHeld == true)) or
+                           (isAltNow ~= (state.altHeld == true)) or
+                           (isCtrlNow ~= (state.ctrlHeld == true))
+      if flagsChanged then
         state.shiftHeld = isShiftNow
+        state.altHeld = isAltNow
+        state.ctrlHeld = isCtrlNow
         hud.updateWebviewHud()
       end
 
@@ -280,7 +289,7 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       if isDown then
-        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
+        local ok, status = xpcall(function() return controls.handleKeyDown(code, flags) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
         if not ok then
           print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
         end

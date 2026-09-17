@@ -221,28 +221,48 @@ local function arpTickEngine(eng, isTopRow)
       midi.sendMidiNote("noteOff", oldP, 0, oldCh)
       eng.currentPitch = nil
     end
-    midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-    eng.currentPitch = { pitch = nextPitch, channel = ch }
-
-    local gateDuration = getArpIntervalSeconds() * gateRatio
-    local pitchToRelease = nextPitch
-    local releaseCh = ch
-    local timer = hs.timer.doAfter(gateDuration, function()
-      local ok, e = pcall(function()
-        midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-        if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
-          eng.currentPitch = nil
+    local isAudible = true
+    if state.tracks then
+      local trkId = 4
+      for id, t in pairs(state.tracks) do
+        if t.channel == ch then
+          trkId = id
+          break
         end
-        if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
-      end)
-      if not ok then print("[Arp Gate Error] " .. tostring(e)) end
-    end)
-    eng.activeGateTimers = eng.activeGateTimers or {}
-    if eng.activeGateTimers[pitchToRelease] then
-      if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
-      eng.activeGateTimers[pitchToRelease] = nil
+      end
+      local trk = state.tracks[trkId]
+      if trk and trk.muted then isAudible = false end
+      local anySolo = false
+      for _, t in pairs(state.tracks) do
+        if t.soloed then anySolo = true; break end
+      end
+      if anySolo and trk and not trk.soloed then isAudible = false end
     end
-    eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+
+    if isAudible then
+      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+      eng.currentPitch = { pitch = nextPitch, channel = ch }
+
+      local gateDuration = getArpIntervalSeconds() * gateRatio
+      local pitchToRelease = nextPitch
+      local releaseCh = ch
+      local timer = hs.timer.doAfter(gateDuration, function()
+        local ok, e = pcall(function()
+          midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+          if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+            eng.currentPitch = nil
+          end
+          if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
+        end)
+        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+      end)
+      eng.activeGateTimers = eng.activeGateTimers or {}
+      if eng.activeGateTimers[pitchToRelease] then
+        if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
+        eng.activeGateTimers[pitchToRelease] = nil
+      end
+      eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+    end
   end)
   if not success then print("[Arp Engine Error] " .. tostring(err)) end
   return nextPitch

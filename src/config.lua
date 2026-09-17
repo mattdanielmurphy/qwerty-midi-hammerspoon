@@ -28,6 +28,8 @@ local state = {
   sustainWasActiveOnPress = false,
   arpLatchActive = getSetting("arpLatchActive", false),  -- Arpeggiator Latch mode
   shiftHeld = false,          -- Shift key active state
+  altHeld = false,            -- Option (Alt) key active state
+  ctrlHeld = false,           -- Control key active state
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
@@ -120,6 +122,16 @@ local state = {
   bottomRowChannel = getSetting("bottomRowChannel", 1),    -- MIDI Channel 1 (Ch 2 in 1-based indexing)
   arpChannel = getSetting("arpChannel", 2),            -- Dedicated Arp MIDI Channel 2 (Ch 3 in 1-based indexing)
   splitArpTopBoost = 20,
+
+  tracks = {
+    [1] = { id = 1, name = "Bass",   channel = 0, volume = 100, muted = false, soloed = false, armed = true,  locked = false },
+    [2] = { id = 2, name = "Chords", channel = 1, volume = 100, muted = false, soloed = false, armed = false, locked = false },
+    [3] = { id = 3, name = "Lead",   channel = 2, volume = 100, muted = false, soloed = false, armed = false, locked = false },
+    [4] = { id = 4, name = "Arp",    channel = 3, volume = 100, muted = false, soloed = false, armed = false, locked = false },
+  },
+  bottomRowTrack = 1,
+  topRowTrack = 3,
+  activeTrack = 1,
 
   ccStates = {
     [1] = 0,
