@@ -146,10 +146,10 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Smart Sus",   class = "latch-active",      action = "sustain" },
-    shift           = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
-    opt             = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
-    shift_opt       = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    base            = { name = "Smart Sus",   class = "ctrl-sus",          action = "sustain" },
+    shift           = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
+    opt             = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
+    shift_opt       = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
     shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
     ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
@@ -654,8 +654,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         noteLabel = "Classic Sus"
         typeClass = "latch-mode-active"
       else
-        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Sustain"
-        typeClass = "ctrl-sustain"
+        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Smart Sus"
+        typeClass = "ctrl-sus"
       end
     elseif isChordToggle then
       local isChOn = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
@@ -775,6 +775,25 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             keyUpdates[strCode].typeClass = "latch-mode-active"
             keyUpdates[strCode].sustainActive = true
           end
+        end
+      elseif propCode == 48 then -- Key 48 (Tab: Sustain)
+        local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
+        if sMode == "smart" then
+          keyUpdates[strCode].displayNote = "Smart Sus"
+          keyUpdates[strCode].note = "Smart Sus"
+          keyUpdates[strCode].typeClass = "latch-active"
+          keyUpdates[strCode].sustainActive = true
+        elseif sMode == "classic" then
+          keyUpdates[strCode].displayNote = "Classic Sus"
+          keyUpdates[strCode].note = "Classic Sus"
+          keyUpdates[strCode].typeClass = "latch-mode-active"
+          keyUpdates[strCode].sustainActive = true
+        else
+          local isShiftOrOpt = (activeLayer == "shift" or activeLayer == "opt" or activeLayer == "shift_opt")
+          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus"
+          keyUpdates[strCode].note = keyUpdates[strCode].displayNote
+          keyUpdates[strCode].typeClass = "ctrl-sus"
+          keyUpdates[strCode].sustainActive = false
         end
       end
     end

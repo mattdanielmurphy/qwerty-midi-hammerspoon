@@ -342,8 +342,8 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Smart Sus", typeClass = "latch-active", description = "Smart sustain (auto-reset chord latch)" },
-      { id = "classicSustain", name = "Classic Sus", typeClass = "latch-mode-active", description = "Classic cumulative sustain" },
+      { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },

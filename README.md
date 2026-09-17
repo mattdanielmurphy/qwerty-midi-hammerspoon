@@ -25,7 +25,7 @@ this has changed a lot recently, which is good and bad. lots of shit is broken, 
 fix:
 - no way to control top arp vs bottom arp
 - when you press any key, the track keys invert in an odd way (if tracks 1 and 3 are selected, pressing a note on the bottom row, which is track 1, causes track 2 to become lit up and tracks 1 and 3 dim, and track 2 shows a waveform even though there's no audio)
-- we need per track everything including volume, etc
+- [x] ~~Arp latch is messed up. I'll press one note, take my finger off, and then press one single other note, and BOTH of those notes will play together. The latched chord just grows forever. Perhaps Smart sustain is the culprit? Even though it was not enabled. Speaking of smart sustain, when it's not enabled, it LOOKS like it is, because it's a brightly colored button. Make it a little darker when not active.~~ *(Fixed: Restored physical key tracking and latch auto-reset on key release in `arpeggiator.lua`; styled Key 48 (Tab: Smart Sustain) in muted dark chassis gray `#141417` when inactive)*
 
 ## once stable
 - we need better arp gate patterns (bring in korg's defaults) and more scales

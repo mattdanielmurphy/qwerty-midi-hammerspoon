@@ -581,7 +581,9 @@ local function arpAddNote(code, pitch, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive
+    trk.keysCurrentlyHeld = trk.keysCurrentlyHeld or {}
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
     if isLatched then
       if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
         trk.targetHeldNotes = {}
@@ -647,7 +649,11 @@ local function arpRemoveNote(code, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive or state.sustainActive
+    if trk.keysCurrentlyHeld then
+      trk.keysCurrentlyHeld[code] = nil
+    end
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
     if isLatched then
       if numPhysicalHeld == 0 then
         trk.latchClearedForNewChord = false
@@ -962,6 +968,8 @@ local function toggleArpPower(targetTrackIdx)
         end
       end
       trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
       if countTableKeys(trk.heldNotes) == 0 then
         stopTrackArp(trk)
       end
@@ -1075,7 +1083,10 @@ local function toggleArpLatch(targetTrackIdx)
       for code, info in pairs(state.pressedKeys) do
         if type(info) == "table" and not info.isControl and info.pitches then
           for _, p in ipairs(info.pitches) do
-            trk.heldNotes[code .. "_" .. p] = p
+            local keyId = code .. "_" .. p
+            trk.heldNotes[keyId] = p
+            trk.targetHeldNotes[keyId] = p
+            trk.keysCurrentlyHeld[keyId] = true
           end
         end
       end
@@ -1091,6 +1102,8 @@ local function toggleArpLatch(targetTrackIdx)
         end
       end
       trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
       if countTableKeys(trk.heldNotes) == 0 then
         stopTrackArp(trk)
       end

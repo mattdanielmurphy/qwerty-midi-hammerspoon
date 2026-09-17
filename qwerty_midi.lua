@@ -1009,7 +1009,9 @@ local function arpAddNote(code, pitch, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive
+    trk.keysCurrentlyHeld = trk.keysCurrentlyHeld or {}
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
     if isLatched then
       if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
         trk.targetHeldNotes = {}
@@ -1075,7 +1077,11 @@ local function arpRemoveNote(code, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive or state.sustainActive
+    if trk.keysCurrentlyHeld then
+      trk.keysCurrentlyHeld[code] = nil
+    end
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
     if isLatched then
       if numPhysicalHeld == 0 then
         trk.latchClearedForNewChord = false
@@ -1390,6 +1396,8 @@ local function toggleArpPower(targetTrackIdx)
         end
       end
       trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
       if countTableKeys(trk.heldNotes) == 0 then
         stopTrackArp(trk)
       end
@@ -1503,7 +1511,10 @@ local function toggleArpLatch(targetTrackIdx)
       for code, info in pairs(state.pressedKeys) do
         if type(info) == "table" and not info.isControl and info.pitches then
           for _, p in ipairs(info.pitches) do
-            trk.heldNotes[code .. "_" .. p] = p
+            local keyId = code .. "_" .. p
+            trk.heldNotes[keyId] = p
+            trk.targetHeldNotes[keyId] = p
+            trk.keysCurrentlyHeld[keyId] = true
           end
         end
       end
@@ -1519,6 +1530,8 @@ local function toggleArpLatch(targetTrackIdx)
         end
       end
       trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
       if countTableKeys(trk.heldNotes) == 0 then
         stopTrackArp(trk)
       end
@@ -3694,10 +3707,10 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Smart Sus",   class = "latch-active",      action = "sustain" },
-    shift           = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
-    opt             = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
-    shift_opt       = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    base            = { name = "Smart Sus",   class = "ctrl-sus",          action = "sustain" },
+    shift           = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
+    opt             = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
+    shift_opt       = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
     shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
     ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
@@ -4202,8 +4215,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         noteLabel = "Classic Sus"
         typeClass = "latch-mode-active"
       else
-        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Sustain"
-        typeClass = "ctrl-sustain"
+        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Smart Sus"
+        typeClass = "ctrl-sus"
       end
     elseif isChordToggle then
       local isChOn = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
@@ -4323,6 +4336,25 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             keyUpdates[strCode].typeClass = "latch-mode-active"
             keyUpdates[strCode].sustainActive = true
           end
+        end
+      elseif propCode == 48 then -- Key 48 (Tab: Sustain)
+        local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
+        if sMode == "smart" then
+          keyUpdates[strCode].displayNote = "Smart Sus"
+          keyUpdates[strCode].note = "Smart Sus"
+          keyUpdates[strCode].typeClass = "latch-active"
+          keyUpdates[strCode].sustainActive = true
+        elseif sMode == "classic" then
+          keyUpdates[strCode].displayNote = "Classic Sus"
+          keyUpdates[strCode].note = "Classic Sus"
+          keyUpdates[strCode].typeClass = "latch-mode-active"
+          keyUpdates[strCode].sustainActive = true
+        else
+          local isShiftOrOpt = (activeLayer == "shift" or activeLayer == "opt" or activeLayer == "shift_opt")
+          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus"
+          keyUpdates[strCode].note = keyUpdates[strCode].displayNote
+          keyUpdates[strCode].typeClass = "ctrl-sus"
+          keyUpdates[strCode].sustainActive = false
         end
       end
     end
@@ -6189,6 +6221,29 @@ local HTML_UI_CONTENT = [[
   }
 
   /* Key 48 Smart Sustain & Classic Sustain Styles */
+  #key-48:not(.latch-active):not(.latch-mode-active),
+  #key-48.ctrl-sus,
+  .key-pad.ctrl-sus,
+  .key-pad.ctrl-sustain {
+    background: #141417 !important;
+    border-color: rgba(212, 163, 89, 0.22) !important;
+    box-shadow: none !important;
+  }
+  #key-48:not(.latch-active):not(.latch-mode-active) .key-note,
+  #key-48.ctrl-sus .key-note,
+  .key-pad.ctrl-sus .key-note,
+  .key-pad.ctrl-sustain .key-note {
+    color: #8a7a58 !important;
+    font-weight: 500 !important;
+    text-shadow: none !important;
+  }
+  #key-48:not(.latch-active):not(.latch-mode-active) .key-code,
+  #key-48.ctrl-sus .key-code,
+  .key-pad.ctrl-sus .key-code,
+  .key-pad.ctrl-sustain .key-code {
+    color: #63636e !important;
+  }
+
   #key-48.latch-active {
     background: rgba(255, 215, 0, 0.22) !important;
     border-color: #ffd700 !important;
@@ -12098,8 +12153,8 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Smart Sus", typeClass = "latch-active", description = "Smart sustain (auto-reset chord latch)" },
-      { id = "classicSustain", name = "Classic Sus", typeClass = "latch-mode-active", description = "Classic cumulative sustain" },
+      { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },

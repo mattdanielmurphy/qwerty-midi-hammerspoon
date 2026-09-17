@@ -936,6 +936,29 @@ local HTML_UI_CONTENT = [[
   }
 
   /* Key 48 Smart Sustain & Classic Sustain Styles */
+  #key-48:not(.latch-active):not(.latch-mode-active),
+  #key-48.ctrl-sus,
+  .key-pad.ctrl-sus,
+  .key-pad.ctrl-sustain {
+    background: #141417 !important;
+    border-color: rgba(212, 163, 89, 0.22) !important;
+    box-shadow: none !important;
+  }
+  #key-48:not(.latch-active):not(.latch-mode-active) .key-note,
+  #key-48.ctrl-sus .key-note,
+  .key-pad.ctrl-sus .key-note,
+  .key-pad.ctrl-sustain .key-note {
+    color: #8a7a58 !important;
+    font-weight: 500 !important;
+    text-shadow: none !important;
+  }
+  #key-48:not(.latch-active):not(.latch-mode-active) .key-code,
+  #key-48.ctrl-sus .key-code,
+  .key-pad.ctrl-sus .key-code,
+  .key-pad.ctrl-sustain .key-code {
+    color: #63636e !important;
+  }
+
   #key-48.latch-active {
     background: rgba(255, 215, 0, 0.22) !important;
     border-color: #ffd700 !important;
