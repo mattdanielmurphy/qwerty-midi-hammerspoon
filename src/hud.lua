@@ -675,19 +675,86 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
       keyUpdates[strCode].displayNote = layerDef.name
       keyUpdates[strCode].note = layerDef.name
+      keyUpdates[strCode].action = layerDef.action
+      keyUpdates[strCode].shiftAction = layerDef.action
       if layerDef.class then
         keyUpdates[strCode].typeClass = layerDef.class
+      end
+
+      local act = layerDef.action
+      if act then
+        if act == "topOctUp" or act == "topOctDown" or act == "topVolUp" or act == "topVolDown" or
+           act == "arpTopToggle" or act == "topTrackToggle" or act == "topTrackLock" or
+           act == "topBoostUp" or act == "topBoostDown" or string.match(act, "^trk.*[34]$") then
+          keyUpdates[strCode].rowActive = "top"
+        elseif act == "botOctUp" or act == "botOctDown" or act == "botVolUp" or act == "botVolDown" or
+               act == "arpBottomToggle" or act == "botTrackToggle" or act == "botTrackLock" or
+               string.match(act, "^trk.*[12]$") then
+          keyUpdates[strCode].rowActive = "bottom"
+        elseif act == "octaveUp" or act == "octaveDown" or act == "octReset" or
+               act == "volUp" or act == "volDown" or act == "mixReset" or
+               act == "arpLinkToggle" or act == "splitArpToggle" then
+          keyUpdates[strCode].rowActive = "both"
+        end
+      end
+
+      -- Special dynamic overlays for Arp / Latch controls (3-state arp button on A, latch on F)
+      local trk = state.tracks and state.tracks[state.activeTrack or 1]
+      local isArpOn = (trk and trk.arpEnabled) or (state.arpEnabled == true)
+      local isArpLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
+
+      if propCode == 0 then -- Key A
+        if activeLayer == "base" then
+          if isArpOn and isArpLatch then
+            keyUpdates[strCode].displayNote = "Arp 🔒"
+            keyUpdates[strCode].note = "Arp 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          elseif isArpOn then
+            keyUpdates[strCode].displayNote = "Arp"
+            keyUpdates[strCode].note = "Arp"
+            keyUpdates[strCode].typeClass = "latch-active"
+            keyUpdates[strCode].sustainActive = true
+          else
+            keyUpdates[strCode].displayNote = "Arp"
+            keyUpdates[strCode].note = "Arp"
+            keyUpdates[strCode].typeClass = "ctrl-arp"
+            keyUpdates[strCode].sustainActive = false
+          end
+        elseif activeLayer == "shift" then
+          if isArpLatch then
+            keyUpdates[strCode].displayNote = "Latch 🔒"
+            keyUpdates[strCode].note = "Latch 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          else
+            keyUpdates[strCode].displayNote = "Latch"
+            keyUpdates[strCode].note = "Latch"
+            keyUpdates[strCode].typeClass = "ctrl-arp"
+            keyUpdates[strCode].sustainActive = false
+          end
+        end
+      elseif propCode == 3 then -- Key F
+        if activeLayer == "base" then
+          if isArpLatch then
+            keyUpdates[strCode].displayNote = "Latch 🔒"
+            keyUpdates[strCode].note = "Latch 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          end
+        end
       end
     end
   end
 
-  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, and audio states
+  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, audio states, and row icons
   local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
   for kCode, trkId in pairs(trkKeyMap) do
     local strCode = tostring(kCode)
     if keyUpdates[strCode] then
       keyUpdates[strCode].sustainActive = false -- strictly prevent legacy toggle selection glow
       keyUpdates[strCode].trkSelected = (state.activeTrack == trkId)
+      keyUpdates[strCode].rowActive = (trkId <= 2) and "bottom" or "top"
       local t = state.tracks and state.tracks[trkId]
       if t then
         keyUpdates[strCode].trkMuted = (t.muted == true)

@@ -1322,8 +1322,8 @@ local function toggleArpPower(targetTrackIdx)
     local subStr = "Track " .. trkId .. " Arp Disabled"
     if trk.arpEnabled then
       if trk.arpLatchActive then
-        valStr = "ARP: LATCH"
-        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH • " .. formatBpm(state.arpBpm) .. " BPM"
+        valStr = "ARP: LATCH 🔒"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH 🔒 • " .. formatBpm(state.arpBpm) .. " BPM"
       else
         valStr = "ARP: ON"
         subStr = "Track " .. trkId .. " (" .. trk.name .. ") ON • " .. formatBpm(state.arpBpm) .. " BPM"
@@ -1334,7 +1334,7 @@ local function toggleArpPower(targetTrackIdx)
       title = "TRACK " .. trkId .. " ARP",
       value = valStr,
       subtext = subStr,
-      targetId = "arp-power-btn",
+      targetId = "key-0",
       color = trk.color or "#64d8f0"
     }
     updateHud(spot)
@@ -1383,8 +1383,8 @@ local function toggleArpPower(targetTrackIdx)
       valStr = "ARP: ON (MUTED)"
       subStr = "⚠️ Top & Bottom rows are both disabled"
     elseif state.arpLatchActive then
-      valStr = "ARP: LATCH"
-      subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+      valStr = "ARP: LATCH 🔒"
+      subStr = "LATCH 🔒 (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
     else
       valStr = "ARP: ON"
       subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
@@ -1392,14 +1392,85 @@ local function toggleArpPower(targetTrackIdx)
   end
 
   local spot = {
-    title = "ARPEGGIATOR",
+    title = "ARP POWER",
     value = valStr,
     subtext = subStr,
-    targetId = "arp-power-btn",
+    targetId = "key-0",
     color = "#d4a359"
   }
   updateHud(spot)
   config.saveSettings()
+end
+
+local function toggleArpLatch(targetTrackIdx)
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  local curLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
+  local targetLatch = not curLatch
+
+  if trk then
+    trk.arpLatchActive = targetLatch
+    if targetLatch then
+      trk.arpEnabled = true
+      trk.latchClearedForNewChord = false
+      -- If notes are currently physically held on the keyboard, latch them now
+      for code, _ in pairs(state.pressedKeys) do
+        local noteKey = config.getNoteKey(code)
+        if noteKey then
+          local pitch = transposer.getTransposedPitch(noteKey.baseNote, code)
+          trk.heldNotes[code] = pitch
+        end
+      end
+      if countTableKeys(trk.heldNotes) > 0 then
+        startArpTimer()
+      end
+    else
+      local newHeld = {}
+      for code, pitch in pairs(trk.heldNotes or {}) do
+        if trk.keysCurrentlyHeld[code] or state.pressedKeys[code] then
+          newHeld[code] = pitch
+        end
+      end
+      trk.heldNotes = newHeld
+      if countTableKeys(trk.heldNotes) == 0 and not isAnyTrackArpActive() then
+        stopArpTimer()
+      end
+    end
+  else
+    state.arpLatchActive = targetLatch
+    if targetLatch then
+      state.arpEnabled = true
+      state.arpLatchClearedForNewChord = false
+    else
+      local newHeld = {}
+      for code, pitch in pairs(state.arpHeldNotes or {}) do
+        if state.arpKeysCurrentlyHeld[code] or state.pressedKeys[code] then
+          newHeld[code] = pitch
+        end
+      end
+      state.arpHeldNotes = newHeld
+      if countTableKeys(state.arpHeldNotes) == 0 then
+        stopArpTimer()
+      end
+    end
+  end
+
+  state.arpLatchActive = targetLatch
+  if targetLatch then
+    state.arpEnabled = true
+  end
+
+  config.saveSettings()
+
+  local spot = {
+    title = "TRACK " .. trkId .. " LATCH",
+    value = targetLatch and "LATCH 🔒 ON" or "LATCH OFF",
+    subtext = "Track " .. trkId .. " (" .. (trk and trk.name or "Track") .. ") • Latch " .. (targetLatch and "Active 🔒 (held notes loop)" or "Disabled (momentary)"),
+    targetId = "key-0",
+    color = (trk and trk.color) or "#64d8f0"
+  }
+  updateHud(spot)
+  return targetLatch
 end
 
 local function clearTrackArp(trackId)
@@ -1824,6 +1895,8 @@ return {
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
+  toggleArpLatch = toggleArpLatch,
+  isAnyTrackArpActive = isAnyTrackArpActive,
   toggleArp = toggleArp,
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,
@@ -4045,19 +4118,86 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
       keyUpdates[strCode].displayNote = layerDef.name
       keyUpdates[strCode].note = layerDef.name
+      keyUpdates[strCode].action = layerDef.action
+      keyUpdates[strCode].shiftAction = layerDef.action
       if layerDef.class then
         keyUpdates[strCode].typeClass = layerDef.class
+      end
+
+      local act = layerDef.action
+      if act then
+        if act == "topOctUp" or act == "topOctDown" or act == "topVolUp" or act == "topVolDown" or
+           act == "arpTopToggle" or act == "topTrackToggle" or act == "topTrackLock" or
+           act == "topBoostUp" or act == "topBoostDown" or string.match(act, "^trk.*[34]$") then
+          keyUpdates[strCode].rowActive = "top"
+        elseif act == "botOctUp" or act == "botOctDown" or act == "botVolUp" or act == "botVolDown" or
+               act == "arpBottomToggle" or act == "botTrackToggle" or act == "botTrackLock" or
+               string.match(act, "^trk.*[12]$") then
+          keyUpdates[strCode].rowActive = "bottom"
+        elseif act == "octaveUp" or act == "octaveDown" or act == "octReset" or
+               act == "volUp" or act == "volDown" or act == "mixReset" or
+               act == "arpLinkToggle" or act == "splitArpToggle" then
+          keyUpdates[strCode].rowActive = "both"
+        end
+      end
+
+      -- Special dynamic overlays for Arp / Latch controls (3-state arp button on A, latch on F)
+      local trk = state.tracks and state.tracks[state.activeTrack or 1]
+      local isArpOn = (trk and trk.arpEnabled) or (state.arpEnabled == true)
+      local isArpLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
+
+      if propCode == 0 then -- Key A
+        if activeLayer == "base" then
+          if isArpOn and isArpLatch then
+            keyUpdates[strCode].displayNote = "Arp 🔒"
+            keyUpdates[strCode].note = "Arp 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          elseif isArpOn then
+            keyUpdates[strCode].displayNote = "Arp"
+            keyUpdates[strCode].note = "Arp"
+            keyUpdates[strCode].typeClass = "latch-active"
+            keyUpdates[strCode].sustainActive = true
+          else
+            keyUpdates[strCode].displayNote = "Arp"
+            keyUpdates[strCode].note = "Arp"
+            keyUpdates[strCode].typeClass = "ctrl-arp"
+            keyUpdates[strCode].sustainActive = false
+          end
+        elseif activeLayer == "shift" then
+          if isArpLatch then
+            keyUpdates[strCode].displayNote = "Latch 🔒"
+            keyUpdates[strCode].note = "Latch 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          else
+            keyUpdates[strCode].displayNote = "Latch"
+            keyUpdates[strCode].note = "Latch"
+            keyUpdates[strCode].typeClass = "ctrl-arp"
+            keyUpdates[strCode].sustainActive = false
+          end
+        end
+      elseif propCode == 3 then -- Key F
+        if activeLayer == "base" then
+          if isArpLatch then
+            keyUpdates[strCode].displayNote = "Latch 🔒"
+            keyUpdates[strCode].note = "Latch 🔒"
+            keyUpdates[strCode].typeClass = "latch-mode-active"
+            keyUpdates[strCode].sustainActive = true
+          end
+        end
       end
     end
   end
 
-  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, and audio states
+  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, audio states, and row icons
   local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
   for kCode, trkId in pairs(trkKeyMap) do
     local strCode = tostring(kCode)
     if keyUpdates[strCode] then
       keyUpdates[strCode].sustainActive = false -- strictly prevent legacy toggle selection glow
       keyUpdates[strCode].trkSelected = (state.activeTrack == trkId)
+      keyUpdates[strCode].rowActive = (trkId <= 2) and "bottom" or "top"
       local t = state.tracks and state.tracks[trkId]
       if t then
         keyUpdates[strCode].trkMuted = (t.muted == true)
@@ -5663,6 +5803,16 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-track .key-note {
     color: var(--trk-color, #e0e0e0);
     font-weight: 600;
+  }
+  .key-pad.ctrl-track .stacked-rows-icon.top-active .rect.top {
+    background: var(--trk-color, #d4a359);
+    border-color: var(--trk-color, #d4a359);
+    box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
+  }
+  .key-pad.ctrl-track .stacked-rows-icon.bottom-active .rect.bottom {
+    background: var(--trk-color, #d4a359);
+    border-color: var(--trk-color, #d4a359);
+    box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
 
   /* Selected Track: exactly one track at a time */
@@ -9331,7 +9481,7 @@ local HTML_UI_CONTENT = [[
             arpPowerBtn.classList.add('arp-active');
             arpPowerBtn.classList.remove('arp-latch');
           } else if (latch) {
-            arpPowerBtn.textContent = 'ARP: LATCH';
+            arpPowerBtn.textContent = 'ARP: LATCH 🔒';
             arpPowerBtn.classList.add('arp-active', 'arp-latch');
           } else {
             arpPowerBtn.textContent = 'ARP: ON';
@@ -9613,11 +9763,54 @@ local HTML_UI_CONTENT = [[
             const iconEl = el.querySelector('.key-row-icon');
             if (iconEl) {
               iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
-              if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
+
+              let rowTarget = k.rowActive || null;
+              const curNote = (k.displayNote || k.note || '').trim();
+
+              if (!rowTarget && curNote) {
+                if (/^Top(Oct| Vol| 3⇄4| Lock|\b)/i.test(curNote)) {
+                  rowTarget = 'top';
+                } else if (/^Bot(Oct| Vol| 1⇄2| Lock|\b)/i.test(curNote)) {
+                  rowTarget = 'bottom';
+                } else if (/^(Oct [+\-]|Oct Reset|Vol [+\-]|Mix Reset)/i.test(curNote)) {
+                  rowTarget = 'both';
+                }
+              }
+
+              if (!rowTarget && effAction) {
+                if (
+                  effAction === 'topOctDown' || effAction === 'topOctUp' ||
+                  effAction === 'topVolDown' || effAction === 'topVolUp' ||
+                  effAction === 'arpTopToggle' || effAction === 'topTrackToggle' ||
+                  effAction === 'topTrackLock' || effAction === 'topBoostUp' || effAction === 'topBoostDown' ||
+                  String(effAction).match(/^trk(Select|Mute|Solo|Lock|Rec|Clear|Focus)[34]$/)
+                ) {
+                  rowTarget = 'top';
+                } else if (
+                  effAction === 'botVolDown' || effAction === 'botVolUp' ||
+                  effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp' ||
+                  effAction === 'botTrackToggle' || effAction === 'botTrackLock' ||
+                  String(effAction).match(/^trk(Select|Mute|Solo|Lock|Rec|Clear|Focus)[12]$/)
+                ) {
+                  rowTarget = 'bottom';
+                } else if (
+                  effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'octReset' ||
+                  effAction === 'volDown' || effAction === 'volUp' || effAction === 'mixReset' ||
+                  effAction === 'arpLinkToggle' || effAction === 'splitArpToggle'
+                ) {
+                  rowTarget = 'both';
+                }
+              }
+
+              if (!rowTarget && isTrkBtn) {
+                rowTarget = (numCode <= 19) ? 'bottom' : 'top';
+              }
+
+              if (rowTarget === 'top') {
                 iconEl.classList.add('top-active');
-              } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
+              } else if (rowTarget === 'bottom') {
                 iconEl.classList.add('bottom-active');
-              } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
+              } else if (rowTarget === 'both') {
                 iconEl.classList.add('both-active');
               }
             }
@@ -12321,17 +12514,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud()
     return
   elseif act == "arpLatchToggle" then
-    state.arpLatchActive = not state.arpLatchActive
-    if not state.arpLatchActive then
-      local newHeld = {}
-      for codeKey, pitch in pairs(state.arpHeldNotes) do
-        if state.arpKeysCurrentlyHeld[codeKey] then
-          newHeld[codeKey] = pitch
-        end
-      end
-      state.arpHeldNotes = newHeld
-    end
-    hud.updateWebviewHud()
+    arpeggiator.toggleArpLatch()
     return
   end
 

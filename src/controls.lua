@@ -370,17 +370,7 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud()
     return
   elseif act == "arpLatchToggle" then
-    state.arpLatchActive = not state.arpLatchActive
-    if not state.arpLatchActive then
-      local newHeld = {}
-      for codeKey, pitch in pairs(state.arpHeldNotes) do
-        if state.arpKeysCurrentlyHeld[codeKey] then
-          newHeld[codeKey] = pitch
-        end
-      end
-      state.arpHeldNotes = newHeld
-    end
-    hud.updateWebviewHud()
+    arpeggiator.toggleArpLatch()
     return
   end
 

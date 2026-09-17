@@ -894,8 +894,8 @@ local function toggleArpPower(targetTrackIdx)
     local subStr = "Track " .. trkId .. " Arp Disabled"
     if trk.arpEnabled then
       if trk.arpLatchActive then
-        valStr = "ARP: LATCH"
-        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH • " .. formatBpm(state.arpBpm) .. " BPM"
+        valStr = "ARP: LATCH 🔒"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH 🔒 • " .. formatBpm(state.arpBpm) .. " BPM"
       else
         valStr = "ARP: ON"
         subStr = "Track " .. trkId .. " (" .. trk.name .. ") ON • " .. formatBpm(state.arpBpm) .. " BPM"
@@ -906,7 +906,7 @@ local function toggleArpPower(targetTrackIdx)
       title = "TRACK " .. trkId .. " ARP",
       value = valStr,
       subtext = subStr,
-      targetId = "arp-power-btn",
+      targetId = "key-0",
       color = trk.color or "#64d8f0"
     }
     updateHud(spot)
@@ -955,8 +955,8 @@ local function toggleArpPower(targetTrackIdx)
       valStr = "ARP: ON (MUTED)"
       subStr = "⚠️ Top & Bottom rows are both disabled"
     elseif state.arpLatchActive then
-      valStr = "ARP: LATCH"
-      subStr = "LATCH (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+      valStr = "ARP: LATCH 🔒"
+      subStr = "LATCH 🔒 (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
     else
       valStr = "ARP: ON"
       subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
@@ -964,14 +964,85 @@ local function toggleArpPower(targetTrackIdx)
   end
 
   local spot = {
-    title = "ARPEGGIATOR",
+    title = "ARP POWER",
     value = valStr,
     subtext = subStr,
-    targetId = "arp-power-btn",
+    targetId = "key-0",
     color = "#d4a359"
   }
   updateHud(spot)
   config.saveSettings()
+end
+
+local function toggleArpLatch(targetTrackIdx)
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  local curLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
+  local targetLatch = not curLatch
+
+  if trk then
+    trk.arpLatchActive = targetLatch
+    if targetLatch then
+      trk.arpEnabled = true
+      trk.latchClearedForNewChord = false
+      -- If notes are currently physically held on the keyboard, latch them now
+      for code, _ in pairs(state.pressedKeys) do
+        local noteKey = config.getNoteKey(code)
+        if noteKey then
+          local pitch = transposer.getTransposedPitch(noteKey.baseNote, code)
+          trk.heldNotes[code] = pitch
+        end
+      end
+      if countTableKeys(trk.heldNotes) > 0 then
+        startArpTimer()
+      end
+    else
+      local newHeld = {}
+      for code, pitch in pairs(trk.heldNotes or {}) do
+        if trk.keysCurrentlyHeld[code] or state.pressedKeys[code] then
+          newHeld[code] = pitch
+        end
+      end
+      trk.heldNotes = newHeld
+      if countTableKeys(trk.heldNotes) == 0 and not isAnyTrackArpActive() then
+        stopArpTimer()
+      end
+    end
+  else
+    state.arpLatchActive = targetLatch
+    if targetLatch then
+      state.arpEnabled = true
+      state.arpLatchClearedForNewChord = false
+    else
+      local newHeld = {}
+      for code, pitch in pairs(state.arpHeldNotes or {}) do
+        if state.arpKeysCurrentlyHeld[code] or state.pressedKeys[code] then
+          newHeld[code] = pitch
+        end
+      end
+      state.arpHeldNotes = newHeld
+      if countTableKeys(state.arpHeldNotes) == 0 then
+        stopArpTimer()
+      end
+    end
+  end
+
+  state.arpLatchActive = targetLatch
+  if targetLatch then
+    state.arpEnabled = true
+  end
+
+  config.saveSettings()
+
+  local spot = {
+    title = "TRACK " .. trkId .. " LATCH",
+    value = targetLatch and "LATCH 🔒 ON" or "LATCH OFF",
+    subtext = "Track " .. trkId .. " (" .. (trk and trk.name or "Track") .. ") • Latch " .. (targetLatch and "Active 🔒 (held notes loop)" or "Disabled (momentary)"),
+    targetId = "key-0",
+    color = (trk and trk.color) or "#64d8f0"
+  }
+  updateHud(spot)
+  return targetLatch
 end
 
 local function clearTrackArp(trackId)
@@ -1396,6 +1467,8 @@ return {
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,
   getArpRowTargetSubtext = getArpRowTargetSubtext,
   toggleArpPower = toggleArpPower,
+  toggleArpLatch = toggleArpLatch,
+  isAnyTrackArpActive = isAnyTrackArpActive,
   toggleArp = toggleArp,
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,

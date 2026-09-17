@@ -753,6 +753,16 @@ local HTML_UI_CONTENT = [[
     color: var(--trk-color, #e0e0e0);
     font-weight: 600;
   }
+  .key-pad.ctrl-track .stacked-rows-icon.top-active .rect.top {
+    background: var(--trk-color, #d4a359);
+    border-color: var(--trk-color, #d4a359);
+    box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
+  }
+  .key-pad.ctrl-track .stacked-rows-icon.bottom-active .rect.bottom {
+    background: var(--trk-color, #d4a359);
+    border-color: var(--trk-color, #d4a359);
+    box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
+  }
 
   /* Selected Track: exactly one track at a time */
   .key-pad.ctrl-track.trk-selected {
@@ -4420,7 +4430,7 @@ local HTML_UI_CONTENT = [[
             arpPowerBtn.classList.add('arp-active');
             arpPowerBtn.classList.remove('arp-latch');
           } else if (latch) {
-            arpPowerBtn.textContent = 'ARP: LATCH';
+            arpPowerBtn.textContent = 'ARP: LATCH 🔒';
             arpPowerBtn.classList.add('arp-active', 'arp-latch');
           } else {
             arpPowerBtn.textContent = 'ARP: ON';
@@ -4702,11 +4712,54 @@ local HTML_UI_CONTENT = [[
             const iconEl = el.querySelector('.key-row-icon');
             if (iconEl) {
               iconEl.classList.remove('top-active', 'bottom-active', 'both-active');
-              if (effAction === 'topOctDown' || effAction === 'topOctUp' || effAction === 'topVolDown' || effAction === 'topVolUp' || effAction === 'arpTopToggle') {
+
+              let rowTarget = k.rowActive || null;
+              const curNote = (k.displayNote || k.note || '').trim();
+
+              if (!rowTarget && curNote) {
+                if (/^Top(Oct| Vol| 3⇄4| Lock|\b)/i.test(curNote)) {
+                  rowTarget = 'top';
+                } else if (/^Bot(Oct| Vol| 1⇄2| Lock|\b)/i.test(curNote)) {
+                  rowTarget = 'bottom';
+                } else if (/^(Oct [+\-]|Oct Reset|Vol [+\-]|Mix Reset)/i.test(curNote)) {
+                  rowTarget = 'both';
+                }
+              }
+
+              if (!rowTarget && effAction) {
+                if (
+                  effAction === 'topOctDown' || effAction === 'topOctUp' ||
+                  effAction === 'topVolDown' || effAction === 'topVolUp' ||
+                  effAction === 'arpTopToggle' || effAction === 'topTrackToggle' ||
+                  effAction === 'topTrackLock' || effAction === 'topBoostUp' || effAction === 'topBoostDown' ||
+                  String(effAction).match(/^trk(Select|Mute|Solo|Lock|Rec|Clear|Focus)[34]$/)
+                ) {
+                  rowTarget = 'top';
+                } else if (
+                  effAction === 'botVolDown' || effAction === 'botVolUp' ||
+                  effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp' ||
+                  effAction === 'botTrackToggle' || effAction === 'botTrackLock' ||
+                  String(effAction).match(/^trk(Select|Mute|Solo|Lock|Rec|Clear|Focus)[12]$/)
+                ) {
+                  rowTarget = 'bottom';
+                } else if (
+                  effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'octReset' ||
+                  effAction === 'volDown' || effAction === 'volUp' || effAction === 'mixReset' ||
+                  effAction === 'arpLinkToggle' || effAction === 'splitArpToggle'
+                ) {
+                  rowTarget = 'both';
+                }
+              }
+
+              if (!rowTarget && isTrkBtn) {
+                rowTarget = (numCode <= 19) ? 'bottom' : 'top';
+              }
+
+              if (rowTarget === 'top') {
                 iconEl.classList.add('top-active');
-              } else if (effAction === 'botVolDown' || effAction === 'botVolUp' || effAction === 'arpBottomToggle' || effAction === 'botOctDown' || effAction === 'botOctUp') {
+              } else if (rowTarget === 'bottom') {
                 iconEl.classList.add('bottom-active');
-              } else if (effAction === 'octaveDown' || effAction === 'octaveUp' || effAction === 'volDown' || effAction === 'volUp') {
+              } else if (rowTarget === 'both') {
                 iconEl.classList.add('both-active');
               }
             }
