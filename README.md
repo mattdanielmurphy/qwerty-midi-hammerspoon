@@ -17,3 +17,18 @@ A modular, key-swallowing QWERTY keyboard MIDI controller and graphical canvas d
 ```bash
 ./install.sh
 ```
+
+
+## TO DO
+
+this has changed a lot recently, which is good and bad. lots of shit is broken, lots to do
+fix:
+- no way to control top arp vs bottom arp
+- when you press any key, the track keys invert in an odd way (if tracks 1 and 3 are selected, pressing a note on the bottom row, which is track 1, causes track 2 to become lit up and tracks 1 and 3 dim, and track 2 shows a waveform even though there's no audio)
+- we need per track everything including volume, etc
+
+## once stable
+- we need better arp gate patterns (bring in korg's defaults) and more scales
+- maybe dedicated oct + AND - keys
+- some way to put the tracks up OR down
+- especially with just 4 tracks, we don't need 4 keys to switch, especially with the constraint we currently have where a row can only hold 2 tracks

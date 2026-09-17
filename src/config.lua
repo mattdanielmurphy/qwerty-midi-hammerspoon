@@ -127,6 +127,7 @@ local state = {
     [1] = {
       id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -134,6 +135,7 @@ local state = {
     [2] = {
       id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -141,6 +143,7 @@ local state = {
     [3] = {
       id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -148,6 +151,7 @@ local state = {
     [4] = {
       id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -284,7 +288,7 @@ local defaultLowerRowKeys = {
 }
 
 local defaultHomeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "sustain",    shiftName = "Sustain" },
+  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "classicSustain", shiftName = "Classic Sus" },
   [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
@@ -338,7 +342,8 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Sustain", typeClass = "latch-active", description = "Sustain pedal CC64 toggle/hold" },
+      { id = "sustain", name = "Smart Sus", typeClass = "latch-active", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "classicSustain", name = "Classic Sus", typeClass = "latch-mode-active", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },

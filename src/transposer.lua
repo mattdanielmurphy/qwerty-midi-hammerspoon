@@ -30,8 +30,12 @@ local function getIntervalInfo(noteNum)
   return harmony.getIntervalInfo(noteNum, state.currentRoot, state.currentScaleIdx)
 end
 
-local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
-  return harmony.getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
+local function getTransposedChordPitches(basePitch, isTopRow, forceChord, chordIdx)
+  local chordOpt = forceChord
+  if type(forceChord) == "boolean" and chordIdx then
+    chordOpt = { enabled = forceChord, chordIdx = chordIdx }
+  end
+  return harmony.getTransposedChordPitches(basePitch, isTopRow, chordOpt, state)
 end
 
 local function getDiatonicPadChord(padIdx)

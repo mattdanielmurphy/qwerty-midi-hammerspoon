@@ -146,14 +146,14 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
-    shift           = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
-    opt             = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
-    shift_opt       = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
-    ctrl            = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",   action = "resetAll" },
+    base            = { name = "Smart Sus",   class = "latch-active",      action = "sustain" },
+    shift           = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    opt             = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    shift_opt       = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",        action = "resetAll" },
   },
   [0] = { -- A
     base            = { name = "Arp",         class = "ctrl-arp",     action = "arpToggle" },
@@ -624,24 +624,51 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local isSustain = (activeAct == "sustain")
-    local isChordToggle = (activeAct == "chordToggle")
+    local activeAct = (state.shiftHeld or state.altHeld) and (cData.shiftAction or cData.action) or cData.action
+    local isSustain = (activeAct == "sustain" or activeAct == "classicSustain" or cData.action == "sustain" or cData.action == "classicSustain")
+    local isChordToggle = (activeAct == "chordToggle" or cData.action == "chordToggle")
     local isMainArp = (activeAct == "arpToggle")
     local isTopArp = (activeAct == "arpTopToggle")
     local isBotArp = (activeAct == "arpBottomToggle")
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     
+    local activeTrk = state.tracks and state.tracks[state.activeTrack or 1]
     local isActiveToggle = false
-    if isSustain and state.sustainActive then isActiveToggle = true end
-    if isChordToggle and state.chordModeActive then isActiveToggle = true end
-    if (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled) then
+    if isSustain then
+      local sMode = activeTrk and activeTrk.sustainMode or (state.sustainActive and "smart" or "off")
+      isActiveToggle = (sMode ~= "off")
+    elseif isChordToggle then
+      isActiveToggle = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
+    elseif (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled) then
       isActiveToggle = true
     end
 
     local noteLabel = cData.name
     local typeClass = pairedClass
-    if isMainArp then
+    if isSustain then
+      local sMode = activeTrk and activeTrk.sustainMode or (state.sustainActive and "smart" or "off")
+      if sMode == "smart" then
+        noteLabel = "Smart Sus"
+        typeClass = "latch-active"
+      elseif sMode == "classic" then
+        noteLabel = "Classic Sus"
+        typeClass = "latch-mode-active"
+      else
+        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Sustain"
+        typeClass = "ctrl-sustain"
+      end
+    elseif isChordToggle then
+      local isChOn = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
+      local cIdx = (activeTrk and activeTrk.chordIdx) or state.chordIdx or 1
+      local cName = state.CHORDS and state.CHORDS[cIdx] and state.CHORDS[cIdx].name or "Chord"
+      if isChOn then
+        noteLabel = "Chord [" .. cName .. "]"
+        typeClass = "latch-active"
+      else
+        noteLabel = "Chord"
+        typeClass = pairedClass
+      end
+    elseif isMainArp then
       if state.arpEnabled and state.arpLatchActive then
         noteLabel = "Arp 🔒"
         typeClass = "latch-mode-active"
@@ -777,6 +804,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         keyUpdates[strCode].trkAudioActive = isAudible and (((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil)))
         keyUpdates[strCode].trkHumanActive = hasKeys
         keyUpdates[strCode].trkArpStep = (t.arpIsPlaying == true)
+        keyUpdates[strCode].trkSustainMode = t.sustainMode or "off"
+        keyUpdates[strCode].trkChordMode = (t.chordModeActive == true)
       end
     end
   end
@@ -1571,7 +1600,9 @@ local function fastUpdateArp()
         soloed = (t and t.soloed == true) or false,
         activeAudio = isAudible and (((t and t.activeNotesCount or 0) > 0) or (t and t.currentPitch ~= nil)),
         humanActive = hasKeys,
-        arpStep = (t and t.arpIsPlaying == true) or false
+        arpStep = (t and t.arpIsPlaying == true) or false,
+        sustainMode = (t and t.sustainMode) or "off",
+        chordMode = (t and t.chordModeActive == true) or false
       }
     end
   end

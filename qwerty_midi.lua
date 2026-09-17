@@ -1009,8 +1009,8 @@ local function arpAddNote(code, pitch, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    if trk.arpLatchActive or state.arpLatchActive then
+    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive
+    if isLatched then
       if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
         trk.targetHeldNotes = {}
         trk.latchClearedForNewChord = true
@@ -1075,9 +1075,8 @@ local function arpRemoveNote(code, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    trk.keysCurrentlyHeld[code] = nil
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    if trk.arpLatchActive or state.arpLatchActive or state.sustainActive then
+    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive or state.sustainActive
+    if isLatched then
       if numPhysicalHeld == 0 then
         trk.latchClearedForNewChord = false
       end
@@ -2086,11 +2085,24 @@ end
 
 local function getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
   local rootPitch = getTransposedPitch(basePitch, isTopRow, state)
-  if not forceChord and not (state.quoteHeld or state.chordModeActive) then
+  local isChordEnabled = false
+  local activeChordIdx = state and state.chordIdx or 1
+  if type(forceChord) == "table" then
+    isChordEnabled = (forceChord.enabled ~= false)
+    if forceChord.chordIdx then activeChordIdx = forceChord.chordIdx end
+  elseif forceChord == true then
+    isChordEnabled = true
+  elseif forceChord == false then
+    isChordEnabled = false
+  else
+    isChordEnabled = state and (state.quoteHeld or state.chordModeActive)
+  end
+
+  if not isChordEnabled then
     return { rootPitch }
   end
-  local chordList = state.CHORDS or CHORDS
-  local chordDef = chordList[state.chordIdx or 1] or chordList[1]
+  local chordList = (state and state.CHORDS) or CHORDS
+  local chordDef = chordList[activeChordIdx] or chordList[1]
   local offsets = chordDef.offsets or { 0 }
   
   local topOffset = state.topRowOctaveOffset or 12
@@ -3682,14 +3694,14 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
-    shift           = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
-    opt             = { name = "Sustain",     class = "ctrl-sustain", action = "sustain" },
-    shift_opt       = { name = "Reset",       class = "ctrl-reset",   action = "resetAll" },
-    ctrl            = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",   action = "panic" },
-    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",   action = "resetAll" },
+    base            = { name = "Smart Sus",   class = "latch-active",      action = "sustain" },
+    shift           = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    opt             = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    shift_opt       = { name = "Classic Sus", class = "latch-mode-active", action = "classicSustain" },
+    ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
+    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",        action = "resetAll" },
   },
   [0] = { -- A
     base            = { name = "Arp",         class = "ctrl-arp",     action = "arpToggle" },
@@ -4160,24 +4172,51 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   for code, cData in pairs(config.getActiveControlKeysMap()) do
-    local activeAct = state.shiftHeld and (cData.shiftAction or cData.action) or cData.action
-    local isSustain = (activeAct == "sustain")
-    local isChordToggle = (activeAct == "chordToggle")
+    local activeAct = (state.shiftHeld or state.altHeld) and (cData.shiftAction or cData.action) or cData.action
+    local isSustain = (activeAct == "sustain" or activeAct == "classicSustain" or cData.action == "sustain" or cData.action == "classicSustain")
+    local isChordToggle = (activeAct == "chordToggle" or cData.action == "chordToggle")
     local isMainArp = (activeAct == "arpToggle")
     local isTopArp = (activeAct == "arpTopToggle")
     local isBotArp = (activeAct == "arpBottomToggle")
     local pairedClass = actionTypeClass[activeAct] or actionTypeClass[cData.action] or ""
     
+    local activeTrk = state.tracks and state.tracks[state.activeTrack or 1]
     local isActiveToggle = false
-    if isSustain and state.sustainActive then isActiveToggle = true end
-    if isChordToggle and state.chordModeActive then isActiveToggle = true end
-    if (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled) then
+    if isSustain then
+      local sMode = activeTrk and activeTrk.sustainMode or (state.sustainActive and "smart" or "off")
+      isActiveToggle = (sMode ~= "off")
+    elseif isChordToggle then
+      isActiveToggle = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
+    elseif (isMainArp and state.arpEnabled) or (isTopArp and state.arpTopEnabled) or (isBotArp and state.arpBottomEnabled) then
       isActiveToggle = true
     end
 
     local noteLabel = cData.name
     local typeClass = pairedClass
-    if isMainArp then
+    if isSustain then
+      local sMode = activeTrk and activeTrk.sustainMode or (state.sustainActive and "smart" or "off")
+      if sMode == "smart" then
+        noteLabel = "Smart Sus"
+        typeClass = "latch-active"
+      elseif sMode == "classic" then
+        noteLabel = "Classic Sus"
+        typeClass = "latch-mode-active"
+      else
+        noteLabel = (state.shiftHeld or state.altHeld) and "Classic Sus" or "Sustain"
+        typeClass = "ctrl-sustain"
+      end
+    elseif isChordToggle then
+      local isChOn = (activeTrk and activeTrk.chordModeActive == true) or (state.chordModeActive == true)
+      local cIdx = (activeTrk and activeTrk.chordIdx) or state.chordIdx or 1
+      local cName = state.CHORDS and state.CHORDS[cIdx] and state.CHORDS[cIdx].name or "Chord"
+      if isChOn then
+        noteLabel = "Chord [" .. cName .. "]"
+        typeClass = "latch-active"
+      else
+        noteLabel = "Chord"
+        typeClass = pairedClass
+      end
+    elseif isMainArp then
       if state.arpEnabled and state.arpLatchActive then
         noteLabel = "Arp 🔒"
         typeClass = "latch-mode-active"
@@ -4313,6 +4352,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         keyUpdates[strCode].trkAudioActive = isAudible and (((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil)))
         keyUpdates[strCode].trkHumanActive = hasKeys
         keyUpdates[strCode].trkArpStep = (t.arpIsPlaying == true)
+        keyUpdates[strCode].trkSustainMode = t.sustainMode or "off"
+        keyUpdates[strCode].trkChordMode = (t.chordModeActive == true)
       end
     end
   end
@@ -5107,7 +5148,9 @@ local function fastUpdateArp()
         soloed = (t and t.soloed == true) or false,
         activeAudio = isAudible and (((t and t.activeNotesCount or 0) > 0) or (t and t.currentPitch ~= nil)),
         humanActive = hasKeys,
-        arpStep = (t and t.arpIsPlaying == true) or false
+        arpStep = (t and t.arpIsPlaying == true) or false,
+        sustainMode = (t and t.sustainMode) or "off",
+        chordMode = (t and t.chordModeActive == true) or false
       }
     end
   end
@@ -5177,8 +5220,12 @@ local function getIntervalInfo(noteNum)
   return harmony.getIntervalInfo(noteNum, state.currentRoot, state.currentScaleIdx)
 end
 
-local function getTransposedChordPitches(basePitch, isTopRow, forceChord)
-  return harmony.getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
+local function getTransposedChordPitches(basePitch, isTopRow, forceChord, chordIdx)
+  local chordOpt = forceChord
+  if type(forceChord) == "boolean" and chordIdx then
+    chordOpt = { enabled = forceChord, chordIdx = chordIdx }
+  end
+  return harmony.getTransposedChordPitches(basePitch, isTopRow, chordOpt, state)
 end
 
 local function getDiatonicPadChord(padIdx)
@@ -6139,6 +6186,66 @@ local HTML_UI_CONTENT = [[
   .key-pad.latch-mode-active .key-note {
     color: #00e5ff !important;
     font-weight: 700 !important;
+  }
+
+  /* Key 48 Smart Sustain & Classic Sustain Styles */
+  #key-48.latch-active {
+    background: rgba(255, 215, 0, 0.22) !important;
+    border-color: #ffd700 !important;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5), inset 0 0 6px rgba(255, 215, 0, 0.2) !important;
+  }
+  #key-48.latch-active .key-note {
+    color: #ffd700 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+  }
+
+  #key-48.latch-mode-active {
+    background: rgba(255, 145, 0, 0.22) !important;
+    border-color: #ff9100 !important;
+    box-shadow: 0 0 12px rgba(255, 145, 0, 0.55), inset 0 0 6px rgba(255, 145, 0, 0.25) !important;
+  }
+  #key-48.latch-mode-active .key-note {
+    color: #ff9100 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255, 145, 0, 0.6);
+  }
+
+  /* Track Status Mode Tags: SUS and CHD */
+  .trk-mode-tags {
+    position: absolute;
+    top: 15px;
+    left: 4px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .trk-tag-sus, .trk-tag-chd {
+    font-size: 7px;
+    font-weight: 800;
+    line-height: 8px;
+    padding: 1px 2px;
+    border-radius: 2px;
+    display: none;
+    letter-spacing: 0.2px;
+  }
+  .trk-tag-sus.active {
+    display: inline-block;
+    background: rgba(255, 215, 0, 0.25);
+    color: #ffd700;
+    border: 1px solid rgba(255, 215, 0, 0.5);
+  }
+  .trk-tag-sus.classic.active {
+    background: rgba(255, 145, 0, 0.25);
+    color: #ff9100;
+    border: 1px solid rgba(255, 145, 0, 0.5);
+  }
+  .trk-tag-chd.active {
+    display: inline-block;
+    background: rgba(0, 229, 255, 0.25);
+    color: #00e5ff;
+    border: 1px solid rgba(0, 229, 255, 0.5);
   }
 
   /* Latched key: subtle border hint */
@@ -8079,6 +8186,18 @@ local HTML_UI_CONTENT = [[
                 msBadges.appendChild(sBadge);
                 pad.appendChild(msBadges);
 
+                const modeTags = document.createElement('div');
+                modeTags.className = 'trk-mode-tags';
+                const susTag = document.createElement('span');
+                susTag.className = 'trk-tag-sus';
+                susTag.textContent = 'SUS';
+                const chdTag = document.createElement('span');
+                chdTag.className = 'trk-tag-chd';
+                chdTag.textContent = 'CHD';
+                modeTags.appendChild(susTag);
+                modeTags.appendChild(chdTag);
+                pad.appendChild(modeTags);
+
                 const waveDiv = document.createElement('div');
                 waveDiv.className = 'trk-waveform';
                 waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
@@ -8152,6 +8271,18 @@ local HTML_UI_CONTENT = [[
               msBadges.appendChild(mBadge);
               msBadges.appendChild(sBadge);
               pad.appendChild(msBadges);
+
+              const modeTags = document.createElement('div');
+              modeTags.className = 'trk-mode-tags';
+              const susTag = document.createElement('span');
+              susTag.className = 'trk-tag-sus';
+              susTag.textContent = 'SUS';
+              const chdTag = document.createElement('span');
+              chdTag.className = 'trk-tag-chd';
+              chdTag.textContent = 'CHD';
+              modeTags.appendChild(susTag);
+              modeTags.appendChild(chdTag);
+              pad.appendChild(modeTags);
 
               const waveDiv = document.createElement('div');
               waveDiv.className = 'trk-waveform';
@@ -10071,6 +10202,21 @@ local HTML_UI_CONTENT = [[
               if (k.trkAudioActive !== undefined) el.classList.toggle('trk-audio-active', !!k.trkAudioActive);
               if (k.trkHumanActive !== undefined) el.classList.toggle('trk-human-active', !!k.trkHumanActive);
               if (k.trkArpStep !== undefined) el.classList.toggle('trk-arp-step', !!k.trkArpStep);
+              if (k.trkSustainMode !== undefined) {
+                const susTag = el.querySelector('.trk-tag-sus');
+                if (susTag) {
+                  const isSus = k.trkSustainMode !== 'off';
+                  susTag.classList.toggle('active', isSus);
+                  susTag.classList.toggle('classic', k.trkSustainMode === 'classic');
+                  susTag.textContent = k.trkSustainMode === 'classic' ? 'ALL' : 'SUS';
+                }
+              }
+              if (k.trkChordMode !== undefined) {
+                const chdTag = el.querySelector('.trk-tag-chd');
+                if (chdTag) {
+                  chdTag.classList.toggle('active', !!k.trkChordMode);
+                }
+              }
             }
 
             const isShift = data.shiftHeld || shiftModeActive;
@@ -10228,6 +10374,21 @@ window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
           if (st.activeAudio !== undefined) el.classList.toggle('trk-audio-active', !!st.activeAudio);
           if (st.humanActive !== undefined) el.classList.toggle('trk-human-active', !!st.humanActive);
           if (st.arpStep !== undefined) el.classList.toggle('trk-arp-step', !!st.arpStep);
+          if (st.sustainMode !== undefined) {
+            const susTag = el.querySelector('.trk-tag-sus');
+            if (susTag) {
+              const isSus = st.sustainMode !== 'off';
+              susTag.classList.toggle('active', isSus);
+              susTag.classList.toggle('classic', st.sustainMode === 'classic');
+              susTag.textContent = st.sustainMode === 'classic' ? 'ALL' : 'SUS';
+            }
+          }
+          if (st.chordMode !== undefined) {
+            const chdTag = el.querySelector('.trk-tag-chd');
+            if (chdTag) {
+              chdTag.classList.toggle('active', !!st.chordMode);
+            }
+          }
         }
       }
     }
@@ -11722,6 +11883,7 @@ local state = {
     [1] = {
       id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -11729,6 +11891,7 @@ local state = {
     [2] = {
       id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -11736,6 +11899,7 @@ local state = {
     [3] = {
       id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -11743,6 +11907,7 @@ local state = {
     [4] = {
       id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -11879,7 +12044,7 @@ local defaultLowerRowKeys = {
 }
 
 local defaultHomeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "sustain",    shiftName = "Sustain" },
+  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "classicSustain", shiftName = "Classic Sus" },
   [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
@@ -11933,7 +12098,8 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Sustain", typeClass = "latch-active", description = "Sustain pedal CC64 toggle/hold" },
+      { id = "sustain", name = "Smart Sus", typeClass = "latch-active", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "classicSustain", name = "Classic Sus", typeClass = "latch-mode-active", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
@@ -12758,6 +12924,12 @@ local function syncTrackAudibility()
         end
       end
       -- Silence any sustained notes on this track's channel
+      if trk.sustainedPitches then
+        for _, item in ipairs(trk.sustainedPitches) do
+          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or trk.channel or 0)
+        end
+        trk.sustainedPitches = {}
+      end
       if state.sustainedPitches then
         local newSustained = {}
         for _, item in ipairs(state.sustainedPitches) do
@@ -12822,6 +12994,9 @@ local function selectTrack(id)
   local trk = state.tracks[targetId]
   state.arpEnabled = trk.arpEnabled == true
   state.arpLatchActive = trk.arpLatchActive == true
+  state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
+  state.chordModeActive = trk.chordModeActive == true
+  if trk.chordIdx then state.chordIdx = trk.chordIdx end
 
   if targetId <= 2 then
     state.bottomRowTrack = targetId
@@ -13271,6 +13446,14 @@ local function executeControlAction(act, code)
     state.arpLatchActive = false
     state.sustainedPitches = {}
     state.pressedKeys = {}
+    if state.tracks then
+      for _, trk in pairs(state.tracks) do
+        trk.sustainMode = "off"
+        trk.sustainedPitches = {}
+        trk.physicalKeysHeld = {}
+        trk.activeNotesCount = 0
+      end
+    end
 
     arpeggiator.stopArpTimer()
     state.arpHeldNotes = {}
@@ -13338,35 +13521,37 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "sustain" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
-    state.sustainWasActiveOnPress = state.sustainActive
-    if state.sustainActive then
-      midi.sendMidiCC(64, 127)
-
-      -- Retroactively sustain all non-arp notes currently being physically held down
-      for code, keyInfo in pairs(state.pressedKeys) do
-        if type(keyInfo) == "table" and not keyInfo.isControl then
-          keyInfo.isSustainedNote = true
-          if not keyInfo.isArpNote then
-            local pitches = keyInfo.pitches or { keyInfo.pitch }
-            local ch = keyInfo.channel or 0
-            for _, p in ipairs(pitches) do
-              if p then
-                state.sustainedPitches = state.sustainedPitches or {}
-                table.insert(state.sustainedPitches, { pitch = p, channel = ch })
-              end
-            end
-          end
-        end
-      end
+    if trk then
+      trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
     end
-
+    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "smart") or state.sustainActive
+    local isSmart = trk and (trk.sustainMode == "smart")
     local spot = {
-      title = "SUSTAIN (CC #64)",
-      value = "SUSTAIN ON",
-      subtext = "Notes held across release",
+      title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+      value = isSmart and "SMART ON" or "SMART OFF",
+      subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Tap Tab to toggle Smart Sustain",
       targetId = code and ("key-" .. code) or "key-48",
-      color = "#d4a359"
+      color = "#ffd700"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "classicSustain" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    if trk then
+      trk.classicWasActiveOnPress = (trk.sustainMode == "classic")
+    end
+    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "classic") or state.sustainActive
+    local isClassic = trk and (trk.sustainMode == "classic")
+    local spot = {
+      title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
+      value = isClassic and "CLASSIC ON" or "CLASSIC OFF",
+      subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Shift+Tab to toggle Classic",
+      targetId = code and ("key-" .. code) or "key-48",
+      color = "#ff9100"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
@@ -13374,36 +13559,57 @@ local function executeControlAction(act, code)
   elseif act == "arpLinkToggle" then
     arpeggiator.toggleArpLink()
   elseif act == "chordToggle" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
     state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
-    state.chordWasActiveOnPress = state.chordModeActive
-    state.chordModeActive = true
+    if trk then
+      trk.chordWasActiveOnPress = (trk.chordModeActive == true)
+    end
+    state.chordWasActiveOnPress = (trk and trk.chordModeActive) or state.chordModeActive
+    local isChord = trk and trk.chordModeActive
+    local chordName = state.CHORDS[(trk and trk.chordIdx) or state.chordIdx or 1].name
     local spot = {
-      title = "CHORD MODE",
-      value = state.chordModeActive and "ON" or "OFF",
-      subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
+      title = "CHORD MODE (TRK " .. activeTrkId .. ")",
+      value = isChord and ("ON (" .. chordName .. ")") or "OFF",
+      subtext = isChord and ("Track " .. activeTrkId .. " chords enabled") or ("Track " .. activeTrkId .. " single notes"),
       targetId = "header",
-      color = "#d4a359"
+      color = isChord and "#d4a359" or "#b5aba0"
     }
     hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
-    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.chordIdx = ((trk.chordIdx or 1) % #state.CHORDS) + 1
+      state.chordIdx = trk.chordIdx
+    else
+      state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    end
     arpeggiator.updateLatchedArpChordNotes()
+    local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
-      title = "CHORD TYPE",
-      value = state.CHORDS[state.chordIdx].name,
-      subtext = "Cycle chord type",
+      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
+      value = chordName,
+      subtext = "Cycle chord type for Track " .. activeTrkId,
       targetId = "header",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-
   elseif act == "chordDown" then
-    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.chordIdx = (((trk.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
+      state.chordIdx = trk.chordIdx
+    else
+      state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    end
     arpeggiator.updateLatchedArpChordNotes()
+    local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
-      title = "CHORD TYPE",
-      value = state.CHORDS[state.chordIdx].name,
-      subtext = "Cycle chord type",
+      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
+      value = chordName,
+      subtext = "Cycle chord type for Track " .. activeTrkId,
       targetId = "header",
       color = "#d4a359"
     }
@@ -14235,7 +14441,7 @@ local function handleKeyDown(code)
   if not actionToExecute or actionToExecute == "" or actionToExecute == "none" then
     local k = config.getNumberControlKey(code) or config.getControlKey(code)
     if k then
-      if state.shiftHeld and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
+      if (state.shiftHeld or state.altHeld) and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
         actionToExecute = k.shiftAction
       elseif k.action and k.action ~= "" and k.action ~= "none" then
         actionToExecute = k.action
@@ -14280,25 +14486,86 @@ local function handleKeyDown(code)
     local isTop = noteKey.isTop
     local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
     local trk = state.tracks and state.tracks[trkIdx]
+    local now = hs.timer.secondsSinceEpoch()
+
+    -- Count physical keys held on this track before registering this key
+    local numPhysHeld = 0
+    if trk and trk.physicalKeysHeld then
+      for _ in pairs(trk.physicalKeysHeld) do
+        numPhysHeld = numPhysHeld + 1
+      end
+    end
+
     if trk then
       trk.physicalKeysHeld = trk.physicalKeysHeld or {}
       trk.physicalKeysHeld[code] = true
     end
     local ch = trk and trk.channel or (isTop and (state.topRowChannel or 2) or (state.bottomRowChannel or 0))
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-    local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
+
+    -- Track-independent chord mode
+    local isChordActive = (trk and trk.chordModeActive) or state.quoteHeld
+    local chordPitches = isChordActive and transposer.getChordPitches(noteKey.baseNote, isTop, true, trk and trk.chordIdx) or { transposedPitch }
     local arpActive = trk and trk.arpEnabled or false
     local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
 
+    -- Track-independent sustain mode
+    local susMode = (trk and trk.sustainMode) or "off"
     local sustainPedalHeld = false
     for c, info in pairs(state.pressedKeys) do
-      if type(info) == "table" and info.isControl and info.action == "sustain" then
+      if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
         sustainPedalHeld = true
         break
       end
     end
-    local effectiveSustain = (state.shiftHeld and (not (state.sustainActive or sustainPedalHeld))) or ((not state.shiftHeld) and (state.sustainActive or sustainPedalHeld))
-    
+    if sustainPedalHeld and susMode == "off" then
+      susMode = "smart"
+    end
+
+    -- Smart Sustain Auto-Reset Engine
+    if trk and susMode == "smart" and not isArpNote then
+      local chordWindow = 0.12 -- 120ms grouping window for multi-finger chord strikes
+      local isNewChord = (numPhysHeld == 0) or ((now - (trk.chordStartTime or 0)) > chordWindow)
+      if isNewChord then
+        -- Silence previously sustained pitches on this track that are NOT physically held down right now
+        if trk.sustainedPitches then
+          for _, item in ipairs(trk.sustainedPitches) do
+            local p = item.pitch
+            local itemCh = item.channel or ch
+            local isStillPhysHeld = false
+            for heldCode, _ in pairs(trk.physicalKeysHeld) do
+              if heldCode ~= code then
+                local kInfo = state.pressedKeys[heldCode]
+                if kInfo and kInfo.pitches then
+                  for _, hp in ipairs(kInfo.pitches) do
+                    if hp == p then isStillPhysHeld = true; break end
+                  end
+                end
+              end
+              if isStillPhysHeld then break end
+            end
+            if not isStillPhysHeld then
+              midi.sendMidiNote("noteOff", p, 0, itemCh)
+            end
+          end
+        end
+        trk.sustainedPitches = {}
+        trk.chordStartTime = now
+      end
+      -- Latch new pitches into trk.sustainedPitches
+      trk.sustainedPitches = trk.sustainedPitches or {}
+      for _, p in ipairs(chordPitches) do
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+      end
+    elseif trk and susMode == "classic" and not isArpNote then
+      -- Classic cumulative sustain: append without clearing
+      trk.sustainedPitches = trk.sustainedPitches or {}
+      for _, p in ipairs(chordPitches) do
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+      end
+    end
+
+    local effectiveSustain = (susMode ~= "off")
     state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch, track = trkIdx, isTop = isTop }
     
     if isTrackAudible(trkIdx) then
@@ -14372,17 +14639,32 @@ local function handleKeyUp(code)
     else
       local sustainPedalHeld = false
       for c, info in pairs(state.pressedKeys) do
-        if type(info) == "table" and info.isControl and info.action == "sustain" then
+        if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
           sustainPedalHeld = true
           break
         end
       end
 
+      local susMode = (trk and trk.sustainMode) or "off"
+      if sustainPedalHeld and susMode == "off" then susMode = "smart" end
+      local isSustained = isSustainedNote or (susMode ~= "off")
+
       quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
         for _, playedPitch in ipairs(releasedPitches or pitches) do
-          if isSustainedNote and (state.sustainActive or sustainPedalHeld) then
-            state.sustainedPitches = state.sustainedPitches or {}
-            table.insert(state.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel })
+          if isSustained and susMode ~= "off" then
+            if trk then
+              trk.sustainedPitches = trk.sustainedPitches or {}
+              local found = false
+              for _, item in ipairs(trk.sustainedPitches) do
+                if item.pitch == playedPitch and item.channel == (channel or keyChannel) then
+                  found = true
+                  break
+                end
+              end
+              if not found then
+                table.insert(trk.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel })
+              end
+            end
           else
             midi.sendMidiNote("noteOff", playedPitch, 0, channel or keyChannel)
           end
@@ -14418,29 +14700,39 @@ local function handleKeyUp(code)
       return true
   end
 
-  local function cleanupSustainPitches()
-    if state.sustainedPitches then
-      for _, item in ipairs(state.sustainedPitches) do
-        if type(item) == "table" and item.pitch then
-          local pitch = item.pitch
-          local channel = item.channel or 0
-          local isCurrentlyHeld = false
-          for _, kInfo in pairs(state.pressedKeys) do
-            if type(kInfo) == "table" and not kInfo.isControl and kInfo.pitches then
-              for _, p in ipairs(kInfo.pitches) do
-                if p == pitch and (kInfo.channel or 0) == channel then
-                  isCurrentlyHeld = true
-                  break
+  local function cleanupSustainPitches(targetTrackId)
+    local tracksToClean = targetTrackId and { [targetTrackId] = state.tracks and state.tracks[targetTrackId] } or (state.tracks or {})
+    for tId, trk in pairs(tracksToClean) do
+      if trk and trk.sustainedPitches then
+        for _, item in ipairs(trk.sustainedPitches) do
+          if type(item) == "table" and item.pitch then
+            local pitch = item.pitch
+            local channel = item.channel or trk.channel or 0
+            local isCurrentlyHeld = false
+            for _, kInfo in pairs(state.pressedKeys) do
+              if type(kInfo) == "table" and not kInfo.isControl and kInfo.pitches and kInfo.track == tId then
+                for _, p in ipairs(kInfo.pitches) do
+                  if p == pitch then
+                    isCurrentlyHeld = true
+                    break
+                  end
                 end
+                if isCurrentlyHeld then break end
               end
-              if isCurrentlyHeld then break end
+            end
+            local isArpActivePitch = trk.currentPitch and ((type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitch)
+            if not isCurrentlyHeld and not isArpActivePitch then
+              midi.sendMidiNote("noteOff", pitch, 0, channel)
             end
           end
-          -- Do NOT issue noteOff if this pitch is currently playing/held in arpeggiator
-          local isArpActivePitch = state.arpCurrentPitch and ((type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch) == pitch)
-          if not isCurrentlyHeld and not isArpActivePitch then
-            midi.sendMidiNote("noteOff", pitch, 0, channel)
-          end
+        end
+        trk.sustainedPitches = {}
+      end
+    end
+    if not targetTrackId and state.sustainedPitches then
+      for _, item in ipairs(state.sustainedPitches) do
+        if type(item) == "table" and item.pitch then
+          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or 0)
         end
       end
       state.sustainedPitches = {}
@@ -14452,97 +14744,119 @@ local function handleKeyUp(code)
     stopControlRepeat(code)
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
-    local act = (keyInfo and keyInfo.action) or (state.shiftHeld and ctrlKey.shiftAction or ctrlKey.action)
+    local act = (keyInfo and keyInfo.action) or ((state.shiftHeld or state.altHeld) and ctrlKey.shiftAction or ctrlKey.action)
     
     local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
     if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
         local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
-        if (wasSustain or act == "sustain") and not state.sustainActive then
-          midi.sendSustainCC(0)
+        if (wasSustain or act == "sustain" or act == "classicSustain") and not state.sustainActive then
           cleanupSustainPitches()
-        elseif not wasSustain and state.sustainActive then
-          midi.sendSustainCC(127)
         end
-        local spot = act == "sustain" and {
-          title = "SUSTAIN (CC #64)",
-          value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-          subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
+        local activeTrkId = state.activeTrack or 1
+        local trk = state.tracks and state.tracks[activeTrkId]
+        local isSusOn = trk and (trk.sustainMode ~= "off")
+        local spot = (act == "sustain" or act == "classicSustain") and {
+          title = (trk and trk.sustainMode == "classic") and ("CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")") or ("SMART SUSTAIN (TRK " .. activeTrkId .. ")"),
+          value = isSusOn and ((trk and trk.sustainMode == "classic") and "CLASSIC ON" or "SMART ON") or "OFF",
+          subtext = isSusOn and "Notes held across release" or "Damping enabled",
           targetId = "key-48",
-          color = state.sustainActive and "#d4a359" or "#b5aba0"
+          color = isSusOn and "#ffd700" or "#b5aba0"
         } or nil
-        hud.updateWebviewHud(spot)
+        if spot then hud.updateWebviewHud(spot) end
         return true
       end
     end
 
     if act == "sustain" then
-      if state.sustainWasActiveOnPress then
-        state.sustainActive = false
-        midi.sendSustainCC(0)
-        cleanupSustainPitches()
-
-        -- When sustain turns off and latch is disabled, clear any arpeggiator notes that are no longer physically held down
-        if not state.arpLatchActive and state.arpTargetHeldNotes then
-          local newTarget = {}
-          for codeKey, pitch in pairs(state.arpTargetHeldNotes) do
-            local baseCode = type(codeKey) == "string" and tonumber(codeKey:match("^(%d+)")) or tonumber(codeKey)
-            if baseCode and state.arpKeysCurrentlyHeld[baseCode] then
-              newTarget[codeKey] = pitch
-            end
-          end
-          state.arpTargetHeldNotes = newTarget
-          state.arpHeldNotes = {}
-          for k, v in pairs(state.arpTargetHeldNotes) do state.arpHeldNotes[k] = v end
-          if next(state.arpHeldNotes) == nil then
-            arpeggiator.stopArpTimer()
-          end
-        end
-      else
-        state.sustainActive = true
-        midi.sendSustainCC(127)
-        -- Retroactively sustain all non-arp notes currently being physically held down
-        for c, keyInfo in pairs(state.pressedKeys) do
-          if type(keyInfo) == "table" and not keyInfo.isControl then
-            keyInfo.isSustainedNote = true
-            if not keyInfo.isArpNote then
-              local pitches = keyInfo.pitches or { keyInfo.pitch }
-              local ch = keyInfo.channel or 0
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if trk.sustainWasActiveOnPress then
+          trk.sustainMode = "off"
+          cleanupSustainPitches(activeTrkId)
+        else
+          trk.sustainMode = "smart"
+          for c, kInfo in pairs(state.pressedKeys) do
+            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
+              kInfo.isSustainedNote = true
+              local pitches = kInfo.pitches or { kInfo.pitch }
+              local ch = kInfo.channel or trk.channel or 0
               for _, p in ipairs(pitches) do
                 if p then
-                  state.sustainedPitches = state.sustainedPitches or {}
-                  table.insert(state.sustainedPitches, { pitch = p, channel = ch })
+                  trk.sustainedPitches = trk.sustainedPitches or {}
+                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
                 end
               end
             end
           end
         end
+        state.sustainActive = (trk.sustainMode ~= "off")
+        local isSmart = (trk.sustainMode == "smart")
+        local spot = {
+          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = isSmart and "SMART ON" or "OFF",
+          subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Damping enabled",
+          targetId = "key-48",
+          color = isSmart and "#ffd700" or "#b5aba0"
+        }
+        hud.updateWebviewHud(spot)
       end
-
-      local spot = {
-        title = "SUSTAIN (CC #64)",
-        value = state.sustainActive and "SUSTAIN ON" or "SUSTAIN OFF",
-        subtext = state.sustainActive and "Notes held across release" or "Damping enabled",
-        targetId = "key-48",
-        color = state.sustainActive and "#d4a359" or "#b5aba0"
-      }
-      hud.updateWebviewHud(spot)
+    elseif act == "classicSustain" then
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if trk.classicWasActiveOnPress then
+          trk.sustainMode = "off"
+          cleanupSustainPitches(activeTrkId)
+        else
+          trk.sustainMode = "classic"
+          for c, kInfo in pairs(state.pressedKeys) do
+            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
+              kInfo.isSustainedNote = true
+              local pitches = kInfo.pitches or { kInfo.pitch }
+              local ch = kInfo.channel or trk.channel or 0
+              for _, p in ipairs(pitches) do
+                if p then
+                  trk.sustainedPitches = trk.sustainedPitches or {}
+                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+                end
+              end
+            end
+          end
+        end
+        state.sustainActive = (trk.sustainMode ~= "off")
+        local isClassic = (trk.sustainMode == "classic")
+        local spot = {
+          title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = isClassic and "CLASSIC ON" or "OFF",
+          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Damping enabled",
+          targetId = "key-48",
+          color = isClassic and "#ff9100" or "#b5aba0"
+        }
+        hud.updateWebviewHud(spot)
+      end
     elseif act == "chordToggle" then
-      if state.chordWasActiveOnPress then
-        state.chordModeActive = false
-      else
-        state.chordModeActive = true
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if trk.chordWasActiveOnPress then
+          trk.chordModeActive = false
+        else
+          trk.chordModeActive = true
+        end
+        state.chordModeActive = (trk.chordModeActive == true)
+        local chordName = state.CHORDS[trk.chordIdx or state.chordIdx or 1].name
+        local spot = {
+          title = "CHORD MODE (TRK " .. activeTrkId .. ")",
+          value = trk.chordModeActive and ("ON (" .. chordName .. ")") or "OFF",
+          subtext = trk.chordModeActive and ("Chords active on Track " .. activeTrkId .. " (" .. ((trk and trk.name) or "") .. ")") or ("Single notes on Track " .. activeTrkId),
+          targetId = "key-39",
+          color = trk.chordModeActive and "#ffd700" or "#b5aba0"
+        }
+        hud.updateWebviewHud(spot)
       end
-      
-      local spot = {
-        title = "CHORD MODE",
-        value = state.chordModeActive and "ON" or "OFF",
-        subtext = "Chord mode: " .. (state.chordModeActive and "Enabled" or "Disabled"),
-        targetId = "header",
-        color = state.chordModeActive and "#d4a359" or "#b5aba0"
-      }
-      hud.updateWebviewHud(spot)
     else
       hud.updateWebviewHud()
     end

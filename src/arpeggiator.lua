@@ -581,8 +581,8 @@ local function arpAddNote(code, pitch, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    if trk.arpLatchActive or state.arpLatchActive then
+    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive
+    if isLatched then
       if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
         trk.targetHeldNotes = {}
         trk.latchClearedForNewChord = true
@@ -647,9 +647,8 @@ local function arpRemoveNote(code, trackIdx)
   local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
-    trk.keysCurrentlyHeld[code] = nil
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    if trk.arpLatchActive or state.arpLatchActive or state.sustainActive then
+    local isLatched = trk.arpLatchActive or (trk.sustainMode and trk.sustainMode ~= "off") or state.arpLatchActive or state.sustainActive
+    if isLatched then
       if numPhysicalHeld == 0 then
         trk.latchClearedForNewChord = false
       end

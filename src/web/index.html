@@ -934,6 +934,66 @@
     font-weight: 700 !important;
   }
 
+  /* Key 48 Smart Sustain & Classic Sustain Styles */
+  #key-48.latch-active {
+    background: rgba(255, 215, 0, 0.22) !important;
+    border-color: #ffd700 !important;
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5), inset 0 0 6px rgba(255, 215, 0, 0.2) !important;
+  }
+  #key-48.latch-active .key-note {
+    color: #ffd700 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+  }
+
+  #key-48.latch-mode-active {
+    background: rgba(255, 145, 0, 0.22) !important;
+    border-color: #ff9100 !important;
+    box-shadow: 0 0 12px rgba(255, 145, 0, 0.55), inset 0 0 6px rgba(255, 145, 0, 0.25) !important;
+  }
+  #key-48.latch-mode-active .key-note {
+    color: #ff9100 !important;
+    font-weight: 700 !important;
+    text-shadow: 0 0 6px rgba(255, 145, 0, 0.6);
+  }
+
+  /* Track Status Mode Tags: SUS and CHD */
+  .trk-mode-tags {
+    position: absolute;
+    top: 15px;
+    left: 4px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .trk-tag-sus, .trk-tag-chd {
+    font-size: 7px;
+    font-weight: 800;
+    line-height: 8px;
+    padding: 1px 2px;
+    border-radius: 2px;
+    display: none;
+    letter-spacing: 0.2px;
+  }
+  .trk-tag-sus.active {
+    display: inline-block;
+    background: rgba(255, 215, 0, 0.25);
+    color: #ffd700;
+    border: 1px solid rgba(255, 215, 0, 0.5);
+  }
+  .trk-tag-sus.classic.active {
+    background: rgba(255, 145, 0, 0.25);
+    color: #ff9100;
+    border: 1px solid rgba(255, 145, 0, 0.5);
+  }
+  .trk-tag-chd.active {
+    display: inline-block;
+    background: rgba(0, 229, 255, 0.25);
+    color: #00e5ff;
+    border: 1px solid rgba(0, 229, 255, 0.5);
+  }
+
   /* Latched key: subtle border hint */
   .key-pad.latched-key {
     border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
@@ -2872,6 +2932,18 @@
                 msBadges.appendChild(sBadge);
                 pad.appendChild(msBadges);
 
+                const modeTags = document.createElement('div');
+                modeTags.className = 'trk-mode-tags';
+                const susTag = document.createElement('span');
+                susTag.className = 'trk-tag-sus';
+                susTag.textContent = 'SUS';
+                const chdTag = document.createElement('span');
+                chdTag.className = 'trk-tag-chd';
+                chdTag.textContent = 'CHD';
+                modeTags.appendChild(susTag);
+                modeTags.appendChild(chdTag);
+                pad.appendChild(modeTags);
+
                 const waveDiv = document.createElement('div');
                 waveDiv.className = 'trk-waveform';
                 waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
@@ -2945,6 +3017,18 @@
               msBadges.appendChild(mBadge);
               msBadges.appendChild(sBadge);
               pad.appendChild(msBadges);
+
+              const modeTags = document.createElement('div');
+              modeTags.className = 'trk-mode-tags';
+              const susTag = document.createElement('span');
+              susTag.className = 'trk-tag-sus';
+              susTag.textContent = 'SUS';
+              const chdTag = document.createElement('span');
+              chdTag.className = 'trk-tag-chd';
+              chdTag.textContent = 'CHD';
+              modeTags.appendChild(susTag);
+              modeTags.appendChild(chdTag);
+              pad.appendChild(modeTags);
 
               const waveDiv = document.createElement('div');
               waveDiv.className = 'trk-waveform';
@@ -4864,6 +4948,21 @@
               if (k.trkAudioActive !== undefined) el.classList.toggle('trk-audio-active', !!k.trkAudioActive);
               if (k.trkHumanActive !== undefined) el.classList.toggle('trk-human-active', !!k.trkHumanActive);
               if (k.trkArpStep !== undefined) el.classList.toggle('trk-arp-step', !!k.trkArpStep);
+              if (k.trkSustainMode !== undefined) {
+                const susTag = el.querySelector('.trk-tag-sus');
+                if (susTag) {
+                  const isSus = k.trkSustainMode !== 'off';
+                  susTag.classList.toggle('active', isSus);
+                  susTag.classList.toggle('classic', k.trkSustainMode === 'classic');
+                  susTag.textContent = k.trkSustainMode === 'classic' ? 'ALL' : 'SUS';
+                }
+              }
+              if (k.trkChordMode !== undefined) {
+                const chdTag = el.querySelector('.trk-tag-chd');
+                if (chdTag) {
+                  chdTag.classList.toggle('active', !!k.trkChordMode);
+                }
+              }
             }
 
             const isShift = data.shiftHeld || shiftModeActive;
@@ -5021,6 +5120,21 @@ window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
           if (st.activeAudio !== undefined) el.classList.toggle('trk-audio-active', !!st.activeAudio);
           if (st.humanActive !== undefined) el.classList.toggle('trk-human-active', !!st.humanActive);
           if (st.arpStep !== undefined) el.classList.toggle('trk-arp-step', !!st.arpStep);
+          if (st.sustainMode !== undefined) {
+            const susTag = el.querySelector('.trk-tag-sus');
+            if (susTag) {
+              const isSus = st.sustainMode !== 'off';
+              susTag.classList.toggle('active', isSus);
+              susTag.classList.toggle('classic', st.sustainMode === 'classic');
+              susTag.textContent = st.sustainMode === 'classic' ? 'ALL' : 'SUS';
+            }
+          }
+          if (st.chordMode !== undefined) {
+            const chdTag = el.querySelector('.trk-tag-chd');
+            if (chdTag) {
+              chdTag.classList.toggle('active', !!st.chordMode);
+            }
+          }
         }
       }
     }

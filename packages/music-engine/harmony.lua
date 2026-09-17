@@ -77,11 +77,24 @@ end
 
 local function getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
   local rootPitch = getTransposedPitch(basePitch, isTopRow, state)
-  if not forceChord and not (state.quoteHeld or state.chordModeActive) then
+  local isChordEnabled = false
+  local activeChordIdx = state and state.chordIdx or 1
+  if type(forceChord) == "table" then
+    isChordEnabled = (forceChord.enabled ~= false)
+    if forceChord.chordIdx then activeChordIdx = forceChord.chordIdx end
+  elseif forceChord == true then
+    isChordEnabled = true
+  elseif forceChord == false then
+    isChordEnabled = false
+  else
+    isChordEnabled = state and (state.quoteHeld or state.chordModeActive)
+  end
+
+  if not isChordEnabled then
     return { rootPitch }
   end
-  local chordList = state.CHORDS or CHORDS
-  local chordDef = chordList[state.chordIdx or 1] or chordList[1]
+  local chordList = (state and state.CHORDS) or CHORDS
+  local chordDef = chordList[activeChordIdx] or chordList[1]
   local offsets = chordDef.offsets or { 0 }
   
   local topOffset = state.topRowOctaveOffset or 12
