@@ -48,6 +48,7 @@ _G.activeWatchers.sync = sync
 _G.activeWatchers.hud = hud
 _G.activeWatchers.state = state
 _G.activeWatchers.controls = controls
+_G.activeWatchers.arpeggiator = arpeggiator
 
 
 if nanokey then
@@ -695,6 +696,170 @@ local function arpTickEngine(eng, isTopRow)
   return nextPitch
 end
 
+local function arpTickTrack(trk)
+  if not trk then return nil end
+  local rateFactor = ARP_RATES[trk.arpRateIdx or state.arpRateIdx] and ARP_RATES[trk.arpRateIdx or state.arpRateIdx].factor or 0.5
+  local prevBeat = math.floor(trk.beatPosition or 0)
+  local prevBar = math.floor((trk.beatPosition or 0) / 4)
+  trk.beatPosition = (trk.beatPosition or 0) + rateFactor
+  local currentBeat = math.floor(trk.beatPosition)
+  local currentBar = math.floor(trk.beatPosition / 4)
+  local doSync = false
+  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then doSync = true
+  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then doSync = true end
+  if doSync then
+    trk.heldNotes = {}
+    if trk.targetHeldNotes then
+      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+    end
+    if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
+      stopEngineState(trk)
+      return nil
+    end
+  end
+
+  local pitchList = {}
+  for code, pitch in pairs(trk.heldNotes or {}) do
+    if pitch then table.insert(pitchList, pitch) end
+  end
+  table.sort(pitchList)
+
+  if #pitchList == 0 then
+    if trk.activeGateTimers then
+      for pitch, entry in pairs(trk.activeGateTimers) do
+        if entry and entry.timer then entry.timer:stop() end
+        local ch = entry and entry.channel or trk.channel or 0
+        midi.sendMidiNote("noteOff", pitch, 0, ch)
+      end
+      trk.activeGateTimers = {}
+    end
+    if trk.currentPitch then
+      local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+      local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      trk.currentPitch = nil
+    end
+    return nil
+  end
+
+  local dirIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
+  if dirIdx == 1 then
+    trk.stepIndex = (trk.pos % #pitchList) + 1
+  elseif dirIdx == 2 then
+    local pos = (trk.pos % #pitchList) + 1
+    trk.stepIndex = #pitchList - pos + 1
+  elseif dirIdx == 3 then
+    if trk.stepIndex > #pitchList then
+      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+    elseif trk.stepIndex < 1 then
+      trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
+    end
+  elseif dirIdx == 4 then
+    if trk.stepIndex > #pitchList or trk.stepIndex < 1 then
+      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+    end
+  elseif dirIdx == 5 then
+    local pos = (trk.pos % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then idx = math.floor(pos / 2) + 1
+    else idx = #pitchList - math.floor(pos / 2) + 1 end
+    trk.stepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif dirIdx == 6 then
+    local pos = (trk.pos % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then idx = mid
+    elseif pos % 2 == 0 then idx = mid + math.floor(pos / 2)
+    else idx = mid - math.floor(pos / 2) end
+    if idx < 1 or idx > #pitchList then idx = ((pos - 1) % #pitchList) + 1 end
+    trk.stepIndex = idx
+  elseif dirIdx == 7 then
+    trk.stepIndex = math.random(1, #pitchList)
+  end
+  trk.stepIndex = math.max(1, math.min(#pitchList, trk.stepIndex or 1))
+  local nextPitch = pitchList[trk.stepIndex]
+
+  if dirIdx == 3 then
+    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = 1
+    else
+      trk.stepIndex = trk.stepIndex + trk.stepDirection
+      if trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+      elseif trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1 end
+    end
+  elseif dirIdx == 4 then
+    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = -1
+    else
+      trk.stepIndex = trk.stepIndex + trk.stepDirection
+      if trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
+      elseif trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1 end
+    end
+  elseif dirIdx == 1 or dirIdx == 2 or dirIdx == 5 or dirIdx == 6 then
+    trk.pos = (trk.pos or 0) + 1
+  end
+
+  local success, err = pcall(function()
+    local gateRatio = (trk.arpGatePercent or state.arpGatePercent or 80.0) / 100.0
+    local vel = math.floor(math.min(127, (trk.volume or 100) * 1.0))
+    local ch = trk.channel or 0
+
+    if gateRatio <= 1.0 and trk.currentPitch then
+      local oldP = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+      local oldCh = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
+      if trk.activeGateTimers and trk.activeGateTimers[oldP] then
+        if trk.activeGateTimers[oldP].timer then trk.activeGateTimers[oldP].timer:stop() end
+        trk.activeGateTimers[oldP] = nil
+      end
+      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
+      trk.currentPitch = nil
+    end
+
+    local isAudible = true
+    if trk.muted then isAudible = false end
+    local anySolo = false
+    for _, t in pairs(state.tracks) do
+      if t.soloed then anySolo = true; break end
+    end
+    if anySolo and not trk.soloed then isAudible = false end
+
+    if isAudible then
+      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+      trk.currentPitch = { pitch = nextPitch, channel = ch }
+
+      local gateDuration = getArpIntervalSeconds() * gateRatio
+      local pitchToRelease = nextPitch
+      local releaseCh = ch
+      local timer = hs.timer.doAfter(gateDuration, function()
+        local ok, e = pcall(function()
+          midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+          if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
+            trk.currentPitch = nil
+          end
+          if trk.activeGateTimers then trk.activeGateTimers[pitchToRelease] = nil end
+        end)
+        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+      end)
+      trk.activeGateTimers = trk.activeGateTimers or {}
+      if trk.activeGateTimers[pitchToRelease] then
+        if trk.activeGateTimers[pitchToRelease].timer then trk.activeGateTimers[pitchToRelease].timer:stop() end
+        trk.activeGateTimers[pitchToRelease] = nil
+      end
+      trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+    end
+  end)
+  if not success then print("[Arp Track Error] " .. tostring(err)) end
+  return nextPitch
+end
+
+local function isAnyTrackArpActive()
+  if not state.tracks then return false end
+  for _, trk in pairs(state.tracks) do
+    if trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
+      return true
+    end
+  end
+  return false
+end
+
 local function safeEvaluateJS(js)
   if not _G.activeWatchers.midiWebview then return end
   local ok, err = pcall(function()
@@ -708,19 +873,32 @@ end
 
 local function arpTick()
   local start = hs.timer.absoluteTime()
-  
-  local p1, p2 = nil, nil
-  if not state.arpLinked then
-    p1 = arpTickEngine(state.arpEngineTop, true)
-    p2 = arpTickEngine(state.arpEngineBottom, false)
+  local activeP = nil
+
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk and trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
+        local p = arpTickTrack(trk)
+        if i == (state.activeTrack or 1) then
+          activeP = p
+        end
+      end
+    end
   else
-    p1 = arpTickEngine(state.arpEngineTop, false)
+    if not state.arpLinked then
+      local p1 = arpTickEngine(state.arpEngineTop, true)
+      local p2 = arpTickEngine(state.arpEngineBottom, false)
+      activeP = p1 or p2
+    else
+      activeP = arpTickEngine(state.arpEngineTop, false)
+    end
   end
 
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   else
-    updateHud(nil, p1 or p2)
+    updateHud(nil, activeP)
   end
   
   local durationMs = (hs.timer.absoluteTime() - start) / 1000000
@@ -749,7 +927,36 @@ local function startArpTimer(preserveState)
   state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
 end
 
-local function arpAddNote(code, pitch)
+local function arpAddNote(code, pitch, trackIdx)
+  local trkId = trackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    if trk.arpLatchActive or state.arpLatchActive then
+      if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
+        trk.targetHeldNotes = {}
+        trk.latchClearedForNewChord = true
+        if trk.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
+          local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+          local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+          midi.sendMidiNote("noteOff", p, 0, c)
+          trk.currentPitch = nil
+        end
+      end
+    end
+    trk.keysCurrentlyHeld[code] = true
+    trk.targetHeldNotes = trk.targetHeldNotes or {}
+    trk.targetHeldNotes[code] = pitch
+    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+      trk.heldNotes = {}
+      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+      if not state.arpTimer then
+        startArpTimer()
+      end
+    end
+    return
+  end
+
   local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
   local noteKey = rawCode and config.getNoteKey(rawCode)
   local isTop = noteKey and noteKey.isTop or false
@@ -785,7 +992,34 @@ local function arpAddNote(code, pitch)
   end
 end
 
-local function arpRemoveNote(code)
+local function arpRemoveNote(code, trackIdx)
+  local trkId = trackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    trk.keysCurrentlyHeld[code] = nil
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    if trk.arpLatchActive or state.arpLatchActive or state.sustainActive then
+      if numPhysicalHeld == 0 then
+        trk.latchClearedForNewChord = false
+      end
+    else
+      if trk.targetHeldNotes then
+        trk.targetHeldNotes[code] = nil
+      end
+    end
+    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+      trk.heldNotes = {}
+      if trk.targetHeldNotes then
+        for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+      end
+      if not isAnyTrackArpActive() then
+        stopArpTimer()
+        updateHud()
+      end
+    end
+    return
+  end
+
   local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
   local noteKey = rawCode and config.getNoteKey(rawCode)
   local isTop = noteKey and noteKey.isTop or false
@@ -932,6 +1166,17 @@ local function updateLatchedArpNotes()
     return
   end
 
+  if state.tracks then
+    for _, trk in pairs(state.tracks) do
+      if trk.heldNotes and next(trk.heldNotes) ~= nil then
+        rebuildNoteTable(trk.heldNotes)
+      end
+      if trk.targetHeldNotes and next(trk.targetHeldNotes) ~= nil then
+        rebuildNoteTable(trk.targetHeldNotes)
+      end
+    end
+  end
+
   if next(state.arpHeldNotes) ~= nil then
     rebuildNoteTable(state.arpHeldNotes)
   end
@@ -941,6 +1186,32 @@ local function updateLatchedArpNotes()
 end
 
 local function updateLatchedArpChordNotes()
+  if state.tracks then
+    for _, trk in pairs(state.tracks) do
+      if trk.heldNotes and next(trk.heldNotes) ~= nil then
+        local uniqueBaseCodes = {}
+        local keysToRemove = {}
+        for code, _ in pairs(trk.heldNotes) do
+          local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+          if rawCode then
+            uniqueBaseCodes[rawCode] = true
+            table.insert(keysToRemove, code)
+          end
+        end
+        for _, code in ipairs(keysToRemove) do trk.heldNotes[code] = nil end
+        for rawCode, _ in pairs(uniqueBaseCodes) do
+          local noteKey = config.getNoteKey(rawCode)
+          if noteKey then
+            local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
+            for _, p in ipairs(newPitches) do
+              trk.heldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
+            end
+          end
+        end
+      end
+    end
+  end
+
   if not state.arpEnabled or not state.arpLatchActive then return end
 
   if not state.arpLinked then
@@ -998,6 +1269,10 @@ local function updateLatchedArpChordNotes()
 end
 
 local function getArpRowTargetSubtext()
+  if state.tracks then
+    local trk = state.tracks[state.activeTrack or 1]
+    return trk and ("Track " .. trk.id .. ": " .. trk.name) or "Active Track"
+  end
   if state.arpTopEnabled and state.arpBottomEnabled then
     return "Top & Bottom Rows"
   elseif state.arpTopEnabled then
@@ -1009,7 +1284,64 @@ local function getArpRowTargetSubtext()
   end
 end
 
-local function toggleArpPower()
+local function toggleArpPower(targetTrackIdx)
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    if not trk.arpEnabled then
+      trk.arpEnabled = true
+      trk.arpLatchActive = true
+      trk.latchClearedForNewChord = false
+    elseif trk.arpLatchActive then
+      trk.arpLatchActive = false
+      local newHeld = {}
+      for code, pitch in pairs(trk.heldNotes or {}) do
+        if trk.keysCurrentlyHeld[code] then
+          newHeld[code] = pitch
+        end
+      end
+      trk.heldNotes = newHeld
+      if countTableKeys(trk.heldNotes) == 0 and not isAnyTrackArpActive() then
+        stopArpTimer()
+      end
+    else
+      trk.arpEnabled = false
+      trk.arpLatchActive = false
+      stopEngineState(trk)
+      trk.heldNotes = {}
+      trk.keysCurrentlyHeld = {}
+      if not isAnyTrackArpActive() then
+        stopArpTimer()
+      end
+    end
+
+    state.arpEnabled = trk.arpEnabled
+    state.arpLatchActive = trk.arpLatchActive
+
+    local valStr = "ARP: OFF"
+    local subStr = "Track " .. trkId .. " Arp Disabled"
+    if trk.arpEnabled then
+      if trk.arpLatchActive then
+        valStr = "ARP: LATCH"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH • " .. formatBpm(state.arpBpm) .. " BPM"
+      else
+        valStr = "ARP: ON"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") ON • " .. formatBpm(state.arpBpm) .. " BPM"
+      end
+    end
+
+    local spot = {
+      title = "TRACK " .. trkId .. " ARP",
+      value = valStr,
+      subtext = subStr,
+      targetId = "arp-power-btn",
+      color = trk.color or "#64d8f0"
+    }
+    updateHud(spot)
+    config.saveSettings()
+    return
+  end
+
   if not state.arpEnabled then
     state.arpEnabled = true
     state.arpLatchActive = true
@@ -1068,6 +1400,47 @@ local function toggleArpPower()
   }
   updateHud(spot)
   config.saveSettings()
+end
+
+local function clearTrackArp(trackId)
+  local trkId = trackId or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    stopEngineState(trk)
+    trk.heldNotes = {}
+    trk.targetHeldNotes = {}
+    trk.keysCurrentlyHeld = {}
+    trk.latchClearedForNewChord = false
+    trk.arpEnabled = false
+    trk.arpLatchActive = false
+    trk.locked = false
+    if not isAnyTrackArpActive() then
+      stopArpTimer()
+    end
+    if trkId == state.activeTrack then
+      state.arpEnabled = false
+      state.arpLatchActive = false
+    end
+    updateHud()
+  end
+end
+
+local function stopAllLoops()
+  if state.tracks then
+    for _, trk in pairs(state.tracks) do
+      stopEngineState(trk)
+      trk.heldNotes = {}
+      trk.targetHeldNotes = {}
+      trk.keysCurrentlyHeld = {}
+      trk.arpEnabled = false
+      trk.arpLatchActive = false
+      trk.locked = false
+    end
+  end
+  stopArpTimer()
+  state.arpEnabled = false
+  state.arpLatchActive = false
+  updateHud()
 end
 
 local function toggleArp()
@@ -1459,6 +1832,8 @@ return {
   setLogicBpmTarget = setLogicBpmTarget,
   toggleArpLink = toggleArpLink,
   clearRowEngine = clearRowEngine,
+  clearTrackArp = clearTrackArp,
+  stopAllLoops = stopAllLoops,
   setArpPowerImplicit = setArpPowerImplicit
 }
 
@@ -2881,13 +3256,27 @@ end
 
 -- Auto-reconnect watcher
 _G.activeWatchers = _G.activeWatchers or {}
-_G.activeWatchers.nanokeyDeviceWatcher = hs.midi.deviceCallback(function(devName, hasConnected)
-  if devName and string.find(string.lower(devName), "nanokey") then
-    if hasConnected then
-      log("Hardware connected: " .. devName)
-      nanoKey.connect(devName)
-    else
-      log("Hardware disconnected: " .. devName)
+_G.activeWatchers.nanokeyDeviceWatcher = hs.midi.deviceCallback(function(devices, virtualDevices)
+  local found = nil
+  if type(devices) == "table" then
+    for _, name in ipairs(devices) do
+      if type(name) == "string" and string.find(string.lower(name), "nanokey") then
+        found = name
+        break
+      end
+    end
+  elseif type(devices) == "string" and string.find(string.lower(devices), "nanokey") then
+    found = devices
+  end
+
+  if found then
+    if not nanoKey.isConnected() then
+      log("Hardware connected: " .. found)
+      nanoKey.connect(found)
+    end
+  else
+    if nanoKey.isConnected() then
+      log("Hardware disconnected.")
       nanoKey.disconnect()
     end
   end
@@ -3546,30 +3935,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local arpHeldPitches = {}
   local currentArpPitches = {}
   
-  if state.arpLinked then
-    if state.arpEnabled then
-      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
-      for _, pitch in pairs(held or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
-      if p then currentArpPitches[p] = true end
+  local activeTrk = state.tracks and state.tracks[state.activeTrack or 1]
+  if activeTrk and activeTrk.arpEnabled then
+    for _, pitch in pairs(activeTrk.heldNotes or {}) do
+      if type(pitch) == "number" then arpHeldPitches[pitch] = true end
     end
-  else
-    if state.arpEnabled and state.arpTopEnabled then
-      for _, pitch in pairs(state.arpEngineTop.heldNotes) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
-    if state.arpEnabled and state.arpBottomEnabled then
-      for _, pitch in pairs(state.arpEngineBottom.heldNotes) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
+    local p = type(activeTrk.currentPitch) == "table" and activeTrk.currentPitch.pitch or activeTrk.currentPitch
+    if p then currentArpPitches[p] = true end
   end
 
   for code, kData in pairs(config.getActiveNoteKeysMap()) do
@@ -3587,32 +3959,19 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and currentArpPitches[noteNum] then
+    if activeTrk and activeTrk.arpEnabled and currentArpPitches[noteNum] then
       isPressed = true
     end
 
     local isLatched = false
-    if state.arpEnabled and state.arpLatchActive then
+    if activeTrk and activeTrk.arpEnabled and activeTrk.arpLatchActive then
       local codeStr = tostring(code)
-      if state.arpLinked then
-        for heldCode, _ in pairs(state.arpHeldNotes) do
-          if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-        end
-      else
-        if state.arpTopEnabled then
-          for heldCode, _ in pairs(state.arpEngineTop.heldNotes) do
-            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-          end
-        end
-        if not isLatched and state.arpBottomEnabled then
-          for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
-            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-          end
-        end
+      for heldCode, _ in pairs(activeTrk.heldNotes or {}) do
+        if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
       end
     end
 
-    local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
+    local arpActive = activeTrk and activeTrk.arpEnabled or false
 
     keyUpdates[tostring(code)] = {
       note = noteName,
@@ -3692,6 +4051,22 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
   end
 
+  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, and audio states
+  local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
+  for kCode, trkId in pairs(trkKeyMap) do
+    local strCode = tostring(kCode)
+    if keyUpdates[strCode] then
+      keyUpdates[strCode].sustainActive = false -- strictly prevent legacy toggle selection glow
+      keyUpdates[strCode].trkSelected = (state.activeTrack == trkId)
+      local t = state.tracks and state.tracks[trkId]
+      if t then
+        keyUpdates[strCode].trkMuted = (t.muted == true)
+        keyUpdates[strCode].trkColor = t.color
+        keyUpdates[strCode].trkAudioActive = ((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil))
+      end
+    end
+  end
+
   local modVal = state.ccStates[1] or 0
 
   local bpmDisplayStr
@@ -3715,6 +4090,38 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
+    activeTrack = state.activeTrack or 1,
+    activeTrackColor = (activeTrk and activeTrk.color) or "#00e5ff",
+    tracks = {
+      [1] = {
+        id = 1, name = "Bass", channel = 0, color = "#00e5ff",
+        selected = (state.activeTrack == 1),
+        muted = state.tracks and state.tracks[1] and state.tracks[1].muted == true,
+        soloed = state.tracks and state.tracks[1] and state.tracks[1].soloed == true,
+        activeAudio = state.tracks and state.tracks[1] and (((state.tracks[1].activeNotesCount or 0) > 0) or (state.tracks[1].currentPitch ~= nil)) or false
+      },
+      [2] = {
+        id = 2, name = "Chords", channel = 1, color = "#ff9100",
+        selected = (state.activeTrack == 2),
+        muted = state.tracks and state.tracks[2] and state.tracks[2].muted == true,
+        soloed = state.tracks and state.tracks[2] and state.tracks[2].soloed == true,
+        activeAudio = state.tracks and state.tracks[2] and (((state.tracks[2].activeNotesCount or 0) > 0) or (state.tracks[2].currentPitch ~= nil)) or false
+      },
+      [3] = {
+        id = 3, name = "Lead", channel = 2, color = "#00e676",
+        selected = (state.activeTrack == 3),
+        muted = state.tracks and state.tracks[3] and state.tracks[3].muted == true,
+        soloed = state.tracks and state.tracks[3] and state.tracks[3].soloed == true,
+        activeAudio = state.tracks and state.tracks[3] and (((state.tracks[3].activeNotesCount or 0) > 0) or (state.tracks[3].currentPitch ~= nil)) or false
+      },
+      [4] = {
+        id = 4, name = "Arp", channel = 3, color = "#d500f9",
+        selected = (state.activeTrack == 4),
+        muted = state.tracks and state.tracks[4] and state.tracks[4].muted == true,
+        soloed = state.tracks and state.tracks[4] and state.tracks[4].soloed == true,
+        activeAudio = state.tracks and state.tracks[4] and (((state.tracks[4].activeNotesCount or 0) > 0) or (state.tracks[4].currentPitch ~= nil)) or false
+      }
+    },
     keys = keyUpdates,
     shiftHeld = state.shiftHeld,
     altHeld = state.altHeld == true,
@@ -4371,36 +4778,20 @@ local function fastUpdateArp()
 
   local arpHeldPitches = {}
   local currentArpPitches = {}
-  
-  if state.arpLinked then
-    if state.arpEnabled then
-      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
-      for _, pitch in pairs(held or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
-      if p then currentArpPitches[p] = true end
+
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  local arpActive = trk and trk.arpEnabled or false
+
+  if arpActive then
+    for _, pitch in pairs(trk.heldNotes or {}) do
+      if type(pitch) == "number" then arpHeldPitches[pitch] = true end
     end
-  else
-    if state.arpEnabled and state.arpTopEnabled then
-      for _, pitch in pairs(state.arpEngineTop.heldNotes or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
-    if state.arpEnabled and state.arpBottomEnabled then
-      for _, pitch in pairs(state.arpEngineBottom.heldNotes or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
+    local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+    if p then currentArpPitches[p] = true end
   end
 
   local activeCodes = {}
   local heldCodes = {}
-  local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
 
   if arpActive then
     for code, kData in pairs(config.getActiveNoteKeysMap()) do
@@ -4414,7 +4805,22 @@ local function fastUpdateArp()
     end
   end
 
-  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s);", hs.json.encode(activeCodes), hs.json.encode(heldCodes))
+  local trkAudioStates = {}
+  if state.tracks then
+    for trkId = 1, 4 do
+      local t = state.tracks[trkId]
+      if t then
+        trkAudioStates[trkId] = ((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil))
+      else
+        trkAudioStates[trkId] = false
+      end
+    end
+  end
+
+  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s, %s);",
+    hs.json.encode(activeCodes),
+    hs.json.encode(heldCodes),
+    hs.json.encode(trkAudioStates))
   safeEvaluateJS(js)
 end
 
@@ -4510,9 +4916,11 @@ local HTML_UI_CONTENT = [[
 <meta charset="utf-8">
 <style>
   :root {
-    --action-bg-hsl: 35, 30%, 18%;
+    --action-bg-hsl: 0, 0%, 18%;
     --action-bg-opacity: 0.85;
     --action-border-opacity: 0.4;
+    --active-track-color: #00e5ff;
+    --active-track-rgb: 0, 229, 255;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
   input, textarea, [contenteditable] { user-select: auto; -webkit-user-select: auto; }
@@ -4545,8 +4953,8 @@ local HTML_UI_CONTENT = [[
   #hud-container {
     width: 980px;
     height: 280px;
-    background: rgba(24, 22, 20, 0.96);
-    border: 2px solid rgba(70, 64, 58, 0.7);
+    background: rgba(18, 18, 18, 0.97);
+    border: 2px solid rgba(55, 55, 55, 0.7);
     border-radius: 14px;
     overflow: hidden;
     box-shadow: 0 10px 30px rgba(0,0,0,0.6), inset 0 0 20px rgba(0, 0, 0, 0.6);
@@ -4562,11 +4970,11 @@ local HTML_UI_CONTENT = [[
   /* Top Header Spotlight Notification Card */
   .spotlight-card {
     position: relative;
-    background: rgba(30, 26, 20, 0.96);
-    border: 1.5px solid #d4a359;
+    background: rgba(26, 26, 26, 0.98);
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
     border-radius: 8px;
     padding: 6px 20px;
-    box-shadow: 0 0 0 1px rgba(212, 163, 89, 0.4), 0 0 12px rgba(212, 163, 89, 0.35);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 0 12px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -4588,7 +4996,7 @@ local HTML_UI_CONTENT = [[
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1.5px;
-    color: #b5aba0;
+    color: #999999;
     text-transform: uppercase;
     margin-bottom: 0;
     display: flex;
@@ -4608,16 +5016,16 @@ local HTML_UI_CONTENT = [[
   .spotlight-sub {
     font-size: 12px;
     font-weight: 600;
-    color: #d4a359;
+    color: var(--active-track-color, #00e5ff);
     white-space: nowrap;
   }
 
-  /* Dynamic Mod Wheel Glow — always driven by --mod-intensity (0.00–1.00) */
+  /* Dynamic Mod Wheel Glow — driven by --mod-intensity (0.00–1.00) */
   #hud-container {
     box-shadow:
-      0 0 calc(var(--mod-intensity) * 18px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.6)),
-      inset 0 0 calc(var(--mod-intensity) * 24px) rgba(212, 163, 89, calc(var(--mod-intensity) * 0.35));
-    border-color: rgba(212, 163, 89, calc(0.25 + var(--mod-intensity) * 0.6));
+      0 0 calc(var(--mod-intensity) * 18px) rgba(255, 255, 255, calc(var(--mod-intensity) * 0.3)),
+      inset 0 0 calc(var(--mod-intensity) * 24px) rgba(255, 255, 255, calc(var(--mod-intensity) * 0.15));
+    border-color: rgba(255, 255, 255, calc(0.2 + var(--mod-intensity) * 0.4));
     transition: box-shadow 0.08s ease, border-color 0.08s ease, height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     border-radius: 14px;
   }
@@ -4638,8 +5046,8 @@ local HTML_UI_CONTENT = [[
     pointer-events: none;
     background: linear-gradient(
       180deg,
-      rgba(212, 163, 89, calc(var(--mod-intensity) * var(--mod-intensity) * 0.28)) 0%,
-      rgba(200, 140, 60, 0) 60%
+      rgba(255, 255, 255, calc(var(--mod-intensity) * var(--mod-intensity) * 0.12)) 0%,
+      rgba(255, 255, 255, 0) 60%
     );
     transition: background 0.08s ease;
   }
@@ -4697,7 +5105,7 @@ local HTML_UI_CONTENT = [[
   /* Header Bar */
   #header {
     height: 48px;
-    background: rgba(36, 32, 28, 0.9);
+    background: rgba(28, 28, 28, 0.95);
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -4709,9 +5117,9 @@ local HTML_UI_CONTENT = [[
   }
 
   .badge {
-    background: rgba(212, 163, 89, 0.18);
-    border: 1.5px solid #d4a359;
-    color: #d4a359;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    color: #e5e5e5;
     font-weight: 700;
     font-size: 14px;
     padding: 3px 6px;
@@ -4733,9 +5141,9 @@ local HTML_UI_CONTENT = [[
   }
 
   .badge-small {
-    background: rgba(212, 163, 89, 0.15);
-    border: 1.5px solid #d4a359;
-    color: #d4a359;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+    color: #e5e5e5;
     font-weight: 700;
     font-size: 11px;
     padding: 3px 4px;
@@ -4756,8 +5164,8 @@ local HTML_UI_CONTENT = [[
   }
 
   .badge-small option {
-    background: #181614;
-    color: #d4a359;
+    background: #181818;
+    color: #e5e5e5;
   }
 
   #layout-select {
@@ -4772,8 +5180,8 @@ local HTML_UI_CONTENT = [[
   }
 
   .badge option {
-    background: #181614;
-    color: #d4a359;
+    background: #181818;
+    color: #e5e5e5;
     font-weight: 600;
   }
 
@@ -4790,7 +5198,7 @@ local HTML_UI_CONTENT = [[
   .mode-slider-track {
     width: 190px;
     height: 10px;
-    background: linear-gradient(90deg, #d4a359 0%, #b8860b 40%, #706558 70%, #3a342e 100%);
+    background: linear-gradient(90deg, #666 0%, #555 40%, #3a3a3a 70%, #222 100%);
     border-radius: 5px;
     position: relative;
     cursor: pointer;
@@ -4814,7 +5222,7 @@ local HTML_UI_CONTENT = [[
   .mode-name-label {
     font-size: 11px;
     font-weight: 700;
-    color: #d4a359;
+    color: #d0d0d0;
     letter-spacing: 0.5px;
     margin-top: 3px;
     white-space: nowrap;
@@ -4822,9 +5230,9 @@ local HTML_UI_CONTENT = [[
   }
 
   .arp-btn {
-    background: rgba(212, 163, 89, 0.15);
-    border: 1.5px solid #d4a359;
-    color: #d4a359;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1.5px solid rgba(255, 255, 255, 0.22);
+    color: #d0d0d0;
     font-weight: 700;
     font-size: 11px;
     padding: 4px 8px;
@@ -4839,17 +5247,20 @@ local HTML_UI_CONTENT = [[
   }
 
   .arp-btn:hover {
-    background: rgba(212, 163, 89, 0.3);
+    background: rgba(255, 255, 255, 0.15);
   }
 
   .arp-btn.arp-active {
-    background: rgba(212, 163, 89, 0.45);
-    box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
+    background: rgba(0, 229, 255, 0.22);
+    border-color: #00e5ff;
+    color: #00e5ff;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
   }
 
   .arp-btn.arp-latch {
-    background: rgba(212, 163, 89, 0.6);
-    box-shadow: 0 0 12px rgba(212, 163, 89, 0.8), inset 0 0 4px rgba(212, 163, 89, 0.3);
+    background: rgba(0, 229, 255, 0.4);
+    border-color: #00e5ff;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.8), inset 0 0 4px rgba(0, 229, 255, 0.3);
     color: #fff;
   }
 
@@ -4862,9 +5273,9 @@ local HTML_UI_CONTENT = [[
   }
 
   .bpm-arrow-btn {
-    background: rgba(212, 163, 89, 0.12);
-    border: 1px solid rgba(212, 163, 89, 0.4);
-    color: #d4a359;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #d0d0d0;
     font-size: 10px;
     padding: 2px 5px;
     border-radius: 4px;
@@ -4877,13 +5288,13 @@ local HTML_UI_CONTENT = [[
   }
 
   .bpm-arrow-btn:hover {
-    background: rgba(212, 163, 89, 0.3);
+    background: rgba(255, 255, 255, 0.18);
   }
 
   .bpm-display {
     font-size: 11px;
     font-weight: 700;
-    color: #d4a359;
+    color: #e5e5e5;
     padding: 3px 6px;
     border-radius: 4px;
     cursor: text;
@@ -4894,13 +5305,13 @@ local HTML_UI_CONTENT = [[
   }
 
   .bpm-display:hover {
-    background: rgba(212, 163, 89, 0.1);
+    background: rgba(255, 255, 255, 0.08);
   }
 
   .bpm-display.editing {
-    background: rgba(212, 163, 89, 0.2);
-    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
-    outline: 1.5px solid #d4a359;
+    background: rgba(255, 255, 255, 0.15);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
+    outline: 1.5px solid #ffffff;
   }
 
   .row-controls {
@@ -5089,8 +5500,8 @@ local HTML_UI_CONTENT = [[
   .key-pad {
     width: 58px;
     height: 44px;
-    background: rgba(26, 23, 20, 0.98);
-    border: 1.5px solid rgba(65, 58, 50, 1.0);
+    background: rgba(25, 25, 25, 0.98);
+    border: 1.5px solid rgba(55, 55, 55, 1.0);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -5100,18 +5511,19 @@ local HTML_UI_CONTENT = [[
     cursor: pointer;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
+    position: relative;
   }
 
   .key-pad:active, .key-pad.pressed {
-    background: rgba(55, 48, 40, 1.0);
-    border-color: rgba(100, 88, 75, 1.0);
+    background: rgba(45, 45, 45, 1.0);
+    border-color: rgba(90, 90, 90, 1.0);
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
   }
 
   .key-pad .key-code {
     font-size: 12px;
     font-weight: 700;
-    color: #f2eae1;
+    color: #f0f0f0;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }
@@ -5119,34 +5531,62 @@ local HTML_UI_CONTENT = [[
   .key-pad .key-note {
     font-size: 9.5px;
     font-weight: 500;
-    color: rgba(200, 190, 175, 0.95);
+    color: rgba(200, 200, 200, 0.9);
     margin-top: 1px;
     white-space: nowrap;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }
 
+  /* Note Keys: Colors strictly driven by Active Track */
+  .key-pad:not(.control-pad):not(.dummy-pad) .key-note {
+    color: var(--active-track-color, #00e5ff);
+  }
+
   /* Glowing Outlines for Note Intervals */
-  .key-pad.root-key {
-    border-color: rgba(212, 163, 89, 0.9);
-    box-shadow: 0 0 10px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2);
+  .key-pad.root-key:not(.control-pad) {
+    border-color: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.25) !important;
   }
-  .key-pad.root-key .key-note { color: #f0c27b; font-weight: 700; }
-  .key-pad.root-key:active, .key-pad.root-key.pressed { background: rgba(212, 163, 89, 0.3); }
+  .key-pad.root-key:not(.control-pad) .key-note {
+    color: #ffffff !important;
+    font-weight: 700;
+    text-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+  }
+  .key-pad.root-key:not(.control-pad):active, .key-pad.root-key:not(.control-pad).pressed {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+  }
 
-  .key-pad.third-key {
-    border: 1.5px dashed rgba(212, 163, 89, 0.75);
-    box-shadow: 0 0 6px rgba(212, 163, 89, 0.25), inset 0 0 4px rgba(212, 163, 89, 0.1);
+  .key-pad.third-key:not(.control-pad) {
+    border: 1.5px dashed rgba(var(--active-track-rgb, 0, 229, 255), 0.75) !important;
+    box-shadow: 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3), inset 0 0 4px rgba(var(--active-track-rgb, 0, 229, 255), 0.15) !important;
   }
-  .key-pad.third-key .key-note { color: rgba(212, 163, 89, 0.9); font-weight: 600; }
-  .key-pad.third-key:active, .key-pad.third-key.pressed { background: rgba(212, 163, 89, 0.2); }
+  .key-pad.third-key:not(.control-pad) .key-note {
+    color: var(--active-track-color, #00e5ff) !important;
+    font-weight: 600;
+  }
+  .key-pad.third-key:not(.control-pad):active, .key-pad.third-key:not(.control-pad).pressed {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
+  }
 
-  .key-pad.fifth-key {
-    border-color: rgba(212, 163, 89, 0.45);
-    box-shadow: 0 0 4px rgba(212, 163, 89, 0.15);
+  .key-pad.fifth-key:not(.control-pad) {
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+    box-shadow: 0 0 4px rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
   }
-  .key-pad.fifth-key .key-note { color: rgba(212, 163, 89, 0.75); font-weight: 500; }
-  .key-pad.fifth-key:active, .key-pad.fifth-key.pressed { background: rgba(212, 163, 89, 0.15); }
+  .key-pad.fifth-key:not(.control-pad) .key-note {
+    color: rgba(var(--active-track-rgb, 0, 229, 255), 0.85) !important;
+    font-weight: 500;
+  }
+  .key-pad.fifth-key:not(.control-pad):active, .key-pad.fifth-key:not(.control-pad).pressed {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.15) !important;
+  }
+
+  /* Physical & Arp Press on Note Keys */
+  .key-pad:not(.control-pad).pressed, .key-pad:not(.control-pad):active {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.25) !important;
+    border-color: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 2px 4px rgba(0,0,0,0.5) !important;
+  }
 
   .key-pad.control-pad {
     background: hsla(var(--action-bg-hsl), var(--action-bg-opacity));
@@ -5157,7 +5597,7 @@ local HTML_UI_CONTENT = [[
   }
 
   .key-pad.control-pad .key-note {
-    color: #a09588;
+    color: #999999;
     font-size: 9.5px;
   }
 
@@ -5168,8 +5608,8 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-root { border-color: rgba(220, 120, 100, 0.45); }
   .key-pad.ctrl-root .key-note { color: #e69d90; font-weight: 600; }
 
-  .key-pad.ctrl-mode { border-color: rgba(212, 163, 89, 0.45); }
-  .key-pad.ctrl-mode .key-note { color: #d4a359; font-weight: 600; }
+  .key-pad.ctrl-mode { border-color: rgba(255, 255, 255, 0.3); }
+  .key-pad.ctrl-mode .key-note { color: #d0d0d0; font-weight: 600; }
 
   .key-pad.ctrl-oct { border-color: rgba(82, 180, 150, 0.45); }
   .key-pad.ctrl-oct .key-note { color: #78c9ad; font-weight: 600; }
@@ -5201,14 +5641,99 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-zoom { border-color: rgba(130, 165, 195, 0.45); }
   .key-pad.ctrl-zoom .key-note { color: #a4c0d8; font-weight: 600; }
 
-  .key-pad.ctrl-arp, .key-pad.ctrl-arptop, .key-pad.ctrl-arpbot { border-color: rgba(212, 163, 89, 0.45); }
-  .key-pad.ctrl-arp .key-note, .key-pad.ctrl-arptop .key-note, .key-pad.ctrl-arpbot .key-note { color: #d4a359; font-weight: 600; }
+  .key-pad.ctrl-arp, .key-pad.ctrl-arptop, .key-pad.ctrl-arpbot { border-color: rgba(0, 229, 255, 0.4); }
+  .key-pad.ctrl-arp .key-note, .key-pad.ctrl-arptop .key-note, .key-pad.ctrl-arpbot .key-note { color: #00e5ff; font-weight: 600; }
 
-  .key-pad.ctrl-bpmedit, .key-pad.ctrl-rand, .key-pad.ctrl-panic, .key-pad.ctrl-reset { border-color: rgba(150, 140, 130, 0.4); }
+  .key-pad.ctrl-bpmedit, .key-pad.ctrl-rand, .key-pad.ctrl-panic, .key-pad.ctrl-reset { border-color: rgba(120, 120, 120, 0.4); }
   .key-pad.ctrl-bpmedit .key-note, .key-pad.ctrl-rand .key-note, .key-pad.ctrl-panic .key-note, .key-pad.ctrl-reset .key-note { color: #b5aba0; font-weight: 500; }
 
-  .key-pad.ctrl-track { border-color: rgba(60, 200, 230, 0.5); }
-  .key-pad.ctrl-track .key-note { color: #64d8f0; font-weight: 600; }
+  /* Track Buttons: 1 to 4 with distinct individual colors, single selection, mute, and waveform */
+  #key-18 { --trk-color: #00e5ff; --trk-rgb: 0, 229, 255; }
+  #key-19 { --trk-color: #ff9100; --trk-rgb: 255, 145, 0; }
+  #key-20 { --trk-color: #00e676; --trk-rgb: 0, 230, 118; }
+  #key-21 { --trk-color: #d500f9; --trk-rgb: 213, 0, 249; }
+
+  .key-pad.ctrl-track {
+    border-color: rgba(var(--trk-rgb, 255, 255, 255), 0.35);
+    position: relative;
+  }
+  .key-pad.ctrl-track .key-code {
+    color: var(--trk-color, #e0e0e0);
+  }
+  .key-pad.ctrl-track .key-note {
+    color: var(--trk-color, #e0e0e0);
+    font-weight: 600;
+  }
+
+  /* Selected Track: exactly one track at a time */
+  .key-pad.ctrl-track.trk-selected {
+    border-color: var(--trk-color) !important;
+    background: rgba(var(--trk-rgb), 0.25) !important;
+    box-shadow: 0 0 12px rgba(var(--trk-rgb), 0.6), inset 0 0 6px rgba(var(--trk-rgb), 0.3) !important;
+  }
+  .key-pad.ctrl-track.trk-selected .key-note {
+    color: #ffffff !important;
+    text-shadow: 0 0 6px var(--trk-color) !important;
+    font-weight: 700 !important;
+  }
+
+  /* Muted Track */
+  .key-pad.ctrl-track.trk-muted {
+    opacity: 0.45;
+    filter: grayscale(0.8);
+  }
+  .key-pad.ctrl-track.trk-muted::after {
+    content: "MUTE";
+    position: absolute;
+    top: 2px;
+    right: 3px;
+    font-size: 7px;
+    font-weight: 800;
+    color: #ff5252;
+    letter-spacing: 0.5px;
+  }
+
+  /* Waveform Bars Overlay on Track Buttons */
+  .trk-waveform {
+    position: absolute;
+    bottom: 2px;
+    left: 4px;
+    right: 4px;
+    height: 10px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+    pointer-events: none;
+    opacity: 0.2;
+    transition: opacity 0.15s ease;
+  }
+  .trk-waveform .wbar {
+    width: 3px;
+    height: 2px;
+    background: var(--trk-color, #888);
+    border-radius: 1px;
+    transition: height 0.08s ease;
+  }
+  .key-pad.trk-audio-active .trk-waveform {
+    opacity: 1;
+  }
+  .key-pad.trk-audio-active .trk-waveform .wbar {
+    background: var(--trk-color, #00e5ff);
+    box-shadow: 0 0 4px var(--trk-color, #00e5ff);
+    animation: trkWaveform 0.5s infinite ease-in-out alternate;
+  }
+  .key-pad.trk-audio-active .trk-waveform .wbar.b1 { animation-delay: 0.0s; }
+  .key-pad.trk-audio-active .trk-waveform .wbar.b2 { animation-delay: 0.12s; }
+  .key-pad.trk-audio-active .trk-waveform .wbar.b3 { animation-delay: 0.24s; }
+  .key-pad.trk-audio-active .trk-waveform .wbar.b4 { animation-delay: 0.08s; }
+  .key-pad.trk-audio-active .trk-waveform .wbar.b5 { animation-delay: 0.18s; }
+
+  @keyframes trkWaveform {
+    0% { height: 2px; }
+    50% { height: 9px; }
+    100% { height: 4px; }
+  }
 
   .key-pad.ctrl-lock { border-color: rgba(255, 180, 50, 0.55); }
   .key-pad.ctrl-lock .key-note { color: #ffb833; font-weight: 600; }
@@ -5222,27 +5747,27 @@ local HTML_UI_CONTENT = [[
   .key-pad.dummy-pad {
     opacity: 0.45;
     cursor: default;
-    background: rgba(20, 18, 16, 0.7);
-    border-color: rgba(50, 44, 38, 0.6);
+    background: rgba(20, 20, 20, 0.7);
+    border-color: rgba(45, 45, 45, 0.6);
   }
 
   .key-pad.sustain-active {
-    background: rgba(212, 163, 89, 0.25);
-    border-color: #d4a359;
+    background: rgba(0, 229, 255, 0.2);
+    border-color: #00e5ff;
   }
 
   .key-pad.sustain-active .key-note {
-    color: #d4a359;
+    color: #00e5ff;
     font-weight: 600;
   }
 
   .key-pad.latch-active {
-    background: rgba(212, 163, 89, 0.28) !important;
-    border-color: #d4a359 !important;
-    box-shadow: 0 0 8px rgba(212, 163, 89, 0.45), inset 0 0 6px rgba(212, 163, 89, 0.2) !important;
+    background: rgba(0, 229, 255, 0.25) !important;
+    border-color: #00e5ff !important;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.45), inset 0 0 6px rgba(0, 229, 255, 0.2) !important;
   }
   .key-pad.latch-active .key-note {
-    color: #ffd885 !important;
+    color: #ffffff !important;
     font-weight: 700 !important;
   }
 
@@ -5256,19 +5781,15 @@ local HTML_UI_CONTENT = [[
     font-weight: 700 !important;
   }
 
-  .key-pad {
-    position: relative;
-  }
-
-  /* Latched key: just a subtle border hint — background removed so root/3rd/5th colors remain visible */
+  /* Latched key: subtle border hint */
   .key-pad.latched-key {
-    border-color: rgba(94, 162, 235, 0.35) !important;
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
   }
 
   .key-pad.latched-key:active, .key-pad.latched-key.pressed {
-    background: rgba(212, 163, 89, 0.35) !important;
-    border-color: rgba(240, 190, 90, 1.0) !important;
-    box-shadow: 0 0 12px rgba(240, 190, 90, 0.6), inset 0 0 8px rgba(240, 190, 90, 0.3);
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.35) !important;
+    border-color: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 12px rgba(var(--active-track-rgb, 0, 229, 255), 0.6), inset 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.3);
   }
 
   /* Arp indicator dot — always in DOM for smooth opacity transitions */
@@ -6915,10 +7436,10 @@ local HTML_UI_CONTENT = [[
   const LAYOUT_DATA = {
     number: [
       { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
-      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Top Arp" },
-      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Bot Arp" },
-      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Dir -" },
-      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Dir +" },
+      { code: 18, keyLabel: "1", isControl: true, noteLabel: "Trk 1: Bass", extraClass: "ctrl-track" },
+      { code: 19, keyLabel: "2", isControl: true, noteLabel: "Trk 2: Chords", extraClass: "ctrl-track" },
+      { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trk 3: Lead", extraClass: "ctrl-track" },
+      { code: 21, keyLabel: "4", isControl: true, noteLabel: "Trk 4: Arp", extraClass: "ctrl-track" },
       { code: 23, keyLabel: "5", isControl: true, noteLabel: "Rate -", shiftLabel: "BotOct -", extraClass: "ctrl-oct" },
       { code: 22, keyLabel: "6", isControl: true, noteLabel: "Rate +", shiftLabel: "BotOct +", extraClass: "ctrl-oct" },
       { code: 26, keyLabel: "7", isControl: true, noteLabel: "Gate -" },
@@ -7146,6 +7667,12 @@ local HTML_UI_CONTENT = [[
               pad.appendChild(codeSpan);
               pad.appendChild(noteSpan);
               pad.appendChild(dotSpan);
+              if (k.code >= 18 && k.code <= 21) {
+                const waveDiv = document.createElement('div');
+                waveDiv.className = 'trk-waveform';
+                waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
+                pad.appendChild(waveDiv);
+              }
               shiftRowEl.appendChild(pad);
             });
             rowEl.appendChild(shiftRowEl);
@@ -7157,7 +7684,7 @@ local HTML_UI_CONTENT = [[
           l[rowName].forEach(k => {
             const pad = document.createElement('div');
             pad.id = 'key-' + k.code;
-            pad.className = 'key-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
+            pad.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.extraClass ? k.extraClass + ' ' : '') + (k.isDummy ? ' dummy-pad' : '');
             if (k.width) {
               pad.style.width = k.width + 'px';
             }
@@ -7187,6 +7714,12 @@ local HTML_UI_CONTENT = [[
             pad.appendChild(codeSpan);
             pad.appendChild(noteSpan);
             pad.appendChild(dotSpan);
+            if (k.code >= 18 && k.code <= 21) {
+              const waveDiv = document.createElement('div');
+              waveDiv.className = 'trk-waveform';
+              waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
+              pad.appendChild(waveDiv);
+            }
 
 
 
@@ -8976,10 +9509,43 @@ local HTML_UI_CONTENT = [[
         document.documentElement.style.setProperty('--action-border-opacity', data.uiActionKeyBorderOpacity);
       }
 
+      const trackRgbMap = {
+        1: '0, 229, 255',
+        2: '255, 145, 0',
+        3: '0, 230, 118',
+        4: '213, 0, 249'
+      };
+      const trkCodeMap = { 1: 18, 2: 19, 3: 20, 4: 21 };
+
+      if (data.activeTrackColor) {
+        document.documentElement.style.setProperty('--active-track-color', data.activeTrackColor);
+        const rgb = trackRgbMap[data.activeTrack] || '0, 229, 255';
+        document.documentElement.style.setProperty('--active-track-rgb', rgb);
+      }
+
+      if (data.tracks) {
+        for (let id = 1; id <= 4; id++) {
+          const t = data.tracks[id] || {};
+          const el = document.getElementById('key-' + trkCodeMap[id]);
+          if (el) {
+            el.classList.remove('sustain-active');
+            el.classList.toggle('trk-selected', !!(t.selected || (data.activeTrack === id)));
+            el.classList.toggle('trk-muted', !!t.muted);
+            el.classList.toggle('trk-audio-active', !!t.activeAudio);
+          }
+        }
+      }
+
       if (data.keys) {
         for (const [code, k] of Object.entries(data.keys)) {
           const el = document.getElementById('key-' + code);
           if (el) {
+            const numCode = parseInt(code, 10);
+            const isTrkBtn = (numCode >= 18 && numCode <= 21);
+            if (isTrkBtn) {
+              k.sustainActive = false;
+            }
+
             const noteEl = el.querySelector(':scope > .key-note');
             if (noteEl) {
               if (k.displayNote !== undefined && k.displayNote !== '') {
@@ -9016,7 +9582,7 @@ local HTML_UI_CONTENT = [[
             const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
-                ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing'].includes(c)
+                ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-audio-active'].includes(c)
               );
               el.className = baseClass + (currentStatusClasses.length ? ' ' + currentStatusClasses.join(' ') : '');
               el.dataset.baseClass = baseClass;
@@ -9031,9 +9597,15 @@ local HTML_UI_CONTENT = [[
             );
             el.classList.toggle('latched-key', !!isLatchedNote);
             el.classList.toggle('pressed', !!k.pressed);
-            el.classList.toggle('sustain-active', !!k.sustainActive);
+            el.classList.toggle('sustain-active', isTrkBtn ? false : !!k.sustainActive);
             el.classList.toggle('arp-held', !!k.arpHeld);
             el.classList.toggle('arp-playing', !!k.arpPlaying);
+
+            if (isTrkBtn) {
+              if (k.trkSelected !== undefined) el.classList.toggle('trk-selected', !!k.trkSelected);
+              if (k.trkMuted !== undefined) el.classList.toggle('trk-muted', !!k.trkMuted);
+              if (k.trkAudioActive !== undefined) el.classList.toggle('trk-audio-active', !!k.trkAudioActive);
+            }
 
             const isShift = data.shiftHeld || shiftModeActive;
             const effAction = isShift ? (k.shiftAction || k.action) : k.action;
@@ -9102,7 +9674,7 @@ local HTML_UI_CONTENT = [[
     }
   };
 
-window.updateArpPitches = function(activeCodes, heldCodes) {
+window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
     el.classList.remove('arp-playing');
     if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
@@ -9123,6 +9695,14 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
         el.classList.add('arp-held', 'latched-key');
       }
     });
+  }
+  if (trkAudioStates && typeof trkAudioStates === 'object') {
+    const trkCodeMap = { 1: 18, 2: 19, 3: 20, 4: 21 };
+    for (let id = 1; id <= 4; id++) {
+      const isAud = trkAudioStates[id];
+      const el = document.getElementById('key-' + trkCodeMap[id]);
+      if (el) el.classList.toggle('trk-audio-active', !!isAud);
+    }
   }
 };
 
@@ -10520,10 +11100,10 @@ local state = {
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
-  -- UI Styling
-  uiActionKeyHue = getSetting("uiActionKeyHue", 30),
-  uiActionKeySat = getSetting("uiActionKeySat", 20),
-  uiActionKeyLight = getSetting("uiActionKeyLight", 75),
+  -- UI Styling (Clean Dark Studio Grayscale)
+  uiActionKeyHue = getSetting("uiActionKeyHue", 0),
+  uiActionKeySat = getSetting("uiActionKeySat", 0),
+  uiActionKeyLight = getSetting("uiActionKeyLight", 70),
   uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
   uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
 
@@ -10611,10 +11191,34 @@ local state = {
   splitArpTopBoost = 20,
 
   tracks = {
-    [1] = { id = 1, name = "Bass",   channel = 0, volume = 100, muted = false, soloed = false, armed = true,  locked = false },
-    [2] = { id = 2, name = "Chords", channel = 1, volume = 100, muted = false, soloed = false, armed = false, locked = false },
-    [3] = { id = 3, name = "Lead",   channel = 2, volume = 100, muted = false, soloed = false, armed = false, locked = false },
-    [4] = { id = 4, name = "Arp",    channel = 3, volume = 100, muted = false, soloed = false, armed = false, locked = false },
+    [1] = {
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
+      muted = false, soloed = false, armed = true, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [2] = {
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [3] = {
+      id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [4] = {
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
   },
   bottomRowTrack = 1,
   topRowTrack = 3,
@@ -10718,10 +11322,10 @@ local WHITE_KEY_INDEX = {
 }
 
 local defaultNumberRowControls = {
-  [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
-  [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
-  [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
-  [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [18] = { key = "1", name = "Trk 1: Bass",   action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [19] = { key = "2", name = "Trk 2: Chords", action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [20] = { key = "3", name = "Trk 3: Lead",   action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [21] = { key = "4", name = "Trk 4: Arp",    action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
   [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
   [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
   [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
@@ -11603,6 +12207,48 @@ local function isTrackAudible(trackIdx)
     return trk.soloed == true
   end
   return true
+end
+
+local function selectTrack(id)
+  local targetId = math.max(1, math.min(4, tonumber(id) or 1))
+  if not (state.tracks and state.tracks[targetId]) then return end
+
+  -- Clean up any currently physically held note keys to prevent hanging notes across track switch
+  for code, info in pairs(state.pressedKeys) do
+    if type(info) == "table" and not info.isControl then
+      if info.pitches then
+        for _, p in ipairs(info.pitches) do
+          midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
+        end
+      end
+      state.pressedKeys[code] = nil
+    end
+  end
+
+  state.activeTrack = targetId
+  local trk = state.tracks[targetId]
+  state.arpEnabled = trk.arpEnabled == true
+  state.arpLatchActive = trk.arpLatchActive == true
+
+  if targetId <= 2 then
+    state.bottomRowTrack = targetId
+    state.bottomRowChannel = trk.channel
+  else
+    state.topRowTrack = targetId
+    state.topRowChannel = trk.channel
+  end
+
+  hud.updateWebviewHud({
+    title = "SELECT TRACK " .. targetId,
+    value = "Track " .. targetId .. ": " .. trk.name .. (trk.locked and " 🔁" or ""),
+    subtext = "MIDI Channel " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp Running" or " • Live Play"),
+    targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[targetId],
+    color = trk.color or "#64d8f0"
+  })
+
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
 end
 
 local function applyTransposeDelta(deltaSteps, spotTitle)
@@ -12600,80 +13246,77 @@ local function executeControlAction(act, code)
 
   -- Master Arp & Track Loop Lock (Consolidated on F)
   elseif act == "lockLoop" then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    local trkId = state.bottomRowTrack or 1
-    if state.tracks and state.tracks[trkId] then
-      state.tracks[trkId].locked = true
+    local curId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[curId]
+    if trk then
+      trk.locked = true
+      trk.arpEnabled = true
+      trk.arpLatchActive = true
+      state.arpEnabled = true
+      state.arpLatchActive = true
+      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = trk.color or "#ffd700" })
     end
-    hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. trkId .. " Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = "#ffd700" })
   elseif act == "lockAndSwap" then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    local curTrk = state.bottomRowTrack or 1
-    if state.tracks and state.tracks[curTrk] then
-      state.tracks[curTrk].locked = true
+    local curId = state.activeTrack or 1
+    local curTrk = state.tracks and state.tracks[curId]
+    if curTrk then
+      curTrk.locked = true
+      curTrk.arpEnabled = true
+      curTrk.arpLatchActive = true
     end
-    state.bottomRowTrack = (curTrk == 1) and 2 or 1
-    local nextTrk = state.tracks and state.tracks[state.bottomRowTrack]
-    if nextTrk then
-      state.bottomRowChannel = nextTrk.channel
-      state.bottomRowVolume = nextTrk.volume or state.bottomRowVolume
-    end
-    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curTrk .. " Looping 🔁", subtext = "Bottom row now playing Track " .. state.bottomRowTrack .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
+    local nextId = (curId % 4) + 1
+    selectTrack(nextId)
+    local nextTrk = state.tracks and state.tracks[nextId]
+    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
   elseif act == "lockAllTracks" then
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then
+          t.locked = true
+          t.arpEnabled = true
+          t.arpLatchActive = true
+        end
+      end
+    end
     state.arpEnabled = true
     state.arpLatchActive = true
-    if state.tracks then
-      for _, t in pairs(state.tracks) do t.locked = true end
-    end
-    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Loops Active", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
   elseif act == "stopLoops" then
-    state.arpLatchActive = false
-    if state.tracks then
-      for _, t in pairs(state.tracks) do t.locked = false end
-    end
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
+    arpeggiator.stopAllLoops()
     hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-3", color = "#ff5555" })
   elseif act == "freezeAll" then
     state.arpLatchActive = true
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
+      end
+    end
     hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-3", color = "#64d8f0" })
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
-    state.bottomRowTrack = (state.bottomRowTrack == 1) and 2 or 1
-    local trk = state.tracks and state.tracks[state.bottomRowTrack]
-    if trk then
-      state.bottomRowChannel = trk.channel
-      state.bottomRowVolume = trk.volume or state.bottomRowVolume
-      hud.updateWebviewHud({ title = "BOTTOM ROW ROUTING", value = "Track " .. state.bottomRowTrack .. ": " .. trk.name, subtext = "MIDI Channel " .. (trk.channel + 1), targetId = "key-40", color = "#64d8f0" })
-    end
+    local nextId = (state.activeTrack == 1) and 2 or 1
+    selectTrack(nextId)
   elseif act == "botTrackLock" then
-    local trkId = state.bottomRowTrack or 1
+    local trkId = state.activeTrack or 1
+    if trkId > 2 then trkId = 1 end
     if state.tracks and state.tracks[trkId] then
       state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "BOTTOM ROW LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
     end
   elseif act == "topTrackToggle" then
-    state.topRowTrack = (state.topRowTrack == 3) and 4 or 3
-    local trk = state.tracks and state.tracks[state.topRowTrack]
-    if trk then
-      state.topRowChannel = trk.channel
-      state.topRowVolume = trk.volume or state.topRowVolume
-      hud.updateWebviewHud({ title = "TOP ROW ROUTING", value = "Track " .. state.topRowTrack .. ": " .. trk.name, subtext = "MIDI Channel " .. (trk.channel + 1), targetId = "key-37", color = "#64d8f0" })
-    end
+    local nextId = (state.activeTrack == 3) and 4 or 3
+    selectTrack(nextId)
   elseif act == "topTrackLock" then
-    local trkId = state.topRowTrack or 3
+    local trkId = state.activeTrack or 3
+    if trkId <= 2 then trkId = 3 end
     if state.tracks and state.tracks[trkId] then
       state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "TOP ROW LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
     end
   elseif act == "trackFocusCycle" then
-    state.activeTrack = (state.activeTrack % 4) + 1
-    local trk = state.tracks and state.tracks[state.activeTrack]
-    hud.updateWebviewHud({ title = "TRACK FOCUS", value = "Track " .. state.activeTrack .. ": " .. (trk and trk.name or ""), subtext = "Master Parameter Focus", targetId = "key-41", color = "#64d8f0" })
+    local nextId = (state.activeTrack % 4) + 1
+    selectTrack(nextId)
   elseif act == "allMuteToggle" then
     local anyUnmuted = false
     if state.tracks then
@@ -12698,24 +13341,7 @@ local function executeControlAction(act, code)
   -- Dedicated Track 1-4 Actions
   elseif string.match(act, "^trkSelect(%d)$") then
     local id = tonumber(string.match(act, "^trkSelect(%d)$"))
-    if id <= 2 then
-      state.bottomRowTrack = id
-      local trk = state.tracks and state.tracks[id]
-      if trk then
-        state.bottomRowChannel = trk.channel
-        state.bottomRowVolume = trk.volume or state.bottomRowVolume
-      end
-      hud.updateWebviewHud({ title = "SELECT TRACK " .. id, value = trk and trk.name or "", subtext = "Bottom Row Routed", targetId = "key-" .. ({[1]=18,[2]=19})[id], color = "#64d8f0" })
-    else
-      state.topRowTrack = id
-      local trk = state.tracks and state.tracks[id]
-      if trk then
-        state.topRowChannel = trk.channel
-        state.topRowVolume = trk.volume or state.topRowVolume
-      end
-      hud.updateWebviewHud({ title = "SELECT TRACK " .. id, value = trk and trk.name or "", subtext = "Top Row Routed", targetId = "key-" .. ({[3]=20,[4]=21})[id], color = "#64d8f0" })
-    end
-    state.activeTrack = id
+    selectTrack(id)
   elseif string.match(act, "^trkMute(%d)$") then
     local id = tonumber(string.match(act, "^trkMute(%d)$"))
     local trk = state.tracks and state.tracks[id]
@@ -12746,12 +13372,11 @@ local function executeControlAction(act, code)
     end
   elseif string.match(act, "^trkClear(%d)$") then
     local id = tonumber(string.match(act, "^trkClear(%d)$"))
+    arpeggiator.clearTrackArp(id)
     hud.updateWebviewHud({ title = "CLEAR TRACK " .. id, value = "Pattern Cleared", subtext = "Reset Sequence", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ff5555" })
   elseif string.match(act, "^trkFocus(%d)$") then
     local id = tonumber(string.match(act, "^trkFocus(%d)$"))
-    state.activeTrack = id
-    local trk = state.tracks and state.tracks[id]
-    hud.updateWebviewHud({ title = "FOCUS TRACK " .. id, value = trk and trk.name or "", subtext = "Active Track Focus", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#64d8f0" })
+    selectTrack(id)
 
   -- Voicing Actions
   elseif act == "voicingUp" then
@@ -13066,13 +13691,12 @@ local function handleKeyDown(code)
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
-    local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trkIdx = state.activeTrack or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
     local trk = state.tracks and state.tracks[trkIdx]
     local ch = trk and trk.channel or (isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0))
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
     local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
-    local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    local arpActive = state.arpEnabled and arpEnabledForRow
+    local arpActive = trk and trk.arpEnabled or false
     local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
 
     local sustainPedalHeld = false
@@ -13088,11 +13712,13 @@ local function handleKeyDown(code)
     
     if isTrackAudible(trkIdx) then
       if isArpNote then 
-        for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
+        for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
       else 
         local quantMode = state.inputQuantizeMode or "Off"
         local bpm = state.arpBpm or 120.0
         local vel = transposer.getEffectiveRowVelocity(isTop)
+
+        if trk then trk.activeNotesCount = (trk.activeNotesCount or 0) + #chordPitches end
 
         quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
           for _, p in ipairs(pitches) do
@@ -13139,9 +13765,14 @@ local function handleKeyUp(code)
     local isArpNote = keyInfo.isArpNote
     local isSustainedNote = keyInfo.isSustainedNote
     local keyChannel = keyInfo.channel or 0
+    local trkId = keyInfo.track or state.activeTrack or 1
+    local trk = state.tracks and state.tracks[trkId]
+    if trk and not isArpNote then
+      trk.activeNotesCount = math.max(0, (trk.activeNotesCount or 0) - #pitches)
+    end
 
     if isArpNote then
-      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
+      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p, trkId) end
     else
       local sustainPedalHeld = false
       for c, info in pairs(state.pressedKeys) do
@@ -13331,6 +13962,7 @@ local function handleKeyUp(code)
 end
 
 return {
+  selectTrack = selectTrack,
   executeControlAction = executeControlAction,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,

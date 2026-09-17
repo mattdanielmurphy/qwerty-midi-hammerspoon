@@ -565,30 +565,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local arpHeldPitches = {}
   local currentArpPitches = {}
   
-  if state.arpLinked then
-    if state.arpEnabled then
-      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
-      for _, pitch in pairs(held or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
-      if p then currentArpPitches[p] = true end
+  local activeTrk = state.tracks and state.tracks[state.activeTrack or 1]
+  if activeTrk and activeTrk.arpEnabled then
+    for _, pitch in pairs(activeTrk.heldNotes or {}) do
+      if type(pitch) == "number" then arpHeldPitches[pitch] = true end
     end
-  else
-    if state.arpEnabled and state.arpTopEnabled then
-      for _, pitch in pairs(state.arpEngineTop.heldNotes) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
-    if state.arpEnabled and state.arpBottomEnabled then
-      for _, pitch in pairs(state.arpEngineBottom.heldNotes) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
+    local p = type(activeTrk.currentPitch) == "table" and activeTrk.currentPitch.pitch or activeTrk.currentPitch
+    if p then currentArpPitches[p] = true end
   end
 
   for code, kData in pairs(config.getActiveNoteKeysMap()) do
@@ -606,32 +589,19 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
 
     local isPressed = (state.pressedKeys[code] ~= nil)
-    if state.arpEnabled and currentArpPitches[noteNum] then
+    if activeTrk and activeTrk.arpEnabled and currentArpPitches[noteNum] then
       isPressed = true
     end
 
     local isLatched = false
-    if state.arpEnabled and state.arpLatchActive then
+    if activeTrk and activeTrk.arpEnabled and activeTrk.arpLatchActive then
       local codeStr = tostring(code)
-      if state.arpLinked then
-        for heldCode, _ in pairs(state.arpHeldNotes) do
-          if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-        end
-      else
-        if state.arpTopEnabled then
-          for heldCode, _ in pairs(state.arpEngineTop.heldNotes) do
-            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-          end
-        end
-        if not isLatched and state.arpBottomEnabled then
-          for heldCode, _ in pairs(state.arpEngineBottom.heldNotes) do
-            if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
-          end
-        end
+      for heldCode, _ in pairs(activeTrk.heldNotes or {}) do
+        if tostring(heldCode):match("^(%d+)") == codeStr then isLatched = true; break end
       end
     end
 
-    local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
+    local arpActive = activeTrk and activeTrk.arpEnabled or false
 
     keyUpdates[tostring(code)] = {
       note = noteName,
@@ -711,6 +681,22 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
   end
 
+  -- Track buttons (keys 18, 19, 20, 21): apply accurate single-selection, mute, color, and audio states
+  local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
+  for kCode, trkId in pairs(trkKeyMap) do
+    local strCode = tostring(kCode)
+    if keyUpdates[strCode] then
+      keyUpdates[strCode].sustainActive = false -- strictly prevent legacy toggle selection glow
+      keyUpdates[strCode].trkSelected = (state.activeTrack == trkId)
+      local t = state.tracks and state.tracks[trkId]
+      if t then
+        keyUpdates[strCode].trkMuted = (t.muted == true)
+        keyUpdates[strCode].trkColor = t.color
+        keyUpdates[strCode].trkAudioActive = ((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil))
+      end
+    end
+  end
+
   local modVal = state.ccStates[1] or 0
 
   local bpmDisplayStr
@@ -734,6 +720,38 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
+    activeTrack = state.activeTrack or 1,
+    activeTrackColor = (activeTrk and activeTrk.color) or "#00e5ff",
+    tracks = {
+      [1] = {
+        id = 1, name = "Bass", channel = 0, color = "#00e5ff",
+        selected = (state.activeTrack == 1),
+        muted = state.tracks and state.tracks[1] and state.tracks[1].muted == true,
+        soloed = state.tracks and state.tracks[1] and state.tracks[1].soloed == true,
+        activeAudio = state.tracks and state.tracks[1] and (((state.tracks[1].activeNotesCount or 0) > 0) or (state.tracks[1].currentPitch ~= nil)) or false
+      },
+      [2] = {
+        id = 2, name = "Chords", channel = 1, color = "#ff9100",
+        selected = (state.activeTrack == 2),
+        muted = state.tracks and state.tracks[2] and state.tracks[2].muted == true,
+        soloed = state.tracks and state.tracks[2] and state.tracks[2].soloed == true,
+        activeAudio = state.tracks and state.tracks[2] and (((state.tracks[2].activeNotesCount or 0) > 0) or (state.tracks[2].currentPitch ~= nil)) or false
+      },
+      [3] = {
+        id = 3, name = "Lead", channel = 2, color = "#00e676",
+        selected = (state.activeTrack == 3),
+        muted = state.tracks and state.tracks[3] and state.tracks[3].muted == true,
+        soloed = state.tracks and state.tracks[3] and state.tracks[3].soloed == true,
+        activeAudio = state.tracks and state.tracks[3] and (((state.tracks[3].activeNotesCount or 0) > 0) or (state.tracks[3].currentPitch ~= nil)) or false
+      },
+      [4] = {
+        id = 4, name = "Arp", channel = 3, color = "#d500f9",
+        selected = (state.activeTrack == 4),
+        muted = state.tracks and state.tracks[4] and state.tracks[4].muted == true,
+        soloed = state.tracks and state.tracks[4] and state.tracks[4].soloed == true,
+        activeAudio = state.tracks and state.tracks[4] and (((state.tracks[4].activeNotesCount or 0) > 0) or (state.tracks[4].currentPitch ~= nil)) or false
+      }
+    },
     keys = keyUpdates,
     shiftHeld = state.shiftHeld,
     altHeld = state.altHeld == true,
@@ -1390,36 +1408,20 @@ local function fastUpdateArp()
 
   local arpHeldPitches = {}
   local currentArpPitches = {}
-  
-  if state.arpLinked then
-    if state.arpEnabled then
-      local held = next(state.arpEngineLinked.heldNotes) and state.arpEngineLinked.heldNotes or state.arpHeldNotes
-      for _, pitch in pairs(held or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineLinked.currentPitch) == "table" and state.arpEngineLinked.currentPitch.pitch or state.arpEngineLinked.currentPitch or state.arpCurrentPitch
-      if p then currentArpPitches[p] = true end
+
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  local arpActive = trk and trk.arpEnabled or false
+
+  if arpActive then
+    for _, pitch in pairs(trk.heldNotes or {}) do
+      if type(pitch) == "number" then arpHeldPitches[pitch] = true end
     end
-  else
-    if state.arpEnabled and state.arpTopEnabled then
-      for _, pitch in pairs(state.arpEngineTop.heldNotes or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineTop.currentPitch) == "table" and state.arpEngineTop.currentPitch.pitch or state.arpEngineTop.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
-    if state.arpEnabled and state.arpBottomEnabled then
-      for _, pitch in pairs(state.arpEngineBottom.heldNotes or {}) do
-        if type(pitch) == "number" then arpHeldPitches[pitch] = true end
-      end
-      local p = type(state.arpEngineBottom.currentPitch) == "table" and state.arpEngineBottom.currentPitch.pitch or state.arpEngineBottom.currentPitch
-      if p then currentArpPitches[p] = true end
-    end
+    local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+    if p then currentArpPitches[p] = true end
   end
 
   local activeCodes = {}
   local heldCodes = {}
-  local arpActive = state.arpLinked and state.arpEnabled or (not state.arpLinked and state.arpEnabled and (state.arpTopEnabled or state.arpBottomEnabled))
 
   if arpActive then
     for code, kData in pairs(config.getActiveNoteKeysMap()) do
@@ -1433,7 +1435,22 @@ local function fastUpdateArp()
     end
   end
 
-  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s);", hs.json.encode(activeCodes), hs.json.encode(heldCodes))
+  local trkAudioStates = {}
+  if state.tracks then
+    for trkId = 1, 4 do
+      local t = state.tracks[trkId]
+      if t then
+        trkAudioStates[trkId] = ((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil))
+      else
+        trkAudioStates[trkId] = false
+      end
+    end
+  end
+
+  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s, %s);",
+    hs.json.encode(activeCodes),
+    hs.json.encode(heldCodes),
+    hs.json.encode(trkAudioStates))
   safeEvaluateJS(js)
 end
 

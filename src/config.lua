@@ -33,10 +33,10 @@ local state = {
   zoomLevel = getSetting("zoomLevel", 1.0),
   BASE_HUD_SCALE = 1.4,
 
-  -- UI Styling
-  uiActionKeyHue = getSetting("uiActionKeyHue", 30),
-  uiActionKeySat = getSetting("uiActionKeySat", 20),
-  uiActionKeyLight = getSetting("uiActionKeyLight", 75),
+  -- UI Styling (Clean Dark Studio Grayscale)
+  uiActionKeyHue = getSetting("uiActionKeyHue", 0),
+  uiActionKeySat = getSetting("uiActionKeySat", 0),
+  uiActionKeyLight = getSetting("uiActionKeyLight", 70),
   uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
   uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
 
@@ -124,10 +124,34 @@ local state = {
   splitArpTopBoost = 20,
 
   tracks = {
-    [1] = { id = 1, name = "Bass",   channel = 0, volume = 100, muted = false, soloed = false, armed = true,  locked = false },
-    [2] = { id = 2, name = "Chords", channel = 1, volume = 100, muted = false, soloed = false, armed = false, locked = false },
-    [3] = { id = 3, name = "Lead",   channel = 2, volume = 100, muted = false, soloed = false, armed = false, locked = false },
-    [4] = { id = 4, name = "Arp",    channel = 3, volume = 100, muted = false, soloed = false, armed = false, locked = false },
+    [1] = {
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
+      muted = false, soloed = false, armed = true, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [2] = {
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [3] = {
+      id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
+    [4] = {
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
+      muted = false, soloed = false, armed = false, locked = false,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+    },
   },
   bottomRowTrack = 1,
   topRowTrack = 3,
@@ -231,10 +255,10 @@ local WHITE_KEY_INDEX = {
 }
 
 local defaultNumberRowControls = {
-  [18] = { key = "1", name = "Top Arp",  action = "arpTopToggle",   shiftAction = "trnspDown",    shiftName = "Trnsp -" },
-  [19] = { key = "2", name = "Bot Arp",  action = "arpBottomToggle",shiftAction = "trnspUp",      shiftName = "Trnsp +" },
-  [20] = { key = "3", name = "Dir -",    action = "arpDirDown",     shiftAction = "topOctDown",   shiftName = "TopOct -" },
-  [21] = { key = "4", name = "Dir +",    action = "arpDirUp",       shiftAction = "topOctUp",     shiftName = "TopOct +" },
+  [18] = { key = "1", name = "Trk 1: Bass",   action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [19] = { key = "2", name = "Trk 2: Chords", action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [20] = { key = "3", name = "Trk 3: Lead",   action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [21] = { key = "4", name = "Trk 4: Arp",    action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
   [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
   [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
   [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },

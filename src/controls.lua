@@ -258,6 +258,48 @@ local function isTrackAudible(trackIdx)
   return true
 end
 
+local function selectTrack(id)
+  local targetId = math.max(1, math.min(4, tonumber(id) or 1))
+  if not (state.tracks and state.tracks[targetId]) then return end
+
+  -- Clean up any currently physically held note keys to prevent hanging notes across track switch
+  for code, info in pairs(state.pressedKeys) do
+    if type(info) == "table" and not info.isControl then
+      if info.pitches then
+        for _, p in ipairs(info.pitches) do
+          midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
+        end
+      end
+      state.pressedKeys[code] = nil
+    end
+  end
+
+  state.activeTrack = targetId
+  local trk = state.tracks[targetId]
+  state.arpEnabled = trk.arpEnabled == true
+  state.arpLatchActive = trk.arpLatchActive == true
+
+  if targetId <= 2 then
+    state.bottomRowTrack = targetId
+    state.bottomRowChannel = trk.channel
+  else
+    state.topRowTrack = targetId
+    state.topRowChannel = trk.channel
+  end
+
+  hud.updateWebviewHud({
+    title = "SELECT TRACK " .. targetId,
+    value = "Track " .. targetId .. ": " .. trk.name .. (trk.locked and " 🔁" or ""),
+    subtext = "MIDI Channel " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp Running" or " • Live Play"),
+    targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[targetId],
+    color = trk.color or "#64d8f0"
+  })
+
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+end
+
 local function applyTransposeDelta(deltaSteps, spotTitle)
   local curT = tonumber(state.transposeShift) or 0
   local curO = tonumber(state.octaveShift) or 0
@@ -1253,80 +1295,77 @@ local function executeControlAction(act, code)
 
   -- Master Arp & Track Loop Lock (Consolidated on F)
   elseif act == "lockLoop" then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    local trkId = state.bottomRowTrack or 1
-    if state.tracks and state.tracks[trkId] then
-      state.tracks[trkId].locked = true
+    local curId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[curId]
+    if trk then
+      trk.locked = true
+      trk.arpEnabled = true
+      trk.arpLatchActive = true
+      state.arpEnabled = true
+      state.arpLatchActive = true
+      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = trk.color or "#ffd700" })
     end
-    hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. trkId .. " Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = "#ffd700" })
   elseif act == "lockAndSwap" then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    local curTrk = state.bottomRowTrack or 1
-    if state.tracks and state.tracks[curTrk] then
-      state.tracks[curTrk].locked = true
+    local curId = state.activeTrack or 1
+    local curTrk = state.tracks and state.tracks[curId]
+    if curTrk then
+      curTrk.locked = true
+      curTrk.arpEnabled = true
+      curTrk.arpLatchActive = true
     end
-    state.bottomRowTrack = (curTrk == 1) and 2 or 1
-    local nextTrk = state.tracks and state.tracks[state.bottomRowTrack]
-    if nextTrk then
-      state.bottomRowChannel = nextTrk.channel
-      state.bottomRowVolume = nextTrk.volume or state.bottomRowVolume
-    end
-    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curTrk .. " Looping 🔁", subtext = "Bottom row now playing Track " .. state.bottomRowTrack .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
+    local nextId = (curId % 4) + 1
+    selectTrack(nextId)
+    local nextTrk = state.tracks and state.tracks[nextId]
+    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
   elseif act == "lockAllTracks" then
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then
+          t.locked = true
+          t.arpEnabled = true
+          t.arpLatchActive = true
+        end
+      end
+    end
     state.arpEnabled = true
     state.arpLatchActive = true
-    if state.tracks then
-      for _, t in pairs(state.tracks) do t.locked = true end
-    end
-    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Loops Active", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
   elseif act == "stopLoops" then
-    state.arpLatchActive = false
-    if state.tracks then
-      for _, t in pairs(state.tracks) do t.locked = false end
-    end
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
+    arpeggiator.stopAllLoops()
     hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-3", color = "#ff5555" })
   elseif act == "freezeAll" then
     state.arpLatchActive = true
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
+      end
+    end
     hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-3", color = "#64d8f0" })
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
-    state.bottomRowTrack = (state.bottomRowTrack == 1) and 2 or 1
-    local trk = state.tracks and state.tracks[state.bottomRowTrack]
-    if trk then
-      state.bottomRowChannel = trk.channel
-      state.bottomRowVolume = trk.volume or state.bottomRowVolume
-      hud.updateWebviewHud({ title = "BOTTOM ROW ROUTING", value = "Track " .. state.bottomRowTrack .. ": " .. trk.name, subtext = "MIDI Channel " .. (trk.channel + 1), targetId = "key-40", color = "#64d8f0" })
-    end
+    local nextId = (state.activeTrack == 1) and 2 or 1
+    selectTrack(nextId)
   elseif act == "botTrackLock" then
-    local trkId = state.bottomRowTrack or 1
+    local trkId = state.activeTrack or 1
+    if trkId > 2 then trkId = 1 end
     if state.tracks and state.tracks[trkId] then
       state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "BOTTOM ROW LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
     end
   elseif act == "topTrackToggle" then
-    state.topRowTrack = (state.topRowTrack == 3) and 4 or 3
-    local trk = state.tracks and state.tracks[state.topRowTrack]
-    if trk then
-      state.topRowChannel = trk.channel
-      state.topRowVolume = trk.volume or state.topRowVolume
-      hud.updateWebviewHud({ title = "TOP ROW ROUTING", value = "Track " .. state.topRowTrack .. ": " .. trk.name, subtext = "MIDI Channel " .. (trk.channel + 1), targetId = "key-37", color = "#64d8f0" })
-    end
+    local nextId = (state.activeTrack == 3) and 4 or 3
+    selectTrack(nextId)
   elseif act == "topTrackLock" then
-    local trkId = state.topRowTrack or 3
+    local trkId = state.activeTrack or 3
+    if trkId <= 2 then trkId = 3 end
     if state.tracks and state.tracks[trkId] then
       state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "TOP ROW LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
     end
   elseif act == "trackFocusCycle" then
-    state.activeTrack = (state.activeTrack % 4) + 1
-    local trk = state.tracks and state.tracks[state.activeTrack]
-    hud.updateWebviewHud({ title = "TRACK FOCUS", value = "Track " .. state.activeTrack .. ": " .. (trk and trk.name or ""), subtext = "Master Parameter Focus", targetId = "key-41", color = "#64d8f0" })
+    local nextId = (state.activeTrack % 4) + 1
+    selectTrack(nextId)
   elseif act == "allMuteToggle" then
     local anyUnmuted = false
     if state.tracks then
@@ -1351,24 +1390,7 @@ local function executeControlAction(act, code)
   -- Dedicated Track 1-4 Actions
   elseif string.match(act, "^trkSelect(%d)$") then
     local id = tonumber(string.match(act, "^trkSelect(%d)$"))
-    if id <= 2 then
-      state.bottomRowTrack = id
-      local trk = state.tracks and state.tracks[id]
-      if trk then
-        state.bottomRowChannel = trk.channel
-        state.bottomRowVolume = trk.volume or state.bottomRowVolume
-      end
-      hud.updateWebviewHud({ title = "SELECT TRACK " .. id, value = trk and trk.name or "", subtext = "Bottom Row Routed", targetId = "key-" .. ({[1]=18,[2]=19})[id], color = "#64d8f0" })
-    else
-      state.topRowTrack = id
-      local trk = state.tracks and state.tracks[id]
-      if trk then
-        state.topRowChannel = trk.channel
-        state.topRowVolume = trk.volume or state.topRowVolume
-      end
-      hud.updateWebviewHud({ title = "SELECT TRACK " .. id, value = trk and trk.name or "", subtext = "Top Row Routed", targetId = "key-" .. ({[3]=20,[4]=21})[id], color = "#64d8f0" })
-    end
-    state.activeTrack = id
+    selectTrack(id)
   elseif string.match(act, "^trkMute(%d)$") then
     local id = tonumber(string.match(act, "^trkMute(%d)$"))
     local trk = state.tracks and state.tracks[id]
@@ -1399,12 +1421,11 @@ local function executeControlAction(act, code)
     end
   elseif string.match(act, "^trkClear(%d)$") then
     local id = tonumber(string.match(act, "^trkClear(%d)$"))
+    arpeggiator.clearTrackArp(id)
     hud.updateWebviewHud({ title = "CLEAR TRACK " .. id, value = "Pattern Cleared", subtext = "Reset Sequence", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ff5555" })
   elseif string.match(act, "^trkFocus(%d)$") then
     local id = tonumber(string.match(act, "^trkFocus(%d)$"))
-    state.activeTrack = id
-    local trk = state.tracks and state.tracks[id]
-    hud.updateWebviewHud({ title = "FOCUS TRACK " .. id, value = trk and trk.name or "", subtext = "Active Track Focus", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#64d8f0" })
+    selectTrack(id)
 
   -- Voicing Actions
   elseif act == "voicingUp" then
@@ -1719,13 +1740,12 @@ local function handleKeyDown(code)
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
-    local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trkIdx = state.activeTrack or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
     local trk = state.tracks and state.tracks[trkIdx]
     local ch = trk and trk.channel or (isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0))
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
     local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
-    local arpEnabledForRow = isTop and state.arpTopEnabled or (not isTop and state.arpBottomEnabled)
-    local arpActive = state.arpEnabled and arpEnabledForRow
+    local arpActive = trk and trk.arpEnabled or false
     local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
 
     local sustainPedalHeld = false
@@ -1741,11 +1761,13 @@ local function handleKeyDown(code)
     
     if isTrackAudible(trkIdx) then
       if isArpNote then 
-        for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p) end
+        for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
       else 
         local quantMode = state.inputQuantizeMode or "Off"
         local bpm = state.arpBpm or 120.0
         local vel = transposer.getEffectiveRowVelocity(isTop)
+
+        if trk then trk.activeNotesCount = (trk.activeNotesCount or 0) + #chordPitches end
 
         quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
           for _, p in ipairs(pitches) do
@@ -1792,9 +1814,14 @@ local function handleKeyUp(code)
     local isArpNote = keyInfo.isArpNote
     local isSustainedNote = keyInfo.isSustainedNote
     local keyChannel = keyInfo.channel or 0
+    local trkId = keyInfo.track or state.activeTrack or 1
+    local trk = state.tracks and state.tracks[trkId]
+    if trk and not isArpNote then
+      trk.activeNotesCount = math.max(0, (trk.activeNotesCount or 0) - #pitches)
+    end
 
     if isArpNote then
-      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p) end
+      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p, trkId) end
     else
       local sustainPedalHeld = false
       for c, info in pairs(state.pressedKeys) do
@@ -1984,6 +2011,7 @@ local function handleKeyUp(code)
 end
 
 return {
+  selectTrack = selectTrack,
   executeControlAction = executeControlAction,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,

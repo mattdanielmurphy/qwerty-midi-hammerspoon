@@ -31,6 +31,7 @@ _G.activeWatchers.sync = sync
 _G.activeWatchers.hud = hud
 _G.activeWatchers.state = state
 _G.activeWatchers.controls = controls
+_G.activeWatchers.arpeggiator = arpeggiator
 
 
 if nanokey then

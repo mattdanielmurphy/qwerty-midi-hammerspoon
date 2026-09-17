@@ -754,13 +754,27 @@ end
 
 -- Auto-reconnect watcher
 _G.activeWatchers = _G.activeWatchers or {}
-_G.activeWatchers.nanokeyDeviceWatcher = hs.midi.deviceCallback(function(devName, hasConnected)
-  if devName and string.find(string.lower(devName), "nanokey") then
-    if hasConnected then
-      log("Hardware connected: " .. devName)
-      nanoKey.connect(devName)
-    else
-      log("Hardware disconnected: " .. devName)
+_G.activeWatchers.nanokeyDeviceWatcher = hs.midi.deviceCallback(function(devices, virtualDevices)
+  local found = nil
+  if type(devices) == "table" then
+    for _, name in ipairs(devices) do
+      if type(name) == "string" and string.find(string.lower(name), "nanokey") then
+        found = name
+        break
+      end
+    end
+  elseif type(devices) == "string" and string.find(string.lower(devices), "nanokey") then
+    found = devices
+  end
+
+  if found then
+    if not nanoKey.isConnected() then
+      log("Hardware connected: " .. found)
+      nanoKey.connect(found)
+    end
+  else
+    if nanoKey.isConnected() then
+      log("Hardware disconnected.")
       nanoKey.disconnect()
     end
   end
