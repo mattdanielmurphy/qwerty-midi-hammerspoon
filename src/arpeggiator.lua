@@ -268,6 +268,45 @@ local function arpTickEngine(eng, isTopRow)
   return nextPitch
 end
 
+local function isTrackAudible(trkId)
+  if not state.tracks then return true end
+  local trk = state.tracks[trkId]
+  if not trk then return true end
+  if trk.muted then return false end
+  local anySolo = false
+  for _, t in pairs(state.tracks) do
+    if t.soloed then anySolo = true; break end
+  end
+  if anySolo then
+    return trk.soloed == true
+  end
+  return true
+end
+
+local function silenceTrack(trkId)
+  local trk = state.tracks and state.tracks[trkId]
+  if not trk then return end
+  if trk.activeGateTimers then
+    for pitch, entry in pairs(trk.activeGateTimers) do
+      if entry and entry.timer then entry.timer:stop() end
+      local ch = entry and entry.channel or trk.channel or 0
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
+    end
+    trk.activeGateTimers = {}
+  end
+  if trk.currentPitch then
+    local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+    midi.sendMidiNote("noteOff", p, 0, c)
+    trk.currentPitch = nil
+  end
+  trk.arpIsPlaying = false
+  trk.activeNotesCount = 0
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+end
+
 local function arpTickTrack(trk)
   if not trk then return nil end
   local rateFactor = ARP_RATES[trk.arpRateIdx or state.arpRateIdx] and ARP_RATES[trk.arpRateIdx or state.arpRateIdx].factor or 0.5
@@ -311,6 +350,7 @@ local function arpTickTrack(trk)
       midi.sendMidiNote("noteOff", p, 0, c)
       trk.currentPitch = nil
     end
+    trk.arpIsPlaying = false
     return nil
   end
 
@@ -385,19 +425,15 @@ local function arpTickTrack(trk)
       trk.currentPitch = nil
     end
 
-    local isAudible = true
-    if trk.muted then isAudible = false end
-    local anySolo = false
-    for _, t in pairs(state.tracks) do
-      if t.soloed then anySolo = true; break end
-    end
-    if anySolo and not trk.soloed then isAudible = false end
-
+    local isAudible = isTrackAudible(trk.id)
     if isAudible then
       midi.sendMidiNote("noteOn", nextPitch, vel, ch)
       trk.currentPitch = { pitch = nextPitch, channel = ch }
+      trk.arpIsPlaying = true
 
-      local gateDuration = getArpIntervalSeconds() * gateRatio
+      local trackRateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+      local trackStepSec = (60.0 / (state.arpBpm or 120.0)) * trackRateFactor
+      local gateDuration = trackStepSec * gateRatio
       local pitchToRelease = nextPitch
       local releaseCh = ch
       local timer = hs.timer.doAfter(gateDuration, function()
@@ -406,7 +442,9 @@ local function arpTickTrack(trk)
           if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
             trk.currentPitch = nil
           end
+          trk.arpIsPlaying = false
           if trk.activeGateTimers then trk.activeGateTimers[pitchToRelease] = nil end
+          if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
         end)
         if not ok then print("[Arp Gate Error] " .. tostring(e)) end
       end)
@@ -416,10 +454,46 @@ local function arpTickTrack(trk)
         trk.activeGateTimers[pitchToRelease] = nil
       end
       trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+      if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
+    else
+      trk.arpIsPlaying = false
     end
   end)
   if not success then print("[Arp Track Error] " .. tostring(err)) end
   return nextPitch
+end
+
+local function stopTrackArp(trk)
+  if not trk then return end
+  if trk.timer then
+    trk.timer:stop()
+    trk.timer = nil
+  end
+  silenceTrack(trk.id)
+end
+
+local function startTrackArp(trk, preserveState)
+  if not trk then return end
+  if trk.timer then
+    trk.timer:stop()
+    trk.timer = nil
+  end
+  local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+  local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+  if not preserveState then
+    if trk.arpDirectionIdx == 4 then
+      trk.stepIndex = 999 
+      trk.stepDirection = -1
+    else
+      trk.stepIndex = 1
+      trk.stepDirection = 1
+    end
+    trk.pos = 0
+    arpTickTrack(trk)
+  end
+  trk.timer = hs.timer.doEvery(intervalSeconds, function()
+    arpTickTrack(trk)
+  end)
 end
 
 local function isAnyTrackArpActive()
@@ -500,7 +574,11 @@ local function startArpTimer(preserveState)
 end
 
 local function arpAddNote(code, pitch, trackIdx)
-  local trkId = trackIdx or state.activeTrack or 1
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+  local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
     local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
@@ -519,19 +597,16 @@ local function arpAddNote(code, pitch, trackIdx)
     trk.keysCurrentlyHeld[code] = true
     trk.targetHeldNotes = trk.targetHeldNotes or {}
     trk.targetHeldNotes[code] = pitch
-    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
       trk.heldNotes = {}
       for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
-      if not state.arpTimer then
-        startArpTimer()
+      if not trk.timer and (trk.arpEnabled or state.arpEnabled) then
+        startTrackArp(trk)
       end
     end
     return
   end
 
-  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-  local noteKey = rawCode and config.getNoteKey(rawCode)
-  local isTop = noteKey and noteKey.isTop or false
   local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
   local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
   if state.arpLatchActive then
@@ -565,7 +640,11 @@ local function arpAddNote(code, pitch, trackIdx)
 end
 
 local function arpRemoveNote(code, trackIdx)
-  local trkId = trackIdx or state.activeTrack or 1
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+  local trkId = trackIdx or defaultTrk
   local trk = state.tracks and state.tracks[trkId]
   if trk then
     trk.keysCurrentlyHeld[code] = nil
@@ -579,13 +658,13 @@ local function arpRemoveNote(code, trackIdx)
         trk.targetHeldNotes[code] = nil
       end
     end
-    if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
       trk.heldNotes = {}
       if trk.targetHeldNotes then
         for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
       end
-      if not isAnyTrackArpActive() then
-        stopArpTimer()
+      if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
+        stopTrackArp(trk)
         updateHud()
       end
     end
@@ -644,6 +723,17 @@ local function formatBpm(bpm)
 end
 
 local function applyBpmChange()
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk and trk.timer then
+        trk.timer:stop()
+        local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+        local newInterval = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+        trk.timer = hs.timer.doEvery(newInterval, function() arpTickTrack(trk) end)
+      end
+    end
+  end
   if state.arpTimer then
     state.arpTimer:stop()
     local newInterval = getArpIntervalSeconds()
@@ -873,18 +963,15 @@ local function toggleArpPower(targetTrackIdx)
         end
       end
       trk.heldNotes = newHeld
-      if countTableKeys(trk.heldNotes) == 0 and not isAnyTrackArpActive() then
-        stopArpTimer()
+      if countTableKeys(trk.heldNotes) == 0 then
+        stopTrackArp(trk)
       end
     else
       trk.arpEnabled = false
       trk.arpLatchActive = false
-      stopEngineState(trk)
+      stopTrackArp(trk)
       trk.heldNotes = {}
       trk.keysCurrentlyHeld = {}
-      if not isAnyTrackArpActive() then
-        stopArpTimer()
-      end
     end
 
     state.arpEnabled = trk.arpEnabled
@@ -985,27 +1072,28 @@ local function toggleArpLatch(targetTrackIdx)
     if targetLatch then
       trk.arpEnabled = true
       trk.latchClearedForNewChord = false
-      -- If notes are currently physically held on the keyboard, latch them now
-      for code, _ in pairs(state.pressedKeys) do
-        local noteKey = config.getNoteKey(code)
-        if noteKey then
-          local pitch = transposer.getTransposedPitch(noteKey.baseNote, code)
-          trk.heldNotes[code] = pitch
+      -- If notes are currently physically held on the keyboard for this track, latch them now
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.pitches then
+          for _, p in ipairs(info.pitches) do
+            trk.heldNotes[code .. "_" .. p] = p
+          end
         end
       end
       if countTableKeys(trk.heldNotes) > 0 then
-        startArpTimer()
+        startTrackArp(trk)
       end
     else
       local newHeld = {}
       for code, pitch in pairs(trk.heldNotes or {}) do
-        if trk.keysCurrentlyHeld[code] or state.pressedKeys[code] then
+        local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+        if trk.keysCurrentlyHeld[code] or (rawCode and state.pressedKeys[rawCode]) then
           newHeld[code] = pitch
         end
       end
       trk.heldNotes = newHeld
-      if countTableKeys(trk.heldNotes) == 0 and not isAnyTrackArpActive() then
-        stopArpTimer()
+      if countTableKeys(trk.heldNotes) == 0 then
+        stopTrackArp(trk)
       end
     end
   else
@@ -1458,6 +1546,11 @@ return {
   stopArpTimer = stopArpTimer,
   getArpIntervalSeconds = getArpIntervalSeconds,
   startArpTimer = startArpTimer,
+  startTrackArp = startTrackArp,
+  stopTrackArp = stopTrackArp,
+  silenceTrack = silenceTrack,
+  isTrackAudible = isTrackAudible,
+  arpTickTrack = arpTickTrack,
   arpAddNote = arpAddNote,
   arpRemoveNote = arpRemoveNote,
   formatBpm = formatBpm,

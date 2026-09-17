@@ -128,29 +128,29 @@ local state = {
       id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [2] = {
       id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [3] = {
       id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [4] = {
       id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
   },
   bottomRowTrack = 1,

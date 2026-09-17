@@ -736,7 +736,17 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-bpmedit, .key-pad.ctrl-rand, .key-pad.ctrl-panic, .key-pad.ctrl-reset { border-color: rgba(120, 120, 120, 0.4); }
   .key-pad.ctrl-bpmedit .key-note, .key-pad.ctrl-rand .key-note, .key-pad.ctrl-panic .key-note, .key-pad.ctrl-reset .key-note { color: #b5aba0; font-weight: 500; }
 
-  /* Track Buttons: 1 to 4 with distinct individual colors, single selection, mute, and waveform */
+  /* Row-specific track coloring */
+  #row-upper {
+    --active-track-color: var(--top-track-color, #00e676);
+    --active-track-rgb: var(--top-track-rgb, 0, 230, 118);
+  }
+  #row-home, #row-lower {
+    --active-track-color: var(--bottom-track-color, #00e5ff);
+    --active-track-rgb: var(--bottom-track-rgb, 0, 229, 255);
+  }
+
+  /* Track Buttons: 1 to 4 with distinct individual colors, dual selection, mute, solo, and waveform */
   #key-18 { --trk-color: #00e5ff; --trk-rgb: 0, 229, 255; }
   #key-19 { --trk-color: #ff9100; --trk-rgb: 255, 145, 0; }
   #key-20 { --trk-color: #00e676; --trk-rgb: 0, 230, 118; }
@@ -764,11 +774,11 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
 
-  /* Selected Track: exactly one track at a time */
+  /* Selected Track: Active track for its row */
   .key-pad.ctrl-track.trk-selected {
     border-color: var(--trk-color) !important;
-    background: rgba(var(--trk-rgb), 0.25) !important;
-    box-shadow: 0 0 12px rgba(var(--trk-rgb), 0.6), inset 0 0 6px rgba(var(--trk-rgb), 0.3) !important;
+    background: rgba(var(--trk-rgb), 0.22) !important;
+    box-shadow: 0 0 10px rgba(var(--trk-rgb), 0.55), inset 0 0 6px rgba(var(--trk-rgb), 0.25) !important;
   }
   .key-pad.ctrl-track.trk-selected .key-note {
     color: #ffffff !important;
@@ -776,20 +786,65 @@ local HTML_UI_CONTENT = [[
     font-weight: 700 !important;
   }
 
-  /* Muted Track */
-  .key-pad.ctrl-track.trk-muted {
-    opacity: 0.45;
-    filter: grayscale(0.8);
-  }
-  .key-pad.ctrl-track.trk-muted::after {
-    content: "MUTE";
+  /* Discrete Clickable Mute & Solo Badges */
+  .trk-ms-badges {
     position: absolute;
-    top: 2px;
-    right: 3px;
-    font-size: 7px;
+    top: 3px;
+    right: 4px;
+    display: flex;
+    gap: 2px;
+    z-index: 5;
+  }
+  .trk-badge {
+    width: 12px;
+    height: 11px;
+    font-size: 8px;
     font-weight: 800;
-    color: #ff5252;
-    letter-spacing: 0.5px;
+    line-height: 11px;
+    text-align: center;
+    border-radius: 2px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.1s ease;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.45);
+  }
+  .trk-badge:hover {
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
+  }
+  .trk-badge.trk-badge-m.active {
+    background: #ff3b30 !important;
+    color: #ffffff !important;
+    border-color: #ff3b30 !important;
+    box-shadow: 0 0 6px rgba(255, 59, 48, 0.8) !important;
+  }
+  .trk-badge.trk-badge-s.active {
+    background: #ffd60a !important;
+    color: #000000 !important;
+    border-color: #ffd60a !important;
+    box-shadow: 0 0 6px rgba(255, 214, 10, 0.8) !important;
+  }
+
+  /* Muted and Soloed Track Key Styling */
+  .key-pad.ctrl-track.trk-muted:not(.trk-selected) {
+    border-color: rgba(var(--trk-rgb), 0.18);
+  }
+  .key-pad.ctrl-track.trk-soloed {
+    box-shadow: 0 0 8px rgba(255, 214, 10, 0.4);
+  }
+
+  /* Human Note Press: Tactile Pad Surface Glow (Subtle Invariant) */
+  .key-pad.ctrl-track.trk-human-active {
+    background: rgba(var(--trk-rgb), 0.38) !important;
+    box-shadow: inset 0 0 10px rgba(var(--trk-rgb), 0.7), 0 0 6px rgba(var(--trk-rgb), 0.4) !important;
+  }
+
+  /* Arpeggiator Stepping: Subtle Rhythmic Tempo Flash (Subtle Invariant) */
+  .key-pad.ctrl-track.trk-arp-step {
+    border-color: #ffffff !important;
+    box-shadow: 0 0 10px var(--trk-color, #00e5ff) !important;
   }
 
   /* Waveform Bars Overlay on Track Buttons */
@@ -804,7 +859,7 @@ local HTML_UI_CONTENT = [[
     justify-content: center;
     gap: 2px;
     pointer-events: none;
-    opacity: 0.2;
+    opacity: 0.18;
     transition: opacity 0.15s ease;
   }
   .trk-waveform .wbar {
@@ -2715,6 +2770,30 @@ local HTML_UI_CONTENT = [[
     if (menu) menu.style.display = 'none';
   }
 
+  // ===== CALL HAMMERSPOON HELPER =====
+  window.callHammerspoon = function(action, data) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      if (typeof action === 'string') {
+        const muteMatch = action.match(/^trkMute(\d)$/);
+        if (muteMatch) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'trkMute', trackId: parseInt(muteMatch[1], 10) });
+          return;
+        }
+        const soloMatch = action.match(/^trkSolo(\d)$/);
+        if (soloMatch) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'trkSolo', trackId: parseInt(soloMatch[1], 10) });
+          return;
+        }
+        const selMatch = action.match(/^trkSelect(\d)$/);
+        if (selMatch) {
+          window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'selectTrack', trackId: parseInt(selMatch[1], 10) });
+          return;
+        }
+      }
+      window.webkit.messageHandlers.midiControllerUC.postMessage(data || { type: action });
+    }
+  };
+
   // ===== TEXT INPUT FOCUS FIX =====
   function postTextInputFocus(focused) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
@@ -2767,6 +2846,33 @@ local HTML_UI_CONTENT = [[
               pad.appendChild(noteSpan);
               pad.appendChild(dotSpan);
               if (k.code >= 18 && k.code <= 21) {
+                const trkNum = k.code - 17;
+                const msBadges = document.createElement('div');
+                msBadges.className = 'trk-ms-badges';
+                const mBadge = document.createElement('span');
+                mBadge.className = 'trk-badge trk-badge-m';
+                mBadge.dataset.trk = trkNum;
+                mBadge.textContent = 'M';
+                mBadge.title = 'Mute Track ' + trkNum;
+                mBadge.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (window.callHammerspoon) window.callHammerspoon('trkMute' + trkNum);
+                });
+                const sBadge = document.createElement('span');
+                sBadge.className = 'trk-badge trk-badge-s';
+                sBadge.dataset.trk = trkNum;
+                sBadge.textContent = 'S';
+                sBadge.title = 'Solo Track ' + trkNum;
+                sBadge.addEventListener('mousedown', (e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (window.callHammerspoon) window.callHammerspoon('trkSolo' + trkNum);
+                });
+                msBadges.appendChild(mBadge);
+                msBadges.appendChild(sBadge);
+                pad.appendChild(msBadges);
+
                 const waveDiv = document.createElement('div');
                 waveDiv.className = 'trk-waveform';
                 waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
@@ -2814,6 +2920,33 @@ local HTML_UI_CONTENT = [[
             pad.appendChild(noteSpan);
             pad.appendChild(dotSpan);
             if (k.code >= 18 && k.code <= 21) {
+              const trkNum = k.code - 17;
+              const msBadges = document.createElement('div');
+              msBadges.className = 'trk-ms-badges';
+              const mBadge = document.createElement('span');
+              mBadge.className = 'trk-badge trk-badge-m';
+              mBadge.dataset.trk = trkNum;
+              mBadge.textContent = 'M';
+              mBadge.title = 'Mute Track ' + trkNum;
+              mBadge.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.callHammerspoon) window.callHammerspoon('trkMute' + trkNum);
+              });
+              const sBadge = document.createElement('span');
+              sBadge.className = 'trk-badge trk-badge-s';
+              sBadge.dataset.trk = trkNum;
+              sBadge.textContent = 'S';
+              sBadge.title = 'Solo Track ' + trkNum;
+              sBadge.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.callHammerspoon) window.callHammerspoon('trkSolo' + trkNum);
+              });
+              msBadges.appendChild(mBadge);
+              msBadges.appendChild(sBadge);
+              pad.appendChild(msBadges);
+
               const waveDiv = document.createElement('div');
               waveDiv.className = 'trk-waveform';
               waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
@@ -4621,6 +4754,16 @@ local HTML_UI_CONTENT = [[
         const rgb = trackRgbMap[data.activeTrack] || '0, 229, 255';
         document.documentElement.style.setProperty('--active-track-rgb', rgb);
       }
+      if (data.topTrackColor) {
+        document.documentElement.style.setProperty('--top-track-color', data.topTrackColor);
+        const rgb = trackRgbMap[data.topRowTrack] || '0, 230, 118';
+        document.documentElement.style.setProperty('--top-track-rgb', rgb);
+      }
+      if (data.bottomTrackColor) {
+        document.documentElement.style.setProperty('--bottom-track-color', data.bottomTrackColor);
+        const rgb = trackRgbMap[data.bottomRowTrack] || '0, 229, 255';
+        document.documentElement.style.setProperty('--bottom-track-rgb', rgb);
+      }
 
       if (data.tracks) {
         for (let id = 1; id <= 4; id++) {
@@ -4628,9 +4771,16 @@ local HTML_UI_CONTENT = [[
           const el = document.getElementById('key-' + trkCodeMap[id]);
           if (el) {
             el.classList.remove('sustain-active');
-            el.classList.toggle('trk-selected', !!(t.selected || (data.activeTrack === id)));
+            el.classList.toggle('trk-selected', !!t.selected);
             el.classList.toggle('trk-muted', !!t.muted);
+            el.classList.toggle('trk-soloed', !!t.soloed);
             el.classList.toggle('trk-audio-active', !!t.activeAudio);
+            el.classList.toggle('trk-human-active', !!t.humanActive);
+            el.classList.toggle('trk-arp-step', !!t.arpStep);
+            const mBadge = el.querySelector('.trk-badge-m');
+            if (mBadge) mBadge.classList.toggle('active', !!t.muted);
+            const sBadge = el.querySelector('.trk-badge-s');
+            if (sBadge) sBadge.classList.toggle('active', !!t.soloed);
           }
         }
       }
@@ -4681,7 +4831,7 @@ local HTML_UI_CONTENT = [[
             const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
-                ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-audio-active'].includes(c)
+                ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-soloed', 'trk-audio-active', 'trk-human-active', 'trk-arp-step'].includes(c)
               );
               el.className = baseClass + (currentStatusClasses.length ? ' ' + currentStatusClasses.join(' ') : '');
               el.dataset.baseClass = baseClass;
@@ -4702,8 +4852,19 @@ local HTML_UI_CONTENT = [[
 
             if (isTrkBtn) {
               if (k.trkSelected !== undefined) el.classList.toggle('trk-selected', !!k.trkSelected);
-              if (k.trkMuted !== undefined) el.classList.toggle('trk-muted', !!k.trkMuted);
+              if (k.trkMuted !== undefined) {
+                el.classList.toggle('trk-muted', !!k.trkMuted);
+                const m = el.querySelector('.trk-badge-m');
+                if (m) m.classList.toggle('active', !!k.trkMuted);
+              }
+              if (k.trkSoloed !== undefined) {
+                el.classList.toggle('trk-soloed', !!k.trkSoloed);
+                const s = el.querySelector('.trk-badge-s');
+                if (s) s.classList.toggle('active', !!k.trkSoloed);
+              }
               if (k.trkAudioActive !== undefined) el.classList.toggle('trk-audio-active', !!k.trkAudioActive);
+              if (k.trkHumanActive !== undefined) el.classList.toggle('trk-human-active', !!k.trkHumanActive);
+              if (k.trkArpStep !== undefined) el.classList.toggle('trk-arp-step', !!k.trkArpStep);
             }
 
             const isShift = data.shiftHeld || shiftModeActive;
@@ -4841,9 +5002,28 @@ window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
   if (trkAudioStates && typeof trkAudioStates === 'object') {
     const trkCodeMap = { 1: 18, 2: 19, 3: 20, 4: 21 };
     for (let id = 1; id <= 4; id++) {
-      const isAud = trkAudioStates[id];
+      const st = trkAudioStates[id];
       const el = document.getElementById('key-' + trkCodeMap[id]);
-      if (el) el.classList.toggle('trk-audio-active', !!isAud);
+      if (el) {
+        if (typeof st === 'boolean') {
+          el.classList.toggle('trk-audio-active', st);
+        } else if (st && typeof st === 'object') {
+          if (st.selected !== undefined) el.classList.toggle('trk-selected', !!st.selected);
+          if (st.muted !== undefined) {
+            el.classList.toggle('trk-muted', !!st.muted);
+            const m = el.querySelector('.trk-badge-m');
+            if (m) m.classList.toggle('active', !!st.muted);
+          }
+          if (st.soloed !== undefined) {
+            el.classList.toggle('trk-soloed', !!st.soloed);
+            const s = el.querySelector('.trk-badge-s');
+            if (s) s.classList.toggle('active', !!st.soloed);
+          }
+          if (st.activeAudio !== undefined) el.classList.toggle('trk-audio-active', !!st.activeAudio);
+          if (st.humanActive !== undefined) el.classList.toggle('trk-human-active', !!st.humanActive);
+          if (st.arpStep !== undefined) el.classList.toggle('trk-arp-step', !!st.arpStep);
+        }
+      }
     }
   }
 };

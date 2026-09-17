@@ -258,19 +258,84 @@ local function isTrackAudible(trackIdx)
   return true
 end
 
+local function syncTrackAudibility()
+  if not state.tracks then return end
+  for trkId = 1, 4 do
+    local trk = state.tracks[trkId]
+    local audible = isTrackAudible(trkId)
+    if not audible then
+      -- Silence arpeggiator on this track
+      if arpeggiator and arpeggiator.silenceTrack then
+        arpeggiator.silenceTrack(trkId)
+      end
+      -- Silence any physically held notes on this track
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.track == trkId then
+          if info.pitches then
+            for _, p in ipairs(info.pitches) do
+              midi.sendMidiNote("noteOff", p, 0, info.channel or trk.channel or 0)
+            end
+          end
+        end
+      end
+      -- Silence any sustained notes on this track's channel
+      if state.sustainedPitches then
+        local newSustained = {}
+        for _, item in ipairs(state.sustainedPitches) do
+          if item.channel == trk.channel then
+            midi.sendMidiNote("noteOff", item.pitch, 0, item.channel)
+          else
+            table.insert(newSustained, item)
+          end
+        end
+        state.sustainedPitches = newSustained
+      end
+      trk.activeNotesCount = 0
+    else
+      -- If track became audible and has physically held keys that were silenced, resume them!
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.track == trkId and not info.isArpNote then
+          if info.pitches then
+            local vel = transposer.getEffectiveRowVelocity(trkId > 2)
+            for _, p in ipairs(info.pitches) do
+              midi.sendMidiNote("noteOn", p, vel, info.channel or trk.channel or 0)
+            end
+            trk.activeNotesCount = (trk.activeNotesCount or 0) + #info.pitches
+          end
+        end
+      end
+    end
+  end
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+end
+
 local function selectTrack(id)
   local targetId = math.max(1, math.min(4, tonumber(id) or 1))
   if not (state.tracks and state.tracks[targetId]) then return end
 
-  -- Clean up any currently physically held note keys to prevent hanging notes across track switch
+  local isBottomTarget = (targetId <= 2)
+
+  -- Clean up only currently physically held note keys on the targeted row
   for code, info in pairs(state.pressedKeys) do
     if type(info) == "table" and not info.isControl then
-      if info.pitches then
-        for _, p in ipairs(info.pitches) do
-          midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
+      local noteKey = config.getNoteKey(code)
+      local isTopKey = (noteKey and noteKey.isTop) or (info.track and info.track > 2)
+      local shouldClean = isBottomTarget and (not isTopKey) or ((not isBottomTarget) and isTopKey)
+      if shouldClean then
+        if info.pitches then
+          for _, p in ipairs(info.pitches) do
+            midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
+          end
+        end
+        state.pressedKeys[code] = nil
+        local prevTrkId = info.track or (isTopKey and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
+        local prevTrk = state.tracks and state.tracks[prevTrkId]
+        if prevTrk and prevTrk.physicalKeysHeld then
+          prevTrk.physicalKeysHeld[code] = nil
         end
       end
-      state.pressedKeys[code] = nil
     end
   end
 
@@ -290,7 +355,7 @@ local function selectTrack(id)
   hud.updateWebviewHud({
     title = "SELECT TRACK " .. targetId,
     value = "Track " .. targetId .. ": " .. trk.name .. (trk.locked and " 🔁" or ""),
-    subtext = "MIDI Channel " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp Running" or " • Live Play"),
+    subtext = (targetId <= 2 and "Bottom Row • " or "Top Row • ") .. "MIDI Ch " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp ON" or " • Live Play"),
     targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[targetId],
     color = trk.color or "#64d8f0"
   })
@@ -1363,6 +1428,7 @@ local function executeControlAction(act, code)
         if not t.muted then anyUnmuted = true; break end
       end
       for _, t in pairs(state.tracks) do t.muted = anyUnmuted end
+      syncTrackAudibility()
     end
     hud.updateWebviewHud({ title = "MASTER MIXER", value = anyUnmuted and "ALL TRACKS MUTED 🔇" or "ALL TRACKS UNMUTED 🔊", subtext = "Global Track Mute", targetId = "key-41", color = anyUnmuted and "#ff5555" or "#50fa7b" })
   elseif act == "mixReset" then
@@ -1372,6 +1438,7 @@ local function executeControlAction(act, code)
         t.soloed = false
         t.volume = 100
       end
+      syncTrackAudibility()
     end
     state.topRowVolume = 100
     state.bottomRowVolume = 100
@@ -1386,6 +1453,7 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[id]
     if trk then
       trk.muted = not trk.muted
+      syncTrackAudibility()
       hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.muted and "MUTED 🔇" or "UNMUTED 🔊", subtext = "Mute Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.muted and "#ff5555" or "#50fa7b" })
     end
   elseif string.match(act, "^trkSolo(%d)$") then
@@ -1393,6 +1461,7 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[id]
     if trk then
       trk.soloed = not trk.soloed
+      syncTrackAudibility()
       hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.soloed and "SOLO ON 🌟" or "SOLO OFF", subtext = "Solo Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.soloed and "#ffd700" or "#64d8f0" })
     end
   elseif string.match(act, "^trkRec(%d)$") then
@@ -1730,9 +1799,13 @@ local function handleKeyDown(code)
   local noteKey = config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
-    local trkIdx = state.activeTrack or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
+    local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
     local trk = state.tracks and state.tracks[trkIdx]
-    local ch = trk and trk.channel or (isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0))
+    if trk then
+      trk.physicalKeysHeld = trk.physicalKeysHeld or {}
+      trk.physicalKeysHeld[code] = true
+    end
+    local ch = trk and trk.channel or (isTop and (state.topRowChannel or 2) or (state.bottomRowChannel or 0))
     local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
     local chordPitches = (state.quoteHeld or state.chordModeActive) and transposer.getChordPitches(noteKey.baseNote, isTop) or { transposedPitch }
     local arpActive = trk and trk.arpEnabled or false
@@ -1747,7 +1820,7 @@ local function handleKeyDown(code)
     end
     local effectiveSustain = (state.shiftHeld and (not (state.sustainActive or sustainPedalHeld))) or ((not state.shiftHeld) and (state.sustainActive or sustainPedalHeld))
     
-    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch, track = trkIdx }
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch, track = trkIdx, isTop = isTop }
     
     if isTrackAudible(trkIdx) then
       if isArpNote then 
@@ -1767,6 +1840,7 @@ local function handleKeyDown(code)
       end
     end
     hud.updateWebviewHud()
+    if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     return true
   end
 
@@ -1804,8 +1878,12 @@ local function handleKeyUp(code)
     local isArpNote = keyInfo.isArpNote
     local isSustainedNote = keyInfo.isSustainedNote
     local keyChannel = keyInfo.channel or 0
-    local trkId = keyInfo.track or state.activeTrack or 1
+    local isTop = keyInfo.isTop
+    local trkId = keyInfo.track or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
     local trk = state.tracks and state.tracks[trkId]
+    if trk and trk.physicalKeysHeld then
+      trk.physicalKeysHeld[code] = nil
+    end
     if trk and not isArpNote then
       trk.activeNotesCount = math.max(0, (trk.activeNotesCount or 0) - #pitches)
     end
