@@ -3629,6 +3629,25 @@ local function updateSingleKeyState(code, pressed, latched)
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
 end
 
+-- Derive the waveform state from live note ownership instead of the cached
+-- counter. The counter is intentionally used for MIDI bookkeeping, but can
+-- briefly outlive a quantized or sustained note and light the wrong track.
+local function isTrackAudioActive(trackId)
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk or not arpeggiator.isTrackAudible(trackId) then return false end
+
+  if trk.currentPitch ~= nil then return true end
+  if trk.activeGateTimers and next(trk.activeGateTimers) ~= nil then return true end
+  if trk.sustainedPitches and next(trk.sustainedPitches) ~= nil then return true end
+
+  for _, info in pairs(state.pressedKeys or {}) do
+    if type(info) == "table" and not info.isControl and info.track == trackId then
+      return true
+    end
+  end
+  return false
+end
+
 local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
   local extraJson = "null"
@@ -4381,7 +4400,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         keyUpdates[strCode].trkMuted = (t.muted == true)
         keyUpdates[strCode].trkSoloed = (t.soloed == true)
         keyUpdates[strCode].trkColor = t.color
-        keyUpdates[strCode].trkAudioActive = isAudible and (((t.activeNotesCount and t.activeNotesCount > 0) or (t.currentPitch ~= nil)))
+        keyUpdates[strCode].trkAudioActive = isTrackAudioActive(trkId)
         keyUpdates[strCode].trkHumanActive = hasKeys
         keyUpdates[strCode].trkArpStep = (t.arpIsPlaying == true)
         keyUpdates[strCode].trkSustainMode = t.sustainMode or "off"
@@ -4428,7 +4447,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         selected = (state.bottomRowTrack == 1),
         muted = state.tracks and state.tracks[1] and state.tracks[1].muted == true or false,
         soloed = state.tracks and state.tracks[1] and state.tracks[1].soloed == true or false,
-        activeAudio = arpeggiator.isTrackAudible(1) and state.tracks and state.tracks[1] and (((state.tracks[1].activeNotesCount or 0) > 0) or (state.tracks[1].currentPitch ~= nil)) or false,
+        activeAudio = isTrackAudioActive(1),
         humanActive = state.tracks and state.tracks[1] and state.tracks[1].physicalKeysHeld and next(state.tracks[1].physicalKeysHeld) ~= nil or false,
         arpStep = state.tracks and state.tracks[1] and state.tracks[1].arpIsPlaying == true or false
       },
@@ -4437,7 +4456,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         selected = (state.bottomRowTrack == 2),
         muted = state.tracks and state.tracks[2] and state.tracks[2].muted == true or false,
         soloed = state.tracks and state.tracks[2] and state.tracks[2].soloed == true or false,
-        activeAudio = arpeggiator.isTrackAudible(2) and state.tracks and state.tracks[2] and (((state.tracks[2].activeNotesCount or 0) > 0) or (state.tracks[2].currentPitch ~= nil)) or false,
+        activeAudio = isTrackAudioActive(2),
         humanActive = state.tracks and state.tracks[2] and state.tracks[2].physicalKeysHeld and next(state.tracks[2].physicalKeysHeld) ~= nil or false,
         arpStep = state.tracks and state.tracks[2] and state.tracks[2].arpIsPlaying == true or false
       },
@@ -4446,7 +4465,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         selected = (state.topRowTrack == 3),
         muted = state.tracks and state.tracks[3] and state.tracks[3].muted == true or false,
         soloed = state.tracks and state.tracks[3] and state.tracks[3].soloed == true or false,
-        activeAudio = arpeggiator.isTrackAudible(3) and state.tracks and state.tracks[3] and (((state.tracks[3].activeNotesCount or 0) > 0) or (state.tracks[3].currentPitch ~= nil)) or false,
+        activeAudio = isTrackAudioActive(3),
         humanActive = state.tracks and state.tracks[3] and state.tracks[3].physicalKeysHeld and next(state.tracks[3].physicalKeysHeld) ~= nil or false,
         arpStep = state.tracks and state.tracks[3] and state.tracks[3].arpIsPlaying == true or false
       },
@@ -4455,7 +4474,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         selected = (state.topRowTrack == 4),
         muted = state.tracks and state.tracks[4] and state.tracks[4].muted == true or false,
         soloed = state.tracks and state.tracks[4] and state.tracks[4].soloed == true or false,
-        activeAudio = arpeggiator.isTrackAudible(4) and state.tracks and state.tracks[4] and (((state.tracks[4].activeNotesCount or 0) > 0) or (state.tracks[4].currentPitch ~= nil)) or false,
+        activeAudio = isTrackAudioActive(4),
         humanActive = state.tracks and state.tracks[4] and state.tracks[4].physicalKeysHeld and next(state.tracks[4].physicalKeysHeld) ~= nil or false,
         arpStep = state.tracks and state.tracks[4] and state.tracks[4].arpIsPlaying == true or false
       }
@@ -4778,43 +4797,13 @@ local function createMidiWebview()
       if arpeggiator.setLogicBpmTarget then arpeggiator.setLogicBpmTarget(state.arpBpm) end
       updateWebviewHud()
     elseif body.type == "toggleArpTop" then
-      state.arpTopEnabled = not state.arpTopEnabled
-      if not state.arpTopEnabled then
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and noteKey.isTop then
-            state.arpHeldNotes[code] = nil
-            state.arpKeysCurrentlyHeld[code] = nil
-          end
-        end
+      if controlsModule and controlsModule.executeControlAction then
+        controlsModule.executeControlAction("arpTopToggle")
       end
-      local spot = {
-        title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
-        value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
-        subtext = arpeggiator.getArpRowTargetSubtext(),
-        targetId = "arp-top-toggle",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
     elseif body.type == "toggleArpBottom" then
-      state.arpBottomEnabled = not state.arpBottomEnabled
-      if not state.arpBottomEnabled then
-        for code in pairs(state.arpHeldNotes) do
-          local noteKey = config.getNoteKey(code)
-          if noteKey and not noteKey.isTop then
-            state.arpHeldNotes[code] = nil
-            state.arpKeysCurrentlyHeld[code] = nil
-          end
-        end
+      if controlsModule and controlsModule.executeControlAction then
+        controlsModule.executeControlAction("arpBottomToggle")
       end
-      local spot = {
-        title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
-        value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
-        subtext = arpeggiator.getArpRowTargetSubtext(),
-        targetId = "arp-bottom-toggle",
-        color = "#d4a359"
-      }
-      updateWebviewHud(spot)
     elseif body.type == "dragOctave" and body.row and body.direction then
       if body.row == "top" then
         state.topRowOctaveOffset = math.max(-48, math.min(36, state.topRowOctaveOffset + (body.direction * 12)))
@@ -5178,7 +5167,7 @@ local function fastUpdateArp()
         selected = (trkId <= 2 and state.bottomRowTrack == trkId) or (trkId >= 3 and state.topRowTrack == trkId),
         muted = (t and t.muted == true) or false,
         soloed = (t and t.soloed == true) or false,
-        activeAudio = isAudible and (((t and t.activeNotesCount or 0) > 0) or (t and t.currentPitch ~= nil)),
+        activeAudio = isTrackAudioActive(trkId),
         humanActive = hasKeys,
         arpStep = (t and t.arpIsPlaying == true) or false,
         sustainMode = (t and t.sustainMode) or "off",
@@ -13148,6 +13137,27 @@ local function executeControlAction(act, code)
     return
   end
 
+  -- Top/Bottom ARP controls target the selected track for that row. The
+  -- multi-track engine no longer consumes the legacy row-level flags.
+  if act == "arpTopToggle" or act == "arpBottomToggle" then
+    local rowName = act == "arpTopToggle" and "TOP" or "BOTTOM"
+    local trackId = act == "arpTopToggle" and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trackId]
+    if trk then
+      arpeggiator.toggleArpPower(trackId)
+      state.arpTopEnabled = (state.tracks[state.topRowTrack or 3].arpEnabled == true)
+      state.arpBottomEnabled = (state.tracks[state.bottomRowTrack or 1].arpEnabled == true)
+      hud.updateWebviewHud({
+        title = rowName .. " ROW ARP (TRACK " .. trackId .. ")",
+        value = trk.arpEnabled and (trk.arpLatchActive and "ON • LATCH 🔒" or "ON") or "OFF",
+        subtext = trk.name .. " • " .. (trk.arpEnabled and "Arpeggiating" or "Live Play"),
+        targetId = act == "arpTopToggle" and "arp-top-toggle" or "arp-bottom-toggle",
+        color = trk.color or "#d4a359"
+      })
+    end
+    return
+  end
+
   -- Record state snapshot before mutating controller parameters
   if act == "modeDown" or act == "modeUp" or
      act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
@@ -13756,96 +13766,6 @@ local function executeControlAction(act, code)
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
       subtext = "Dual Row Volume Level",
       targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpTopToggle" then
-    state.arpTopEnabled = not state.arpTopEnabled
-    if state.arpTopEnabled and state.arpImplicitlyDisabled then
-      state.arpImplicitlyDisabled = false
-      if not state.arpEnabled then
-        arpeggiator.setArpPowerImplicit(true)
-      end
-    end
-
-    if not state.arpTopEnabled then
-      if state.arpEnabled and not state.arpBottomEnabled then
-        state.arpImplicitlyDisabled = true
-        arpeggiator.setArpPowerImplicit(false)
-      else
-        if not state.arpLinked then
-          arpeggiator.clearRowEngine(true)
-        else
-          local toRemove = {}
-          for c in pairs(state.arpHeldNotes) do
-            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
-            local noteKey = rawCode and config.getNoteKey(rawCode)
-            if noteKey and noteKey.isTop then
-              table.insert(toRemove, c)
-            end
-          end
-          for _, c in ipairs(toRemove) do
-            state.arpHeldNotes[c] = nil
-            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
-          end
-          local remaining = 0
-          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-          if remaining == 0 then
-            arpeggiator.stopArpTimer()
-          end
-        end
-      end
-    end
-    local spot = {
-      title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
-      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-top-toggle",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpBottomToggle" then
-    state.arpBottomEnabled = not state.arpBottomEnabled
-    if state.arpBottomEnabled and state.arpImplicitlyDisabled then
-      state.arpImplicitlyDisabled = false
-      if not state.arpEnabled then
-        arpeggiator.setArpPowerImplicit(true)
-      end
-    end
-
-    if not state.arpBottomEnabled then
-      if state.arpEnabled and not state.arpTopEnabled then
-        state.arpImplicitlyDisabled = true
-        arpeggiator.setArpPowerImplicit(false)
-      else
-        if not state.arpLinked then
-          arpeggiator.clearRowEngine(false)
-        else
-          local toRemove = {}
-          for c in pairs(state.arpHeldNotes) do
-            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
-            local noteKey = rawCode and config.getNoteKey(rawCode)
-            if noteKey and (not noteKey.isTop) then
-              table.insert(toRemove, c)
-            end
-          end
-          for _, c in ipairs(toRemove) do
-            state.arpHeldNotes[c] = nil
-            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
-          end
-          local remaining = 0
-          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-          if remaining == 0 then
-            arpeggiator.stopArpTimer()
-          end
-        end
-      end
-    end
-    local spot = {
-      title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
-      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-bottom-toggle",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)

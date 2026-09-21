@@ -448,6 +448,27 @@ local function executeControlAction(act, code)
     return
   end
 
+  -- Top/Bottom ARP controls target the selected track for that row. The
+  -- multi-track engine no longer consumes the legacy row-level flags.
+  if act == "arpTopToggle" or act == "arpBottomToggle" then
+    local rowName = act == "arpTopToggle" and "TOP" or "BOTTOM"
+    local trackId = act == "arpTopToggle" and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trackId]
+    if trk then
+      arpeggiator.toggleArpPower(trackId)
+      state.arpTopEnabled = (state.tracks[state.topRowTrack or 3].arpEnabled == true)
+      state.arpBottomEnabled = (state.tracks[state.bottomRowTrack or 1].arpEnabled == true)
+      hud.updateWebviewHud({
+        title = rowName .. " ROW ARP (TRACK " .. trackId .. ")",
+        value = trk.arpEnabled and (trk.arpLatchActive and "ON • LATCH 🔒" or "ON") or "OFF",
+        subtext = trk.name .. " • " .. (trk.arpEnabled and "Arpeggiating" or "Live Play"),
+        targetId = act == "arpTopToggle" and "arp-top-toggle" or "arp-bottom-toggle",
+        color = trk.color or "#d4a359"
+      })
+    end
+    return
+  end
+
   -- Record state snapshot before mutating controller parameters
   if act == "modeDown" or act == "modeUp" or
      act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
@@ -1056,96 +1077,6 @@ local function executeControlAction(act, code)
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
       subtext = "Dual Row Volume Level",
       targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpTopToggle" then
-    state.arpTopEnabled = not state.arpTopEnabled
-    if state.arpTopEnabled and state.arpImplicitlyDisabled then
-      state.arpImplicitlyDisabled = false
-      if not state.arpEnabled then
-        arpeggiator.setArpPowerImplicit(true)
-      end
-    end
-
-    if not state.arpTopEnabled then
-      if state.arpEnabled and not state.arpBottomEnabled then
-        state.arpImplicitlyDisabled = true
-        arpeggiator.setArpPowerImplicit(false)
-      else
-        if not state.arpLinked then
-          arpeggiator.clearRowEngine(true)
-        else
-          local toRemove = {}
-          for c in pairs(state.arpHeldNotes) do
-            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
-            local noteKey = rawCode and config.getNoteKey(rawCode)
-            if noteKey and noteKey.isTop then
-              table.insert(toRemove, c)
-            end
-          end
-          for _, c in ipairs(toRemove) do
-            state.arpHeldNotes[c] = nil
-            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
-          end
-          local remaining = 0
-          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-          if remaining == 0 then
-            arpeggiator.stopArpTimer()
-          end
-        end
-      end
-    end
-    local spot = {
-      title = "<div class=\"stacked-rows-icon top-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>TOP ROW ARP",
-      value = state.arpTopEnabled and "TOP ARP: ON" or "TOP ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-top-toggle",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpBottomToggle" then
-    state.arpBottomEnabled = not state.arpBottomEnabled
-    if state.arpBottomEnabled and state.arpImplicitlyDisabled then
-      state.arpImplicitlyDisabled = false
-      if not state.arpEnabled then
-        arpeggiator.setArpPowerImplicit(true)
-      end
-    end
-
-    if not state.arpBottomEnabled then
-      if state.arpEnabled and not state.arpTopEnabled then
-        state.arpImplicitlyDisabled = true
-        arpeggiator.setArpPowerImplicit(false)
-      else
-        if not state.arpLinked then
-          arpeggiator.clearRowEngine(false)
-        else
-          local toRemove = {}
-          for c in pairs(state.arpHeldNotes) do
-            local rawCode = type(c) == "string" and tonumber(c:match("^(%d+)")) or tonumber(c)
-            local noteKey = rawCode and config.getNoteKey(rawCode)
-            if noteKey and (not noteKey.isTop) then
-              table.insert(toRemove, c)
-            end
-          end
-          for _, c in ipairs(toRemove) do
-            state.arpHeldNotes[c] = nil
-            if state.arpTargetHeldNotes then state.arpTargetHeldNotes[c] = nil end
-          end
-          local remaining = 0
-          for _ in pairs(state.arpHeldNotes) do remaining = remaining + 1 end
-          if remaining == 0 then
-            arpeggiator.stopArpTimer()
-          end
-        end
-      end
-    end
-    local spot = {
-      title = "<div class=\"stacked-rows-icon bottom-active\"><div class=\"rect top\"></div><div class=\"rect bottom\"></div></div>BOTTOM ROW ARP",
-      value = state.arpBottomEnabled and "BOTTOM ARP: ON" or "BOTTOM ARP: OFF",
-      subtext = arpeggiator.getArpRowTargetSubtext(),
-      targetId = "arp-bottom-toggle",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
