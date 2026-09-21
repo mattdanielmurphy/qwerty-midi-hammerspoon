@@ -4,7 +4,7 @@ const hud = await Bun.file("src/hud.lua").text();
 const web = await Bun.file("src/web/index.html").text();
 
 test("only the authoritative HUD render updates track-button selection state", () => {
-  const fastUpdate = hud.match(/local function fastUpdateArp\(\)([\s\S]*?)\nend\n\nreturn \{/);
+  const fastUpdate = hud.match(/local function fastUpdateArpNow\(\)([\s\S]*?)\nend\n\nlocal function queueArpHudUpdate/);
 
   expect(fastUpdate).not.toBeNull();
   expect(fastUpdate[1]).not.toContain("trkStates");

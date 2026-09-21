@@ -979,6 +979,7 @@ end
 
 local lastFullRenderTime = 0
 local renderScheduled = false
+local arpHudUpdateScheduled = false
 
 updateWebviewHud = function(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
@@ -1535,7 +1536,7 @@ local function reloadMidiWebview()
   return createMidiWebview()
 end
 
-local function fastUpdateArp()
+local function fastUpdateArpNow()
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local activeCodes = {}
@@ -1577,9 +1578,18 @@ local function fastUpdateArp()
   safeEvaluateJS(js)
 end
 
+local function queueArpHudUpdate()
+  if arpHudUpdateScheduled then return end
+  arpHudUpdateScheduled = true
+  hs.timer.doAfter(0, function()
+    arpHudUpdateScheduled = false
+    fastUpdateArpNow()
+  end)
+end
+
 return {
   setControlsModule = setControlsModule,
-  fastUpdateArp = fastUpdateArp,
+  fastUpdateArp = queueArpHudUpdate,
   updateSingleKeyState = updateSingleKeyState,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,

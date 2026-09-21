@@ -456,6 +456,7 @@ local function newArpEngine()
     currentPitch = nil,
     beatPosition = 0,
     activeGateTimers = {},
+    gateGeneration = 0,
     latchClearedForNewChord = false,
   }
 end
@@ -864,24 +865,27 @@ local function arpTickTrack(trk)
       local gateDuration = trackStepSec * gateRatio
       local pitchToRelease = nextPitch
       local releaseCh = ch
+      trk.activeGateTimers = trk.activeGateTimers or {}
+      local priorGate = trk.activeGateTimers[pitchToRelease]
+      if priorGate and priorGate.timer then priorGate.timer:stop() end
+      local gateGeneration = (trk.gateGeneration or 0) + 1
+      trk.gateGeneration = gateGeneration
       local timer = hs.timer.doAfter(gateDuration, function()
         local ok, e = pcall(function()
-          midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-          if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
-            trk.currentPitch = nil
+          local activeGate = trk.activeGateTimers and trk.activeGateTimers[pitchToRelease]
+          if activeGate and activeGate.generation == gateGeneration then
+            midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+            if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
+              trk.currentPitch = nil
+            end
+            trk.arpIsPlaying = false
+            trk.activeGateTimers[pitchToRelease] = nil
           end
-          trk.arpIsPlaying = false
-          if trk.activeGateTimers then trk.activeGateTimers[pitchToRelease] = nil end
           if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
         end)
         if not ok then print("[Arp Gate Error] " .. tostring(e)) end
       end)
-      trk.activeGateTimers = trk.activeGateTimers or {}
-      if trk.activeGateTimers[pitchToRelease] then
-        if trk.activeGateTimers[pitchToRelease].timer then trk.activeGateTimers[pitchToRelease].timer:stop() end
-        trk.activeGateTimers[pitchToRelease] = nil
-      end
-      trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+      trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh, generation = gateGeneration }
       if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     else
       trk.arpIsPlaying = false
@@ -2014,7 +2018,6 @@ return {
   stopAllLoops = stopAllLoops,
   setArpPowerImplicit = setArpPowerImplicit
 }
-
 
 end
 
@@ -4540,6 +4543,7 @@ end
 
 local lastFullRenderTime = 0
 local renderScheduled = false
+local arpHudUpdateScheduled = false
 
 updateWebviewHud = function(spotlightInfo, activeArpPitch, forceImmediate)
   if spotlightInfo ~= nil then pendingSpotlightInfo = spotlightInfo end
@@ -5096,7 +5100,7 @@ local function reloadMidiWebview()
   return createMidiWebview()
 end
 
-local function fastUpdateArp()
+local function fastUpdateArpNow()
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
 
   local activeCodes = {}
@@ -5138,9 +5142,18 @@ local function fastUpdateArp()
   safeEvaluateJS(js)
 end
 
+local function queueArpHudUpdate()
+  if arpHudUpdateScheduled then return end
+  arpHudUpdateScheduled = true
+  hs.timer.doAfter(0, function()
+    arpHudUpdateScheduled = false
+    fastUpdateArpNow()
+  end)
+end
+
 return {
   setControlsModule = setControlsModule,
-  fastUpdateArp = fastUpdateArp,
+  fastUpdateArp = queueArpHudUpdate,
   updateSingleKeyState = updateSingleKeyState,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
