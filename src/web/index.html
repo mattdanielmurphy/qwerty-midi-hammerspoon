@@ -1044,6 +1044,9 @@
     pointer-events: none;
   }
 
+  /* Playback telemetry is intentionally disabled until its signal is reliable. */
+  .trk-waveform { display: none !important; }
+
   /* Pressed the key that triggered this latch chord — very faint dot */
   .key-pad.latched-key .latch-dot {
     opacity: 0.18;
@@ -5098,7 +5101,7 @@
     }
   };
 
-window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
+window.updateArpPitches = function(activeCodes, heldCodes) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
     el.classList.remove('arp-playing');
     if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
@@ -5120,51 +5123,11 @@ window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates) {
       }
     });
   }
-  if (trkAudioStates && typeof trkAudioStates === 'object') {
-    const trkCodeMap = { 1: 18, 2: 19, 3: 20, 4: 21 };
-    for (let id = 1; id <= 4; id++) {
-      const st = trkAudioStates[id];
-      const el = document.getElementById('key-' + trkCodeMap[id]);
-      if (el) {
-        if (typeof st === 'boolean') {
-          el.classList.toggle('trk-audio-active', st);
-        } else if (st && typeof st === 'object') {
-          if (st.selected !== undefined) el.classList.toggle('trk-selected', !!st.selected);
-          if (st.muted !== undefined) {
-            el.classList.toggle('trk-muted', !!st.muted);
-            const m = el.querySelector('.trk-badge-m');
-            if (m) m.classList.toggle('active', !!st.muted);
-          }
-          if (st.soloed !== undefined) {
-            el.classList.toggle('trk-soloed', !!st.soloed);
-            const s = el.querySelector('.trk-badge-s');
-            if (s) s.classList.toggle('active', !!st.soloed);
-          }
-          if (st.activeAudio !== undefined) el.classList.toggle('trk-audio-active', !!st.activeAudio);
-          if (st.humanActive !== undefined) el.classList.toggle('trk-human-active', !!st.humanActive);
-          if (st.arpStep !== undefined) el.classList.toggle('trk-arp-step', !!st.arpStep);
-          if (st.sustainMode !== undefined) {
-            const susTag = el.querySelector('.trk-tag-sus');
-            if (susTag) {
-              const isSus = st.sustainMode !== 'off';
-              susTag.classList.toggle('active', isSus);
-              susTag.classList.toggle('classic', st.sustainMode === 'classic');
-              susTag.textContent = st.sustainMode === 'classic' ? 'ALL' : 'SUS';
-            }
-          }
-          if (st.chordMode !== undefined) {
-            const chdTag = el.querySelector('.trk-tag-chd');
-            if (chdTag) {
-              chdTag.classList.toggle('active', !!st.chordMode);
-            }
-          }
-        }
-      }
-    }
-  }
 };
 
 window.updateKeyState = function(code, pressed, latched) {
+  const isTrackButton = code >= 18 && code <= 21;
+  if (isTrackButton) return;
   const el = document.getElementById('key-' + code);
   if (el) {
     if (pressed) el.dataset.physicallyPressed = 'true';

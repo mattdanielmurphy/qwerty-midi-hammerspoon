@@ -1,4 +1,5 @@
 ## 2026-09-21
+- **Track Button State Authority & Waveform Disable:** Removed the fast arpeggiator IPC path as a second writer of track-button state. Selection now comes solely from the authoritative HUD payload; generic keypress IPC ignores track buttons, and the unreliable playback waveform is disabled. Added a Bun regression test. Link: [2026-09-21_14-20_track-button-state-authority.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-09-21_14-20_track-button-state-authority.md)
 - **Per-Track Top/Bottom ARP Controls & Correct Track Audio Telemetry:** Routed the Top/Bottom ARP UI toggles through the selected track’s independent arpeggiator engine instead of stale row-level flags. Replaced waveform activation based on cached `activeNotesCount` with live pressed, sustained, and arp-gate ownership checks so note presses cannot illuminate an unrelated track.
 
 ## 2026-09-17
@@ -111,5 +112,4 @@
 ## 2026-09-15
 - **KORG nanoKEY Studio Forbidden Button Sniffer & Native Mode SysEx:** Disassembled KORG Gadget to uncover native SysEx protocol (`F0 42 40 00 01 36 ...`), built interactive Swift packet sniffer (`bin/sniff`) capturing BLE-MIDI GATT frames, and mapped Octave Up/Down and Scene buttons. Link: [2026-09-15_21-00_nanokey-studio-forbidden-button-sniffer-and-native-sysex.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-09-15_21-00_nanokey-studio-forbidden-button-sniffer-and-native-sysex.md)
 - **nanoKEY Studio CC Pad Chords & Real-Time Input Quantization:** Translated CC-mapped trigger pads (CC 43, 48, 50, 49; CC 36, 38, 42, 46) into full diatonic chords (`harmony.getDiatonicPadChord`) with dynamic HUD chord labels. Built microsecond-precision input quantizer (`packages/music-engine/quantizer.lua`) with musical divisions (`1/1` to `1/32`), staccato gate safety, HUD header badge selector, and Settings panel integration. Link: [2026-09-15_21-40_nanokey-cc-pad-chords-and-input-quantization.md](file:///Users/matt/projects/qwerty-midi-hammerspoon/agent-logs/2026-09-15_21-40_nanokey-cc-pad-chords-and-input-quantization.md)
-
 
