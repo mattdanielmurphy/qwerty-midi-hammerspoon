@@ -1178,6 +1178,35 @@ local function applyBpmChange()
   end
 end
 
+-- Tracks own their timing.  The header and rate keys control the focused track
+-- so a rate change immediately replaces that track's running clock interval.
+local function setTrackArpRate(rateIdx, targetTrackIdx)
+  local normalizedRateIdx = math.max(1, math.min(#ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  state.arpRateIdx = normalizedRateIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    if state.arpTimer then applyBpmChange() end
+    return nil, normalizedRateIdx
+  end
+
+  trk.arpRateIdx = normalizedRateIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpRateIdx", normalizedRateIdx)
+  end
+  if trk.timer then
+    trk.timer:stop()
+    local rateFactor = ARP_RATES[normalizedRateIdx] and ARP_RATES[normalizedRateIdx].factor or 0.25
+    local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+    trk.timer = hs.timer.doEvery(intervalSeconds, function()
+      arpTickTrack(trk)
+    end)
+  end
+
+  return trk, normalizedRateIdx
+end
+
 local function applyGatePercentChange()
   if state.arpTimer then
     local gateRatio = (state.arpGatePercent or 80.0) / 100.0
@@ -1999,6 +2028,7 @@ return {
   arpRemoveNote = arpRemoveNote,
   formatBpm = formatBpm,
   applyBpmChange = applyBpmChange,
+  setTrackArpRate = setTrackArpRate,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,
@@ -3832,44 +3862,44 @@ local PROPOSED_LAYOUT_MAP = {
 
   -- NUMBER ROW CONTROLS:
   [18] = { -- 1
-    base            = { name = "Trk 1: Bass", class = "ctrl-track",   action = "trkSelect1" },
-    shift           = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
-    opt             = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
-    shift_opt       = { name = "Trk 1 Lock",  class = "ctrl-lock",    action = "trkLock1" },
-    ctrl            = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
-    shift_ctrl      = { name = "Trk 1 Clear", class = "ctrl-mute",    action = "trkClear1" },
-    ctrl_opt        = { name = "Trk 1 Focus", class = "ctrl-track",   action = "trkFocus1" },
-    ctrl_opt_shift  = { name = "Trk 1 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Bass",        class = "ctrl-track",   action = "trkSelect1" },
+    shift           = { name = "Mute 1",      class = "ctrl-mute",    action = "trkMute1" },
+    opt             = { name = "Solo 1",      class = "ctrl-solo",    action = "trkSolo1" },
+    shift_opt       = { name = "Lock 1",      class = "ctrl-lock",    action = "trkLock1" },
+    ctrl            = { name = "Arm 1",       class = "ctrl-track",   action = "trkRec1" },
+    shift_ctrl      = { name = "Clear 1",     class = "ctrl-mute",    action = "trkClear1" },
+    ctrl_opt        = { name = "Focus 1",     class = "ctrl-track",   action = "trkFocus1" },
+    ctrl_opt_shift  = { name = "Panic 1",     class = "ctrl-panic",   action = "panic" },
   },
   [19] = { -- 2
-    base            = { name = "Trk 2: Chords", class = "ctrl-track", action = "trkSelect2" },
-    shift           = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
-    opt             = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
-    shift_opt       = { name = "Trk 2 Lock",  class = "ctrl-lock",    action = "trkLock2" },
-    ctrl            = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
-    shift_ctrl      = { name = "Trk 2 Clear", class = "ctrl-mute",    action = "trkClear2" },
-    ctrl_opt        = { name = "Trk 2 Focus", class = "ctrl-track",   action = "trkFocus2" },
-    ctrl_opt_shift  = { name = "Trk 2 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Chords",      class = "ctrl-track",   action = "trkSelect2" },
+    shift           = { name = "Mute 2",      class = "ctrl-mute",    action = "trkMute2" },
+    opt             = { name = "Solo 2",      class = "ctrl-solo",    action = "trkSolo2" },
+    shift_opt       = { name = "Lock 2",      class = "ctrl-lock",    action = "trkLock2" },
+    ctrl            = { name = "Arm 2",       class = "ctrl-track",   action = "trkRec2" },
+    shift_ctrl      = { name = "Clear 2",     class = "ctrl-mute",    action = "trkClear2" },
+    ctrl_opt        = { name = "Focus 2",     class = "ctrl-track",   action = "trkFocus2" },
+    ctrl_opt_shift  = { name = "Panic 2",     class = "ctrl-panic",   action = "panic" },
   },
   [20] = { -- 3
-    base            = { name = "Trk 3: Lead", class = "ctrl-track",   action = "trkSelect3" },
-    shift           = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
-    opt             = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
-    shift_opt       = { name = "Trk 3 Lock",  class = "ctrl-lock",    action = "trkLock3" },
-    ctrl            = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
-    shift_ctrl      = { name = "Trk 3 Clear", class = "ctrl-mute",    action = "trkClear3" },
-    ctrl_opt        = { name = "Trk 3 Focus", class = "ctrl-track",   action = "trkFocus3" },
-    ctrl_opt_shift  = { name = "Trk 3 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Lead",        class = "ctrl-track",   action = "trkSelect3" },
+    shift           = { name = "Mute 3",      class = "ctrl-mute",    action = "trkMute3" },
+    opt             = { name = "Solo 3",      class = "ctrl-solo",    action = "trkSolo3" },
+    shift_opt       = { name = "Lock 3",      class = "ctrl-lock",    action = "trkLock3" },
+    ctrl            = { name = "Arm 3",       class = "ctrl-track",   action = "trkRec3" },
+    shift_ctrl      = { name = "Clear 3",     class = "ctrl-mute",    action = "trkClear3" },
+    ctrl_opt        = { name = "Focus 3",     class = "ctrl-track",   action = "trkFocus3" },
+    ctrl_opt_shift  = { name = "Panic 3",     class = "ctrl-panic",   action = "panic" },
   },
   [21] = { -- 4
-    base            = { name = "Trk 4: Arp",  class = "ctrl-track",   action = "trkSelect4" },
-    shift           = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
-    opt             = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
-    shift_opt       = { name = "Trk 4 Lock",  class = "ctrl-lock",    action = "trkLock4" },
-    ctrl            = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
-    shift_ctrl      = { name = "Trk 4 Clear", class = "ctrl-mute",    action = "trkClear4" },
-    ctrl_opt        = { name = "Trk 4 Focus", class = "ctrl-track",   action = "trkFocus4" },
-    ctrl_opt_shift  = { name = "Trk 4 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Arp",         class = "ctrl-track",   action = "trkSelect4" },
+    shift           = { name = "Mute 4",      class = "ctrl-mute",    action = "trkMute4" },
+    opt             = { name = "Solo 4",      class = "ctrl-solo",    action = "trkSolo4" },
+    shift_opt       = { name = "Lock 4",      class = "ctrl-lock",    action = "trkLock4" },
+    ctrl            = { name = "Arm 4",       class = "ctrl-track",   action = "trkRec4" },
+    shift_ctrl      = { name = "Clear 4",     class = "ctrl-mute",    action = "trkClear4" },
+    ctrl_opt        = { name = "Focus 4",     class = "ctrl-track",   action = "trkFocus4" },
+    ctrl_opt_shift  = { name = "Panic 4",     class = "ctrl-panic",   action = "panic" },
   },
   [23] = { -- 5
     base            = { name = "Dir +",       class = "ctrl-arpdir",  action = "arpDirUp" },
@@ -4477,7 +4507,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeName = modeName,
     arpLatchActive = state.arpLatchActive,
     arpDirectionIdx = state.arpDirectionIdx,
-    arpRateIdx = state.arpRateIdx,
+    arpRateIdx = (activeTrk and activeTrk.arpRateIdx) or state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
     inputQuantizeMode = state.inputQuantizeMode or "Off",
     padChords = {
@@ -4707,12 +4737,11 @@ local function createMidiWebview()
       }
       updateWebviewHud(spot)
     elseif body.type == "setArpRate" and body.rateIdx ~= nil then
-      state.arpRateIdx = math.max(1, math.min(#ARP_RATES, body.rateIdx))
-      arpeggiator.applyBpmChange()
+      local _, rateIdx = arpeggiator.setTrackArpRate(body.rateIdx, state.activeTrack or 1)
       local spot = {
         title = "ARP RATE",
-        value = ARP_RATES[state.arpRateIdx].label,
-        subtext = "Note Division",
+        value = ARP_RATES[rateIdx].label,
+        subtext = "Track " .. (state.activeTrack or 1) .. " Note Division",
         targetId = "arp-rate-select",
         color = "#d4a359"
       }
@@ -5988,69 +6017,83 @@ local HTML_UI_CONTENT = [[
     --active-track-rgb: var(--bottom-track-rgb, 0, 229, 255);
   }
 
-  /* Track buttons use reserved zones: role, number, M/S controls, then status. */
+  /* Track selector cards retain their identity across every modifier layer. */
   #key-18 { --trk-color: #00e5ff; --trk-rgb: 0, 229, 255; }
   #key-19 { --trk-color: #ff9100; --trk-rgb: 255, 145, 0; }
   #key-20 { --trk-color: #00e676; --trk-rgb: 0, 230, 118; }
   #key-21 { --trk-color: #d500f9; --trk-rgb: 213, 0, 249; }
 
-  .key-pad.ctrl-track {
+  .key-pad.track-card {
     border-color: rgba(var(--trk-rgb, 255, 255, 255), 0.35);
     position: relative;
     display: block;
   }
-  .key-pad.ctrl-track .key-code {
+  .key-pad.track-card .key-code {
     color: var(--trk-color, #e0e0e0);
     position: absolute;
-    top: 3px;
-    left: 0;
-    right: 0;
-    font-size: 18px;
-    line-height: 18px;
+    top: 4px;
+    left: 5px;
+    font-size: 10px;
+    line-height: 10px;
+    text-align: left;
+  }
+  .key-pad.track-card .key-note {
+    display: block;
+    position: absolute;
+    top: 18px;
+    left: 3px;
+    right: 3px;
+    margin: 0;
+    color: #d8d8d8;
+    font-size: 7.5px;
+    font-weight: 800;
+    line-height: 9px;
+    letter-spacing: 0.45px;
+    overflow: hidden;
     text-align: center;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
   }
-  .key-pad.ctrl-track .key-note {
-    display: none;
-  }
-  .key-pad.ctrl-track .key-row-icon {
+  .key-pad.track-card .key-row-icon {
     display: none !important;
   }
   .trk-role {
     position: absolute;
     top: 4px;
-    left: 4px;
-    min-width: 10px;
+    right: 4px;
+    left: auto;
+    min-width: 20px;
     height: 10px;
-    padding: 0 1px;
-    border: 1px solid rgba(var(--trk-rgb), 0.55);
-    border-radius: 2px;
+    padding: 0;
+    border: 0;
     color: var(--trk-color);
-    background: rgba(var(--trk-rgb), 0.12);
-    font-size: 8px;
+    background: transparent;
+    font-size: 6.5px;
     font-weight: 800;
     line-height: 10px;
     text-align: center;
-    text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.7);
+    letter-spacing: 0.45px;
+    text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.5);
     pointer-events: none;
   }
-  .key-pad.ctrl-track .stacked-rows-icon.top-active .rect.top {
+  .key-pad.track-card .stacked-rows-icon.top-active .rect.top {
     background: var(--trk-color, #d4a359);
     border-color: var(--trk-color, #d4a359);
     box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
-  .key-pad.ctrl-track .stacked-rows-icon.bottom-active .rect.bottom {
+  .key-pad.track-card .stacked-rows-icon.bottom-active .rect.bottom {
     background: var(--trk-color, #d4a359);
     border-color: var(--trk-color, #d4a359);
     box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
 
   /* Selected Track: Active track for its row */
-  .key-pad.ctrl-track.trk-selected {
+  .key-pad.track-card.trk-selected {
     border-color: var(--trk-color) !important;
     background: rgba(var(--trk-rgb), 0.22) !important;
     box-shadow: 0 0 10px rgba(var(--trk-rgb), 0.55), inset 0 0 6px rgba(var(--trk-rgb), 0.25) !important;
   }
-  .key-pad.ctrl-track.trk-selected .key-note {
+  .key-pad.track-card.trk-selected .key-note {
     color: #ffffff !important;
     text-shadow: 0 0 6px var(--trk-color) !important;
     font-weight: 700 !important;
@@ -6099,21 +6142,21 @@ local HTML_UI_CONTENT = [[
   }
 
   /* Muted and Soloed Track Key Styling */
-  .key-pad.ctrl-track.trk-muted:not(.trk-selected) {
+  .key-pad.track-card.trk-muted:not(.trk-selected) {
     border-color: rgba(var(--trk-rgb), 0.18);
   }
-  .key-pad.ctrl-track.trk-soloed {
+  .key-pad.track-card.trk-soloed {
     box-shadow: 0 0 8px rgba(255, 214, 10, 0.4);
   }
 
   /* Human Note Press: Tactile Pad Surface Glow (Subtle Invariant) */
-  .key-pad.ctrl-track.trk-human-active {
+  .key-pad.track-card.trk-human-active {
     background: rgba(var(--trk-rgb), 0.38) !important;
     box-shadow: inset 0 0 10px rgba(var(--trk-rgb), 0.7), 0 0 6px rgba(var(--trk-rgb), 0.4) !important;
   }
 
   /* Arpeggiator Stepping: Subtle Rhythmic Tempo Flash (Subtle Invariant) */
-  .key-pad.ctrl-track.trk-arp-step {
+  .key-pad.track-card.trk-arp-step {
     border-color: #ffffff !important;
     box-shadow: 0 0 10px var(--trk-color, #00e5ff) !important;
   }
@@ -6158,6 +6201,25 @@ local HTML_UI_CONTENT = [[
     0% { height: 2px; }
     50% { height: 9px; }
     100% { height: 4px; }
+  }
+
+  /* K, L, and ; are track actions, not track cards: their labels stay visible. */
+  .key-pad.ctrl-track:not(.track-card) {
+    border-color: rgba(105, 190, 215, 0.5);
+    background: rgba(35, 65, 74, 0.3);
+  }
+  .key-pad.ctrl-track:not(.track-card) .key-note {
+    color: #8ed7ec;
+    font-weight: 700;
+  }
+  .key-pad.track-card.ctrl-mute .key-note {
+    color: #ff9da3;
+  }
+  .key-pad.track-card.ctrl-solo .key-note {
+    color: #ffe174;
+  }
+  .key-pad.track-card.ctrl-lock .key-note {
+    color: #d8c280;
   }
 
   .key-pad.ctrl-lock { border-color: rgba(255, 180, 50, 0.55); }
@@ -8188,7 +8250,8 @@ local HTML_UI_CONTENT = [[
             l[rowName].forEach(k => {
               const pad = document.createElement('div');
               pad.id = 'key-' + k.code + '-shift';
-              pad.className = 'key-pad shift-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
+              const isTrackCard = k.code >= 18 && k.code <= 21;
+              pad.className = 'key-pad shift-pad ' + (k.isControl ? 'control-pad' : '') + (isTrackCard ? ' track-card' : '') + (k.isDummy ? ' dummy-pad' : '');
               if (k.width) pad.style.width = k.width + 'px';
               pad.setAttribute('data-is-shift', 'true');
               pad.setAttribute('draggable', k.isDummy ? 'false' : 'true');
@@ -8218,7 +8281,7 @@ local HTML_UI_CONTENT = [[
                 const role = TRACK_ROLES[trkNum];
                 const roleBadge = document.createElement('span');
                 roleBadge.className = 'trk-role';
-                roleBadge.textContent = role.letter;
+                roleBadge.textContent = role.name.toUpperCase();
                 roleBadge.title = role.name;
                 pad.appendChild(roleBadge);
                 const msBadges = document.createElement('div');
@@ -8277,7 +8340,8 @@ local HTML_UI_CONTENT = [[
           l[rowName].forEach(k => {
             const pad = document.createElement('div');
             pad.id = 'key-' + k.code;
-            pad.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.extraClass ? k.extraClass + ' ' : '') + (k.isDummy ? ' dummy-pad' : '');
+            const isTrackCard = k.code >= 18 && k.code <= 21;
+            pad.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.extraClass ? k.extraClass + ' ' : '') + (k.isDummy ? ' dummy-pad' : '');
             if (k.width) {
               pad.style.width = k.width + 'px';
             }
@@ -8312,7 +8376,7 @@ local HTML_UI_CONTENT = [[
               const role = TRACK_ROLES[trkNum];
               const roleBadge = document.createElement('span');
               roleBadge.className = 'trk-role';
-              roleBadge.textContent = role.letter;
+              roleBadge.textContent = role.name.toUpperCase();
               roleBadge.title = role.name;
               pad.appendChild(roleBadge);
               const msBadges = document.createElement('div');
@@ -10198,8 +10262,9 @@ local HTML_UI_CONTENT = [[
           const el = document.getElementById('key-' + code);
           if (el) {
             const numCode = parseInt(code, 10);
-            const isTrkBtn = (numCode >= 18 && numCode <= 21);
-            if (isTrkBtn) {
+            const isTrackCard = numCode >= 18 && numCode <= 21;
+            const isTrkBtn = isTrackCard;
+            if (isTrackCard) {
               k.sustainActive = false;
             }
 
@@ -10236,7 +10301,7 @@ local HTML_UI_CONTENT = [[
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               }
             }
-            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
+            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.typeClass || '');
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
                 ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-soloed', 'trk-audio-active', 'trk-human-active', 'trk-arp-step'].includes(c)
@@ -11916,7 +11981,7 @@ local state = {
       id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -11924,7 +11989,7 @@ local state = {
       id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -11932,7 +11997,7 @@ local state = {
       id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -11940,7 +12005,7 @@ local state = {
       id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = 5, arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -12697,6 +12762,21 @@ local state = config.state
 local SCALES = config.SCALES
 local NOTE_NAMES = config.NOTE_NAMES
 
+local function getActiveArpRateIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpRateIdx) or state.arpRateIdx or 5
+end
+
+local function setActiveArpRate(rateIdx)
+  if arpeggiator.setTrackArpRate then
+    return arpeggiator.setTrackArpRate(rateIdx, state.activeTrack or 1)
+  end
+
+  state.arpRateIdx = math.max(1, math.min(#state.ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  arpeggiator.applyBpmChange()
+  return nil, state.arpRateIdx
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
 
 -- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
@@ -12772,7 +12852,6 @@ local function applyStateSnapshot(snap)
 
   -- Capture current values before overwriting so we can skip no-op arp restarts
   local prevBpm = state.arpBpm
-  local prevRateIdx = state.arpRateIdx
   local prevGatePercent = state.arpGatePercent
 
   state.currentRoot = snap.currentRoot
@@ -12786,7 +12865,7 @@ local function applyStateSnapshot(snap)
   state.arpEnabled = snap.arpEnabled
   state.arpLatchActive = snap.arpLatchActive
   state.arpDirectionIdx = snap.arpDirectionIdx
-  state.arpRateIdx = snap.arpRateIdx
+  setActiveArpRate(snap.arpRateIdx)
   state.arpGatePercent = snap.arpGatePercent
   state.arpBpm = snap.arpBpm
   state.arpTopEnabled = snap.arpTopEnabled
@@ -12798,7 +12877,7 @@ local function applyStateSnapshot(snap)
   if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
 
   arpeggiator.updateLatchedArpNotes()
-  if snap.arpBpm ~= prevBpm or snap.arpRateIdx ~= prevRateIdx then
+  if snap.arpBpm ~= prevBpm then
     arpeggiator.applyBpmChange()
   end
   if snap.arpGatePercent ~= prevGatePercent then
@@ -13037,6 +13116,7 @@ local function selectTrack(id)
   local trk = state.tracks[targetId]
   state.arpEnabled = trk.arpEnabled == true
   state.arpLatchActive = trk.arpLatchActive == true
+  state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
   state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
   state.chordModeActive = trk.chordModeActive == true
   if trk.chordIdx then state.chordIdx = trk.chordIdx end
@@ -13121,8 +13201,7 @@ local function executeControlAction(act, code)
     return
   elseif string.match(act, "^setArpRate_(%d+)$") then
     local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
-    state.arpRateIdx = rate
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(rate)
     hud.updateWebviewHud()
     return
   elseif string.match(act, "^setArpDir_(%d+)$") then
@@ -13467,9 +13546,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "randomRhythm" then
-    state.arpRateIdx = math.random(1, #state.ARP_RATES)
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
     state.arpGatePercent = math.random(25, 120)
-    arpeggiator.applyBpmChange()
     arpeggiator.applyGatePercentChange()
     local spot = {
       title = "RANDOM RHYTHM",
@@ -13483,10 +13561,9 @@ local function executeControlAction(act, code)
     state.currentRoot = math.random(0, 11)
     state.currentScaleIdx = math.random(1, #SCALES)
     state.arpDirectionIdx = math.random(1, #state.ARP_DIRECTIONS)
-    state.arpRateIdx = math.random(1, #state.ARP_RATES)
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
     state.arpGatePercent = math.random(25, 120)
     arpeggiator.updateLatchedArpNotes()
-    arpeggiator.applyBpmChange()
     arpeggiator.applyGatePercentChange()
     local rootName = NOTE_NAMES[state.currentRoot + 1]
     local scaleInfo = SCALES[state.currentScaleIdx]
@@ -13818,8 +13895,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateDown" then
-    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(math.max(1, getActiveArpRateIdx() - 1))
     local spot = {
       title = "ARP RATE",
       value = state.ARP_RATES[state.arpRateIdx].label,
@@ -13829,8 +13905,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateUp" then
-    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(math.min(#state.ARP_RATES, getActiveArpRateIdx() + 1))
     local spot = {
       title = "ARP RATE",
       value = state.ARP_RATES[state.arpRateIdx].label,
@@ -14192,28 +14267,22 @@ local function executeControlAction(act, code)
 
   -- Arp Rate Presets (Key 6)
   elseif act == "arpRateTriplet" then
-    state.arpRateIdx = 15 -- 1/8T
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(15) -- 1/8T
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8T (Triplet)", subtext = "Triplet Feel", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRateStraight" then
-    state.arpRateIdx = 6 -- 1/8
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(6) -- 1/8
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8 (Straight)", subtext = "Straight Feel", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate16th" then
-    state.arpRateIdx = 7 -- 1/16
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(7) -- 1/16
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/16th", subtext = "Sixteenth Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate8th" then
-    state.arpRateIdx = 6 -- 1/8
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(6) -- 1/8
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8th", subtext = "Eighth Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate32nd" then
-    state.arpRateIdx = 8 -- 1/32
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(8) -- 1/32
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/32nd", subtext = "Thirty-Second Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate4th" then
-    state.arpRateIdx = 5 -- 1/4
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(5) -- 1/4
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/4th", subtext = "Quarter Notes", targetId = "key-22", color = "#64d8f0" })
 
   -- Arp Gate Presets (Key 7)

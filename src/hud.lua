@@ -268,44 +268,44 @@ local PROPOSED_LAYOUT_MAP = {
 
   -- NUMBER ROW CONTROLS:
   [18] = { -- 1
-    base            = { name = "Trk 1: Bass", class = "ctrl-track",   action = "trkSelect1" },
-    shift           = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
-    opt             = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
-    shift_opt       = { name = "Trk 1 Lock",  class = "ctrl-lock",    action = "trkLock1" },
-    ctrl            = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
-    shift_ctrl      = { name = "Trk 1 Clear", class = "ctrl-mute",    action = "trkClear1" },
-    ctrl_opt        = { name = "Trk 1 Focus", class = "ctrl-track",   action = "trkFocus1" },
-    ctrl_opt_shift  = { name = "Trk 1 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Bass",        class = "ctrl-track",   action = "trkSelect1" },
+    shift           = { name = "Mute 1",      class = "ctrl-mute",    action = "trkMute1" },
+    opt             = { name = "Solo 1",      class = "ctrl-solo",    action = "trkSolo1" },
+    shift_opt       = { name = "Lock 1",      class = "ctrl-lock",    action = "trkLock1" },
+    ctrl            = { name = "Arm 1",       class = "ctrl-track",   action = "trkRec1" },
+    shift_ctrl      = { name = "Clear 1",     class = "ctrl-mute",    action = "trkClear1" },
+    ctrl_opt        = { name = "Focus 1",     class = "ctrl-track",   action = "trkFocus1" },
+    ctrl_opt_shift  = { name = "Panic 1",     class = "ctrl-panic",   action = "panic" },
   },
   [19] = { -- 2
-    base            = { name = "Trk 2: Chords", class = "ctrl-track", action = "trkSelect2" },
-    shift           = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
-    opt             = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
-    shift_opt       = { name = "Trk 2 Lock",  class = "ctrl-lock",    action = "trkLock2" },
-    ctrl            = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
-    shift_ctrl      = { name = "Trk 2 Clear", class = "ctrl-mute",    action = "trkClear2" },
-    ctrl_opt        = { name = "Trk 2 Focus", class = "ctrl-track",   action = "trkFocus2" },
-    ctrl_opt_shift  = { name = "Trk 2 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Chords",      class = "ctrl-track",   action = "trkSelect2" },
+    shift           = { name = "Mute 2",      class = "ctrl-mute",    action = "trkMute2" },
+    opt             = { name = "Solo 2",      class = "ctrl-solo",    action = "trkSolo2" },
+    shift_opt       = { name = "Lock 2",      class = "ctrl-lock",    action = "trkLock2" },
+    ctrl            = { name = "Arm 2",       class = "ctrl-track",   action = "trkRec2" },
+    shift_ctrl      = { name = "Clear 2",     class = "ctrl-mute",    action = "trkClear2" },
+    ctrl_opt        = { name = "Focus 2",     class = "ctrl-track",   action = "trkFocus2" },
+    ctrl_opt_shift  = { name = "Panic 2",     class = "ctrl-panic",   action = "panic" },
   },
   [20] = { -- 3
-    base            = { name = "Trk 3: Lead", class = "ctrl-track",   action = "trkSelect3" },
-    shift           = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
-    opt             = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
-    shift_opt       = { name = "Trk 3 Lock",  class = "ctrl-lock",    action = "trkLock3" },
-    ctrl            = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
-    shift_ctrl      = { name = "Trk 3 Clear", class = "ctrl-mute",    action = "trkClear3" },
-    ctrl_opt        = { name = "Trk 3 Focus", class = "ctrl-track",   action = "trkFocus3" },
-    ctrl_opt_shift  = { name = "Trk 3 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Lead",        class = "ctrl-track",   action = "trkSelect3" },
+    shift           = { name = "Mute 3",      class = "ctrl-mute",    action = "trkMute3" },
+    opt             = { name = "Solo 3",      class = "ctrl-solo",    action = "trkSolo3" },
+    shift_opt       = { name = "Lock 3",      class = "ctrl-lock",    action = "trkLock3" },
+    ctrl            = { name = "Arm 3",       class = "ctrl-track",   action = "trkRec3" },
+    shift_ctrl      = { name = "Clear 3",     class = "ctrl-mute",    action = "trkClear3" },
+    ctrl_opt        = { name = "Focus 3",     class = "ctrl-track",   action = "trkFocus3" },
+    ctrl_opt_shift  = { name = "Panic 3",     class = "ctrl-panic",   action = "panic" },
   },
   [21] = { -- 4
-    base            = { name = "Trk 4: Arp",  class = "ctrl-track",   action = "trkSelect4" },
-    shift           = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
-    opt             = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
-    shift_opt       = { name = "Trk 4 Lock",  class = "ctrl-lock",    action = "trkLock4" },
-    ctrl            = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
-    shift_ctrl      = { name = "Trk 4 Clear", class = "ctrl-mute",    action = "trkClear4" },
-    ctrl_opt        = { name = "Trk 4 Focus", class = "ctrl-track",   action = "trkFocus4" },
-    ctrl_opt_shift  = { name = "Trk 4 Panic", class = "ctrl-panic",   action = "panic" },
+    base            = { name = "Arp",         class = "ctrl-track",   action = "trkSelect4" },
+    shift           = { name = "Mute 4",      class = "ctrl-mute",    action = "trkMute4" },
+    opt             = { name = "Solo 4",      class = "ctrl-solo",    action = "trkSolo4" },
+    shift_opt       = { name = "Lock 4",      class = "ctrl-lock",    action = "trkLock4" },
+    ctrl            = { name = "Arm 4",       class = "ctrl-track",   action = "trkRec4" },
+    shift_ctrl      = { name = "Clear 4",     class = "ctrl-mute",    action = "trkClear4" },
+    ctrl_opt        = { name = "Focus 4",     class = "ctrl-track",   action = "trkFocus4" },
+    ctrl_opt_shift  = { name = "Panic 4",     class = "ctrl-panic",   action = "panic" },
   },
   [23] = { -- 5
     base            = { name = "Dir +",       class = "ctrl-arpdir",  action = "arpDirUp" },
@@ -913,7 +913,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeName = modeName,
     arpLatchActive = state.arpLatchActive,
     arpDirectionIdx = state.arpDirectionIdx,
-    arpRateIdx = state.arpRateIdx,
+    arpRateIdx = (activeTrk and activeTrk.arpRateIdx) or state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
     inputQuantizeMode = state.inputQuantizeMode or "Off",
     padChords = {
@@ -1143,12 +1143,11 @@ local function createMidiWebview()
       }
       updateWebviewHud(spot)
     elseif body.type == "setArpRate" and body.rateIdx ~= nil then
-      state.arpRateIdx = math.max(1, math.min(#ARP_RATES, body.rateIdx))
-      arpeggiator.applyBpmChange()
+      local _, rateIdx = arpeggiator.setTrackArpRate(body.rateIdx, state.activeTrack or 1)
       local spot = {
         title = "ARP RATE",
-        value = ARP_RATES[state.arpRateIdx].label,
-        subtext = "Note Division",
+        value = ARP_RATES[rateIdx].label,
+        subtext = "Track " .. (state.activeTrack or 1) .. " Note Division",
         targetId = "arp-rate-select",
         color = "#d4a359"
       }

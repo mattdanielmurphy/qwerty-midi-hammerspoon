@@ -9,6 +9,21 @@ local state = config.state
 local SCALES = config.SCALES
 local NOTE_NAMES = config.NOTE_NAMES
 
+local function getActiveArpRateIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpRateIdx) or state.arpRateIdx or 5
+end
+
+local function setActiveArpRate(rateIdx)
+  if arpeggiator.setTrackArpRate then
+    return arpeggiator.setTrackArpRate(rateIdx, state.activeTrack or 1)
+  end
+
+  state.arpRateIdx = math.max(1, math.min(#state.ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  arpeggiator.applyBpmChange()
+  return nil, state.arpRateIdx
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
 
 -- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
@@ -84,7 +99,6 @@ local function applyStateSnapshot(snap)
 
   -- Capture current values before overwriting so we can skip no-op arp restarts
   local prevBpm = state.arpBpm
-  local prevRateIdx = state.arpRateIdx
   local prevGatePercent = state.arpGatePercent
 
   state.currentRoot = snap.currentRoot
@@ -98,7 +112,7 @@ local function applyStateSnapshot(snap)
   state.arpEnabled = snap.arpEnabled
   state.arpLatchActive = snap.arpLatchActive
   state.arpDirectionIdx = snap.arpDirectionIdx
-  state.arpRateIdx = snap.arpRateIdx
+  setActiveArpRate(snap.arpRateIdx)
   state.arpGatePercent = snap.arpGatePercent
   state.arpBpm = snap.arpBpm
   state.arpTopEnabled = snap.arpTopEnabled
@@ -110,7 +124,7 @@ local function applyStateSnapshot(snap)
   if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
 
   arpeggiator.updateLatchedArpNotes()
-  if snap.arpBpm ~= prevBpm or snap.arpRateIdx ~= prevRateIdx then
+  if snap.arpBpm ~= prevBpm then
     arpeggiator.applyBpmChange()
   end
   if snap.arpGatePercent ~= prevGatePercent then
@@ -349,6 +363,7 @@ local function selectTrack(id)
   local trk = state.tracks[targetId]
   state.arpEnabled = trk.arpEnabled == true
   state.arpLatchActive = trk.arpLatchActive == true
+  state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
   state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
   state.chordModeActive = trk.chordModeActive == true
   if trk.chordIdx then state.chordIdx = trk.chordIdx end
@@ -433,8 +448,7 @@ local function executeControlAction(act, code)
     return
   elseif string.match(act, "^setArpRate_(%d+)$") then
     local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
-    state.arpRateIdx = rate
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(rate)
     hud.updateWebviewHud()
     return
   elseif string.match(act, "^setArpDir_(%d+)$") then
@@ -779,9 +793,8 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "randomRhythm" then
-    state.arpRateIdx = math.random(1, #state.ARP_RATES)
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
     state.arpGatePercent = math.random(25, 120)
-    arpeggiator.applyBpmChange()
     arpeggiator.applyGatePercentChange()
     local spot = {
       title = "RANDOM RHYTHM",
@@ -795,10 +808,9 @@ local function executeControlAction(act, code)
     state.currentRoot = math.random(0, 11)
     state.currentScaleIdx = math.random(1, #SCALES)
     state.arpDirectionIdx = math.random(1, #state.ARP_DIRECTIONS)
-    state.arpRateIdx = math.random(1, #state.ARP_RATES)
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
     state.arpGatePercent = math.random(25, 120)
     arpeggiator.updateLatchedArpNotes()
-    arpeggiator.applyBpmChange()
     arpeggiator.applyGatePercentChange()
     local rootName = NOTE_NAMES[state.currentRoot + 1]
     local scaleInfo = SCALES[state.currentScaleIdx]
@@ -1130,8 +1142,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateDown" then
-    state.arpRateIdx = math.max(1, state.arpRateIdx - 1)
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(math.max(1, getActiveArpRateIdx() - 1))
     local spot = {
       title = "ARP RATE",
       value = state.ARP_RATES[state.arpRateIdx].label,
@@ -1141,8 +1152,7 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateUp" then
-    state.arpRateIdx = math.min(#state.ARP_RATES, state.arpRateIdx + 1)
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(math.min(#state.ARP_RATES, getActiveArpRateIdx() + 1))
     local spot = {
       title = "ARP RATE",
       value = state.ARP_RATES[state.arpRateIdx].label,
@@ -1504,28 +1514,22 @@ local function executeControlAction(act, code)
 
   -- Arp Rate Presets (Key 6)
   elseif act == "arpRateTriplet" then
-    state.arpRateIdx = 15 -- 1/8T
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(15) -- 1/8T
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8T (Triplet)", subtext = "Triplet Feel", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRateStraight" then
-    state.arpRateIdx = 6 -- 1/8
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(6) -- 1/8
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8 (Straight)", subtext = "Straight Feel", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate16th" then
-    state.arpRateIdx = 7 -- 1/16
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(7) -- 1/16
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/16th", subtext = "Sixteenth Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate8th" then
-    state.arpRateIdx = 6 -- 1/8
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(6) -- 1/8
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/8th", subtext = "Eighth Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate32nd" then
-    state.arpRateIdx = 8 -- 1/32
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(8) -- 1/32
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/32nd", subtext = "Thirty-Second Notes", targetId = "key-22", color = "#64d8f0" })
   elseif act == "arpRate4th" then
-    state.arpRateIdx = 5 -- 1/4
-    arpeggiator.applyBpmChange()
+    setActiveArpRate(5) -- 1/4
     hud.updateWebviewHud({ title = "ARP RATE", value = "1/4th", subtext = "Quarter Notes", targetId = "key-22", color = "#64d8f0" })
 
   -- Arp Gate Presets (Key 7)

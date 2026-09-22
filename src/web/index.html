@@ -745,69 +745,83 @@
     --active-track-rgb: var(--bottom-track-rgb, 0, 229, 255);
   }
 
-  /* Track buttons use reserved zones: role, number, M/S controls, then status. */
+  /* Track selector cards retain their identity across every modifier layer. */
   #key-18 { --trk-color: #00e5ff; --trk-rgb: 0, 229, 255; }
   #key-19 { --trk-color: #ff9100; --trk-rgb: 255, 145, 0; }
   #key-20 { --trk-color: #00e676; --trk-rgb: 0, 230, 118; }
   #key-21 { --trk-color: #d500f9; --trk-rgb: 213, 0, 249; }
 
-  .key-pad.ctrl-track {
+  .key-pad.track-card {
     border-color: rgba(var(--trk-rgb, 255, 255, 255), 0.35);
     position: relative;
     display: block;
   }
-  .key-pad.ctrl-track .key-code {
+  .key-pad.track-card .key-code {
     color: var(--trk-color, #e0e0e0);
     position: absolute;
-    top: 3px;
-    left: 0;
-    right: 0;
-    font-size: 18px;
-    line-height: 18px;
+    top: 4px;
+    left: 5px;
+    font-size: 10px;
+    line-height: 10px;
+    text-align: left;
+  }
+  .key-pad.track-card .key-note {
+    display: block;
+    position: absolute;
+    top: 18px;
+    left: 3px;
+    right: 3px;
+    margin: 0;
+    color: #d8d8d8;
+    font-size: 7.5px;
+    font-weight: 800;
+    line-height: 9px;
+    letter-spacing: 0.45px;
+    overflow: hidden;
     text-align: center;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
   }
-  .key-pad.ctrl-track .key-note {
-    display: none;
-  }
-  .key-pad.ctrl-track .key-row-icon {
+  .key-pad.track-card .key-row-icon {
     display: none !important;
   }
   .trk-role {
     position: absolute;
     top: 4px;
-    left: 4px;
-    min-width: 10px;
+    right: 4px;
+    left: auto;
+    min-width: 20px;
     height: 10px;
-    padding: 0 1px;
-    border: 1px solid rgba(var(--trk-rgb), 0.55);
-    border-radius: 2px;
+    padding: 0;
+    border: 0;
     color: var(--trk-color);
-    background: rgba(var(--trk-rgb), 0.12);
-    font-size: 8px;
+    background: transparent;
+    font-size: 6.5px;
     font-weight: 800;
     line-height: 10px;
     text-align: center;
-    text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.7);
+    letter-spacing: 0.45px;
+    text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.5);
     pointer-events: none;
   }
-  .key-pad.ctrl-track .stacked-rows-icon.top-active .rect.top {
+  .key-pad.track-card .stacked-rows-icon.top-active .rect.top {
     background: var(--trk-color, #d4a359);
     border-color: var(--trk-color, #d4a359);
     box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
-  .key-pad.ctrl-track .stacked-rows-icon.bottom-active .rect.bottom {
+  .key-pad.track-card .stacked-rows-icon.bottom-active .rect.bottom {
     background: var(--trk-color, #d4a359);
     border-color: var(--trk-color, #d4a359);
     box-shadow: 0 0 4px rgba(var(--trk-rgb, 212, 163, 89), 0.6);
   }
 
   /* Selected Track: Active track for its row */
-  .key-pad.ctrl-track.trk-selected {
+  .key-pad.track-card.trk-selected {
     border-color: var(--trk-color) !important;
     background: rgba(var(--trk-rgb), 0.22) !important;
     box-shadow: 0 0 10px rgba(var(--trk-rgb), 0.55), inset 0 0 6px rgba(var(--trk-rgb), 0.25) !important;
   }
-  .key-pad.ctrl-track.trk-selected .key-note {
+  .key-pad.track-card.trk-selected .key-note {
     color: #ffffff !important;
     text-shadow: 0 0 6px var(--trk-color) !important;
     font-weight: 700 !important;
@@ -856,21 +870,21 @@
   }
 
   /* Muted and Soloed Track Key Styling */
-  .key-pad.ctrl-track.trk-muted:not(.trk-selected) {
+  .key-pad.track-card.trk-muted:not(.trk-selected) {
     border-color: rgba(var(--trk-rgb), 0.18);
   }
-  .key-pad.ctrl-track.trk-soloed {
+  .key-pad.track-card.trk-soloed {
     box-shadow: 0 0 8px rgba(255, 214, 10, 0.4);
   }
 
   /* Human Note Press: Tactile Pad Surface Glow (Subtle Invariant) */
-  .key-pad.ctrl-track.trk-human-active {
+  .key-pad.track-card.trk-human-active {
     background: rgba(var(--trk-rgb), 0.38) !important;
     box-shadow: inset 0 0 10px rgba(var(--trk-rgb), 0.7), 0 0 6px rgba(var(--trk-rgb), 0.4) !important;
   }
 
   /* Arpeggiator Stepping: Subtle Rhythmic Tempo Flash (Subtle Invariant) */
-  .key-pad.ctrl-track.trk-arp-step {
+  .key-pad.track-card.trk-arp-step {
     border-color: #ffffff !important;
     box-shadow: 0 0 10px var(--trk-color, #00e5ff) !important;
   }
@@ -915,6 +929,25 @@
     0% { height: 2px; }
     50% { height: 9px; }
     100% { height: 4px; }
+  }
+
+  /* K, L, and ; are track actions, not track cards: their labels stay visible. */
+  .key-pad.ctrl-track:not(.track-card) {
+    border-color: rgba(105, 190, 215, 0.5);
+    background: rgba(35, 65, 74, 0.3);
+  }
+  .key-pad.ctrl-track:not(.track-card) .key-note {
+    color: #8ed7ec;
+    font-weight: 700;
+  }
+  .key-pad.track-card.ctrl-mute .key-note {
+    color: #ff9da3;
+  }
+  .key-pad.track-card.ctrl-solo .key-note {
+    color: #ffe174;
+  }
+  .key-pad.track-card.ctrl-lock .key-note {
+    color: #d8c280;
   }
 
   .key-pad.ctrl-lock { border-color: rgba(255, 180, 50, 0.55); }
@@ -2945,7 +2978,8 @@
             l[rowName].forEach(k => {
               const pad = document.createElement('div');
               pad.id = 'key-' + k.code + '-shift';
-              pad.className = 'key-pad shift-pad ' + (k.isControl ? 'control-pad' : '') + (k.isDummy ? ' dummy-pad' : '');
+              const isTrackCard = k.code >= 18 && k.code <= 21;
+              pad.className = 'key-pad shift-pad ' + (k.isControl ? 'control-pad' : '') + (isTrackCard ? ' track-card' : '') + (k.isDummy ? ' dummy-pad' : '');
               if (k.width) pad.style.width = k.width + 'px';
               pad.setAttribute('data-is-shift', 'true');
               pad.setAttribute('draggable', k.isDummy ? 'false' : 'true');
@@ -2975,7 +3009,7 @@
                 const role = TRACK_ROLES[trkNum];
                 const roleBadge = document.createElement('span');
                 roleBadge.className = 'trk-role';
-                roleBadge.textContent = role.letter;
+                roleBadge.textContent = role.name.toUpperCase();
                 roleBadge.title = role.name;
                 pad.appendChild(roleBadge);
                 const msBadges = document.createElement('div');
@@ -3034,7 +3068,8 @@
           l[rowName].forEach(k => {
             const pad = document.createElement('div');
             pad.id = 'key-' + k.code;
-            pad.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.extraClass ? k.extraClass + ' ' : '') + (k.isDummy ? ' dummy-pad' : '');
+            const isTrackCard = k.code >= 18 && k.code <= 21;
+            pad.className = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.extraClass ? k.extraClass + ' ' : '') + (k.isDummy ? ' dummy-pad' : '');
             if (k.width) {
               pad.style.width = k.width + 'px';
             }
@@ -3069,7 +3104,7 @@
               const role = TRACK_ROLES[trkNum];
               const roleBadge = document.createElement('span');
               roleBadge.className = 'trk-role';
-              roleBadge.textContent = role.letter;
+              roleBadge.textContent = role.name.toUpperCase();
               roleBadge.title = role.name;
               pad.appendChild(roleBadge);
               const msBadges = document.createElement('div');
@@ -4955,8 +4990,9 @@
           const el = document.getElementById('key-' + code);
           if (el) {
             const numCode = parseInt(code, 10);
-            const isTrkBtn = (numCode >= 18 && numCode <= 21);
-            if (isTrkBtn) {
+            const isTrackCard = numCode >= 18 && numCode <= 21;
+            const isTrkBtn = isTrackCard;
+            if (isTrackCard) {
               k.sustainActive = false;
             }
 
@@ -4993,7 +5029,7 @@
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               }
             }
-            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (k.typeClass || '');
+            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.typeClass || '');
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
                 ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-soloed', 'trk-audio-active', 'trk-human-active', 'trk-arp-step'].includes(c)

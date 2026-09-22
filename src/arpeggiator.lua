@@ -750,6 +750,35 @@ local function applyBpmChange()
   end
 end
 
+-- Tracks own their timing.  The header and rate keys control the focused track
+-- so a rate change immediately replaces that track's running clock interval.
+local function setTrackArpRate(rateIdx, targetTrackIdx)
+  local normalizedRateIdx = math.max(1, math.min(#ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  state.arpRateIdx = normalizedRateIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    if state.arpTimer then applyBpmChange() end
+    return nil, normalizedRateIdx
+  end
+
+  trk.arpRateIdx = normalizedRateIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpRateIdx", normalizedRateIdx)
+  end
+  if trk.timer then
+    trk.timer:stop()
+    local rateFactor = ARP_RATES[normalizedRateIdx] and ARP_RATES[normalizedRateIdx].factor or 0.25
+    local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+    trk.timer = hs.timer.doEvery(intervalSeconds, function()
+      arpTickTrack(trk)
+    end)
+  end
+
+  return trk, normalizedRateIdx
+end
+
 local function applyGatePercentChange()
   if state.arpTimer then
     local gateRatio = (state.arpGatePercent or 80.0) / 100.0
@@ -1571,6 +1600,7 @@ return {
   arpRemoveNote = arpRemoveNote,
   formatBpm = formatBpm,
   applyBpmChange = applyBpmChange,
+  setTrackArpRate = setTrackArpRate,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,
