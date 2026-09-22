@@ -6012,6 +6012,9 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-track .key-note {
     display: none;
   }
+  .key-pad.ctrl-track .key-row-icon {
+    display: none !important;
+  }
   .trk-role {
     position: absolute;
     top: 4px;
@@ -6056,18 +6059,19 @@ local HTML_UI_CONTENT = [[
   /* Discrete Clickable Mute & Solo Badges */
   .trk-ms-badges {
     position: absolute;
-    top: 3px;
-    right: 4px;
+    right: 3px;
+    bottom: 3px;
     display: flex;
     gap: 2px;
     z-index: 5;
   }
   .trk-badge {
-    width: 12px;
-    height: 11px;
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
     font-size: 8px;
     font-weight: 800;
-    line-height: 11px;
+    line-height: 8px;
     text-align: center;
     border-radius: 2px;
     cursor: pointer;
@@ -6252,13 +6256,14 @@ local HTML_UI_CONTENT = [[
   .trk-mode-tags {
     position: absolute;
     bottom: 3px;
-    left: 4px;
+    left: 3px;
     display: flex;
     gap: 2px;
     pointer-events: none;
     z-index: 4;
   }
   .trk-tag-sus, .trk-tag-chd {
+    box-sizing: border-box;
     width: 9px;
     height: 9px;
     padding: 0;
