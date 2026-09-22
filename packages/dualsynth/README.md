@@ -37,7 +37,9 @@ packages/dualsynth/
 - **Input Device**: Sony PS5 DualSense Wireless Controller (Model CFI-ZCT1)
 - **Connection**: Bluetooth 5.1 or USB-C HID
 - **Advanced Features**:
-  - Continuous Hall-effect triggers (L2/R2) $\rightarrow$ Velocity gating & CC #74 filter sweeps
+  - Continuous Hall-effect triggers: L2 controls expression (CC #11) and cutoff (CC #74); R2 controls FX / reverb send (CC #91)
+  - Sound controls target the selected QWERTY Track 1–4 MIDI channel; hold Create + D-Pad to choose the track
+  - Hold Options + D-Pad to choose an operating mode; selection occurs on the D-Pad press, never when releasing a trigger
   - Dual analog sticks $\rightarrow$ 4-axis continuous modulation & 3D space traversal
   - 6-axis IMU (Gyro/Accel) $\rightarrow$ Continuous tilt vibrato/pitch/FX
   - Dual voice-coil haptics $\rightarrow$ Metronome pulse & detent crossing

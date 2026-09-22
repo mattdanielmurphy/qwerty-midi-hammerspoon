@@ -30,28 +30,30 @@ final class DualSynthCoordinator: DualSynthDelegate {
     }
 
     func notesTriggered(pitches: [UInt8], velocity: UInt8, name: String) {
-        print("🎵 NOTES ON  -> \(name) | Pitches: \(pitches) | Velocity: \(velocity)")
-        midi.sendNotesOn(pitches: pitches, velocity: velocity)
+        print("🎵 NOTES ON  -> \(name) | Pitches: \(pitches) | Velocity: \(velocity) | Track \(controller.qwertyTrackId)")
+        midi.sendNotesOn(pitches: pitches, velocity: velocity, channel: controller.selectedTrackMIDIChannel)
     }
 
     func notesReleased(pitches: [UInt8], name: String) {
         print("🔇 NOTES OFF -> \(name) | Pitches: \(pitches)")
-        midi.sendNotesOff(pitches: pitches)
+        midi.sendNotesOff(pitches: pitches, channel: controller.selectedTrackMIDIChannel)
     }
 
     func continuousParamChanged(cc: UInt8, value: UInt8, name: String) {
-        print("🎛️ CC #\(cc) [\(name)] -> \(value)")
-        midi.sendCC(controller: cc, value: value)
+        print("🎛️ CC #\(cc) [\(name)] -> \(value) | Track \(controller.qwertyTrackId)")
+        midi.sendCC(controller: cc, value: value, channel: controller.selectedTrackMIDIChannel)
     }
 
     func pitchBendChanged(value: UInt16) {
         print("〰️ PITCH BEND -> \(value)")
-        midi.sendPitchBend(value: value)
+        midi.sendPitchBend(value: value, channel: controller.selectedTrackMIDIChannel)
     }
 
     func panicTriggered() {
         print("🚨 PANIC -> All Notes Off")
-        midi.allNotesOff()
+        for channel: UInt8 in 0...3 {
+            midi.allNotesOff(channel: channel)
+        }
     }
 
     func telemetryUpdated(_ telemetry: ControllerTelemetry) {

@@ -12,7 +12,7 @@ public enum ControlLayer: String, CaseIterable {
 public enum OperatingMode: String, CaseIterable {
     case melodic = "Melodic (8-Note Scale)"
     case chords = "Chord Groovebox"
-    case companion = "Studio Companion"
+    case companion = "Sound & Tracks"
     case drums = "Drum & Percussion"
 
     public var icon: String {
@@ -28,7 +28,7 @@ public enum OperatingMode: String, CaseIterable {
         switch self {
         case .melodic: return "MELODIC (8-NOTE)"
         case .chords: return "CHORDS"
-        case .companion: return "COMPANION"
+        case .companion: return "SOUND + TRACKS"
         case .drums: return "DRUMS"
         }
     }
@@ -37,7 +37,7 @@ public enum OperatingMode: String, CaseIterable {
         switch self {
         case .melodic: return "8 diatonic scale degrees across D-Pad & Face buttons with L1/R1 octave paging"
         case .chords: return "Diatonic chord generator with real-time morphing, inversions & arpeggiator"
-        case .companion: return "6-axis spatial expression, macro controls & transport companion for QWERTY"
+        case .companion: return "Sound-control surface for QWERTY Tracks 1–4; notes stay on the keyboard"
         case .drums: return "8 velocity-sensitive GM drum pads across D-Pad and Face buttons"
         }
     }
@@ -173,10 +173,11 @@ public struct ControllerTelemetry {
     public var heldChordAddHighOctave: Bool = false
     public var heldChordTemporaryStepShift: Int = 0
 
-    // Operating Mode & Menu Selector
-    public var operatingMode: OperatingMode = .chords
-    public var isMenuSelectorOpen: Bool = false
-    public var menuSelectionIndex: Int = 0
+    // Operating Mode, Held Menus & QWERTY Track Target
+    public var operatingMode: OperatingMode = .companion
+    public var isModeMenuHeld: Bool = false
+    public var isTrackSelectorHeld: Bool = false
+    public var qwertyTrackId: Int = 1
     public var isSyncedWithQwerty: Bool = false
     public var melodicOctaveOffset: Int = 0
     public var currentVelocityVal: UInt8 = 100
@@ -206,10 +207,11 @@ public final class ControllerManager: ObservableObject {
     @Published public var currentLayer: ControlLayer = .base
     @Published public var telemetry = ControllerTelemetry()
 
-    // Operating Mode & Menu Selector
-    @Published public var operatingMode: OperatingMode = .chords
-    @Published public var isMenuSelectorOpen: Bool = false
-    @Published public var menuSelectionIndex: Int = 0
+    // Operating Mode, Held Menus & QWERTY Track Target
+    @Published public var operatingMode: OperatingMode = .companion
+    @Published public var isModeMenuHeld: Bool = false
+    @Published public var isTrackSelectorHeld: Bool = false
+    @Published public var qwertyTrackId: Int = 1
     @Published public var isSyncedWithQwerty: Bool = false
     @Published public var melodicOctaveOffset: Int = 0
 
@@ -274,6 +276,8 @@ public final class ControllerManager: ObservableObject {
     // Modifier states
     public var isL1Held: Bool = false
     public var isR1Held: Bool = false
+    private var modeMenuDidSelect: Bool = false
+    private var trackSelectorDidSelect: Bool = false
 
     // CoreHaptics & Motion Smoothing
     private var hapticEngine: CHHapticEngine?
@@ -321,8 +325,9 @@ public final class ControllerManager: ObservableObject {
 
     private func syncTelemetryEngineState() {
         telemetry.operatingMode = operatingMode
-        telemetry.isMenuSelectorOpen = isMenuSelectorOpen
-        telemetry.menuSelectionIndex = menuSelectionIndex
+        telemetry.isModeMenuHeld = isModeMenuHeld
+        telemetry.isTrackSelectorHeld = isTrackSelectorHeld
+        telemetry.qwertyTrackId = qwertyTrackId
         telemetry.isSyncedWithQwerty = isSyncedWithQwerty
         telemetry.melodicOctaveOffset = melodicOctaveOffset
         telemetry.currentVelocityVal = currentVelocity()
@@ -467,33 +472,12 @@ public final class ControllerManager: ObservableObject {
             self.notifyTelemetry()
         }
 
-        // R2 Trigger: Menu & Mode Selector
+        // R2 Trigger: continuous FX / reverb send (CC #91)
         gamepad.rightTrigger.valueChangedHandler = { [weak self] (_, value, _) in
             guard let self = self else { return }
             self.telemetry.rightTrigger = value
-
-            let wasOpen = self.telemetry.isMenuSelectorOpen
-            if value > 0.15 {
-                self.telemetry.isMenuSelectorOpen = true
-                self.isMenuSelectorOpen = true
-                let modesCount = OperatingMode.allCases.count
-                let norm = clamp((Double(value) - 0.15) / 0.70, min: 0.0, max: 0.999)
-                let newIdx = Int(norm * Double(modesCount))
-                if newIdx != self.telemetry.menuSelectionIndex {
-                    self.telemetry.menuSelectionIndex = newIdx
-                    self.menuSelectionIndex = newIdx
-                    self.triggerStageHapticBurst(stage: 1)
-                }
-            } else if wasOpen && value < 0.10 {
-                let allModes = OperatingMode.allCases
-                if self.menuSelectionIndex >= 0 && self.menuSelectionIndex < allModes.count {
-                    let selected = allModes[self.menuSelectionIndex]
-                    self.setOperatingMode(selected)
-                }
-                self.telemetry.isMenuSelectorOpen = false
-                self.isMenuSelectorOpen = false
-                self.triggerStageHapticBurst(stage: 2)
-            }
+            let fxSend = UInt8(clamp(Double(value) * 127.0, min: 0, max: 127))
+            self.delegate?.continuousParamChanged(cc: 91, value: fxSend, name: "R2 FX Send (CC91)")
             self.notifyTelemetry()
         }
 
@@ -612,24 +596,40 @@ public final class ControllerManager: ObservableObject {
             }
         }
 
-        // 8. Create Button (|||) -> Cycles Chord Types
+        // 8. Create Button (|||): hold with D-Pad to select QWERTY Track 1–4.
         if let createBtn = gamepad.buttonOptions {
             createBtn.valueChangedHandler = { [weak self] (_, _, pressed) in
                 guard let self = self else { return }
                 self.telemetry.create = pressed
                 if pressed {
-                    self.cycleChordType()
+                    self.trackSelectorDidSelect = false
+                    self.isTrackSelectorHeld = true
+                    self.telemetry.isTrackSelectorHeld = true
+                    self.lastEventDescription = "Hold Create + D-Pad: Select QWERTY Track"
+                } else {
+                    self.isTrackSelectorHeld = false
+                    self.telemetry.isTrackSelectorHeld = false
                 }
                 self.notifyTelemetry()
             }
         }
 
-        // 9. Options Button (☰) -> Cycles Scale
+        // 9. Options Button (☰): hold with D-Pad to select an operating mode.
+        // A tap still cycles scale, so the former shortcut remains available.
         gamepad.buttonMenu.valueChangedHandler = { [weak self] (_, _, pressed) in
             guard let self = self else { return }
             self.telemetry.options = pressed
             if pressed {
-                self.cycleScale()
+                self.modeMenuDidSelect = false
+                self.isModeMenuHeld = true
+                self.telemetry.isModeMenuHeld = true
+                self.lastEventDescription = "Hold Options + D-Pad: Select Operating Mode"
+            } else {
+                self.isModeMenuHeld = false
+                self.telemetry.isModeMenuHeld = false
+                if !self.modeMenuDidSelect {
+                    self.cycleScale()
+                }
             }
             self.notifyTelemetry()
         }
@@ -791,7 +791,7 @@ public final class ControllerManager: ObservableObject {
     private func setupAdaptiveTriggers(_ controller: GCController) {
         guard let ds = controller.extendedGamepad as? GCDualSenseGamepad else { return }
         ds.leftTrigger.setModeSlopeFeedback(startPosition: 0.05, endPosition: 0.95, startStrength: 0.15, endStrength: 0.8)
-        ds.rightTrigger.setModeWeaponWithStartPosition(0.15, endPosition: 0.85, resistiveStrength: 0.6)
+        ds.rightTrigger.setModeSlopeFeedback(startPosition: 0.05, endPosition: 0.95, startStrength: 0.1, endStrength: 0.65)
     }
 
     public func currentVelocity() -> UInt8 {
@@ -822,16 +822,57 @@ public final class ControllerManager: ObservableObject {
         notifyTelemetry()
     }
 
-    public func cycleMenuSelection(forward: Bool = true) {
-        let count = OperatingMode.allCases.count
-        if forward {
-            menuSelectionIndex = (menuSelectionIndex + 1) % count
-        } else {
-            menuSelectionIndex = (menuSelectionIndex - 1 + count) % count
+    public var selectedTrackMIDIChannel: UInt8 {
+        UInt8(qwertyTrackId - 1)
+    }
+
+    public var selectedQwertyTrackName: String {
+        switch qwertyTrackId {
+        case 1: return "Bass"
+        case 2: return "Chords"
+        case 3: return "Lead"
+        case 4: return "Arp"
+        default: return "Track"
         }
-        telemetry.menuSelectionIndex = menuSelectionIndex
-        triggerStageHapticBurst(stage: 1)
+    }
+
+    public func selectQwertyTrack(_ id: Int) {
+        let targetId = Int(clamp(id, min: 1, max: 4))
+        guard targetId != qwertyTrackId else { return }
+
+        releaseInputForTrackChange()
+        qwertyTrackId = targetId
+        telemetry.qwertyTrackId = targetId
+        telemetry.isSyncedWithQwerty = true
+        isSyncedWithQwerty = true
+        lastEventDescription = String(format: "QWERTY Track %d: %@ (MIDI Ch %d)", targetId, selectedQwertyTrackName, targetId)
+        triggerStageHapticBurst(stage: 2)
+        broadcastStateToHammerspoon()
         notifyTelemetry()
+    }
+
+    private func releaseInputForTrackChange() {
+        stopArpeggiator()
+        let pitches = Set(currentlySoundingPitches)
+            .union(activeMelodicPitches.values)
+            .union(activeDrumPitches.values)
+            .union(activeFacePitches.values.flatMap { $0 })
+        if !pitches.isEmpty {
+            delegate?.notesReleased(pitches: pitches.sorted(), name: "QWERTY Track Change")
+        }
+        currentlySoundingPitches.removeAll()
+        activeMelodicPitches.removeAll()
+        activeDrumPitches.removeAll()
+        activeFaceButtons.removeAll()
+        activeFacePitches.removeAll()
+        activeFaceRoots.removeAll()
+        latchedPitches.removeAll()
+        latchedRoots.removeAll()
+        heldFaceButtonIndex = nil
+        telemetry.isHoldingChord = false
+        telemetry.activeChordNotes.removeAll()
+        telemetry.playedRootPitches.removeAll()
+        telemetry.activeChordName = "None"
     }
 
     public func scaleDegreeForButton(index: Int) -> Int {
@@ -913,13 +954,7 @@ public final class ControllerManager: ObservableObject {
 
     // MARK: - Face Actions (Modes & Shift Layers)
     private func handleFaceAction(buttonIndex: Int, pressed: Bool) {
-        if telemetry.isMenuSelectorOpen {
-            if pressed {
-                menuSelectionIndex = buttonIndex % OperatingMode.allCases.count
-                telemetry.menuSelectionIndex = menuSelectionIndex
-                triggerStageHapticBurst(stage: 1)
-                notifyTelemetry()
-            }
+        if isModeMenuHeld || isTrackSelectorHeld {
             return
         }
 
@@ -1089,13 +1124,31 @@ public final class ControllerManager: ObservableObject {
 
     // MARK: - D-Pad Actions (Operating Modes & Navigation)
     private func handleDpadAction(direction: DpadDir, pressed: Bool) {
-        if telemetry.isMenuSelectorOpen {
-            if pressed {
-                switch direction {
-                case .up, .left: cycleMenuSelection(forward: false)
-                case .down, .right: cycleMenuSelection(forward: true)
-                }
+        guard pressed else { return }
+
+        if isModeMenuHeld {
+            let mode: OperatingMode
+            switch direction {
+            case .left: mode = .companion
+            case .up: mode = .chords
+            case .right: mode = .melodic
+            case .down: mode = .drums
             }
+            modeMenuDidSelect = true
+            setOperatingMode(mode)
+            return
+        }
+
+        if isTrackSelectorHeld {
+            let trackId: Int
+            switch direction {
+            case .left: trackId = 1
+            case .up: trackId = 2
+            case .right: trackId = 3
+            case .down: trackId = 4
+            }
+            trackSelectorDidSelect = true
+            selectQwertyTrack(trackId)
             return
         }
 
@@ -1771,6 +1824,14 @@ public final class ControllerManager: ObservableObject {
                 stateChanged = true
             }
         }
+        if let track = (userInfo["activeTrack"] as? NSNumber)?.intValue ?? (userInfo["activeTrack"] as? Int) {
+            let validTrack = Int(clamp(track, min: 1, max: 4))
+            if self.qwertyTrackId != validTrack {
+                self.qwertyTrackId = validTrack
+                self.telemetry.qwertyTrackId = validTrack
+                stateChanged = true
+            }
+        }
 
         self.telemetry.isSyncedWithQwerty = true
         self.isSyncedWithQwerty = true
@@ -1826,7 +1887,8 @@ public final class ControllerManager: ObservableObject {
             "bpm": bpm,
             "octaveShift": octaveShift,
             "chordIdx": ChordType.allCases.firstIndex(of: chordType) ?? 0,
-            "operatingMode": operatingMode.rawValue
+            "operatingMode": operatingMode.rawValue,
+            "activeTrack": qwertyTrackId
         ]
         DistributedNotificationCenter.default().post(
             name: NSNotification.Name("DualSynthStateBroadcast"),

@@ -22,7 +22,7 @@
   - **CoreHaptics Driver Invariant**: Rapid parallel `makeAdvancedPlayer` triggers cause error `-4810` and daemon teardown. Use discrete pulse grains (120ms) with `Date` throttling.
   - **Logic Pro CC #11**: MIDI CC #11 (Expression) acts as a gain multiplier; idle value must default to 127 to avoid muting instruments.
   - **Held-Chord Morphing**: Holding any chord face button allows D-Pad to dynamically alter, add on to (+8va, +Sub), or transpose harmonies in real time with automatic reversion upon release.
-  - **Trigger Roles & Adaptive Haptics**: Left Trigger (L2) drives continuous velocity and dynamic expression with progressive slope resistance (`setModeSlopeFeedback`); Right Trigger (R2) acts as the modal menu selector with weapon-style detent feedback (`setModeWeaponWithStartPosition`).
+  - **DualSynth Sound & Track Surface**: Sound & Tracks is the default mode. L2 sends expression/cutoff (CC #11/#74) and R2 sends FX/reverb send (CC #91), both with `setModeSlopeFeedback`, to the selected QWERTY Track 1–4 MIDI channel. Hold Create + D-Pad to select Track 1 ← / 2 ↑ / 3 → / 4 ↓; hold Options + D-Pad to select Sound & Tracks ← / Chords ↑ / Melodic → / Drums ↓ immediately. Trigger release never selects a menu item.
   - **Zero-Latency IPC Sync**: DualSense and Hammerspoon sync bidirectionally without ports or sockets via macOS native `NSDistributedNotificationCenter` (`DistributedNotificationCenter.default()` in Swift and `hs.distributednotifications` in Lua), synchronizing musical key, scale, BPM, octave, and real-time played notes.
 
 ## Key Files

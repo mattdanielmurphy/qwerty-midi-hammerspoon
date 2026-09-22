@@ -82,23 +82,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, DualSynthDelegate {
     }
 
     func notesTriggered(pitches: [UInt8], velocity: UInt8, name: String) {
-        midi.sendNotesOn(pitches: pitches, velocity: velocity)
+        midi.sendNotesOn(pitches: pitches, velocity: velocity, channel: controller.selectedTrackMIDIChannel)
     }
 
     func notesReleased(pitches: [UInt8], name: String) {
-        midi.sendNotesOff(pitches: pitches)
+        midi.sendNotesOff(pitches: pitches, channel: controller.selectedTrackMIDIChannel)
     }
 
     func continuousParamChanged(cc: UInt8, value: UInt8, name: String) {
-        midi.sendCC(controller: cc, value: value)
+        midi.sendCC(controller: cc, value: value, channel: controller.selectedTrackMIDIChannel)
     }
 
     func pitchBendChanged(value: UInt16) {
-        midi.sendPitchBend(value: value)
+        midi.sendPitchBend(value: value, channel: controller.selectedTrackMIDIChannel)
     }
 
     func panicTriggered() {
-        midi.allNotesOff()
+        for channel: UInt8 in 0...3 {
+            midi.allNotesOff(channel: channel)
+        }
     }
 
     func telemetryUpdated(_ telemetry: ControllerTelemetry) {

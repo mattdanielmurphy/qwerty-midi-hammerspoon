@@ -126,7 +126,7 @@ A lightweight Swift Package Manager (SPM) project:
 * `Sources/DualSynthCore/`:
   - `ControllerManager.swift`: Discovers and connects to `GCController`, attaches handlers to `GCDualSenseGamepad`.
   - `MIDIEngine.swift`: Wraps `MIDISourceCreate` and formats `MIDIPacketList` / `MIDIEventList` (MIDI 1.0 & 2.0).
-  - `InputMapper.swift`: Maps Face Buttons ($\triangle, \bigcirc, \times, \square$) to scale degrees, `R2` trigger to dynamic velocity/gate, and `L2` trigger to filter CC #74.
+  - `ControllerManager.swift`: Makes Sound & Tracks the default mode; sends L2 expression/cutoff (CC #11/#74) and R2 FX send (CC #91) to the selected QWERTY Track 1–4 channel. Holding Create + D-Pad selects a track; holding Options + D-Pad selects a mode immediately.
   - `HapticsEngine.swift`: Generates transient voice-coil metronome pulses via `CHHapticEngine`.
 * `Sources/dualsynth-cli/`: Command-line daemon entry point with real-time CLI terminal telemetry.
 

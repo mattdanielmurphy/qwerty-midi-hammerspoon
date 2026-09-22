@@ -224,8 +224,8 @@ public struct DualSenseHUDView: View {
                 }
                 .frame(width: s.d(baseWidth))
 
-                if controller.telemetry.isMenuSelectorOpen {
-                    menuSelectorOverlayView(s: s)
+                if controller.telemetry.isModeMenuHeld {
+                    modeMenuOverlayView(s: s)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
@@ -298,6 +298,17 @@ public struct DualSenseHUDView: View {
             .cornerRadius(s.d(6))
             .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(theme.wellBorder, lineWidth: 1))
             .fixedSize()
+
+            Text("T\(controller.qwertyTrackId) \(controller.selectedQwertyTrackName.uppercased()) • CH \(controller.qwertyTrackId)")
+                .font(.system(size: s.f(9), weight: .black, design: .monospaced))
+                .foregroundColor(.cyan)
+                .lineLimit(1)
+                .padding(.horizontal, s.d(7))
+                .padding(.vertical, s.d(4))
+                .background(Color.cyan.opacity(0.12))
+                .cornerRadius(s.d(6))
+                .overlay(RoundedRectangle(cornerRadius: s.d(6)).stroke(Color.cyan.opacity(0.55), lineWidth: 1))
+                .fixedSize()
 
             // Musical Mode Badges (Fixed horizontal size so text NEVER wraps)
             HStack(spacing: s.d(6)) {
@@ -462,8 +473,8 @@ public struct DualSenseHUDView: View {
                     TriggerGaugeView(
                         title: "R2 TRIGGER",
                         value: controller.telemetry.rightTrigger,
-                        subtitle: controller.telemetry.isMenuSelectorOpen ? "MENU ACTIVE" : "Hold for Menu",
-                        activeColor: controller.telemetry.isMenuSelectorOpen ? .orange : .cyan,
+                        subtitle: "FX SEND (CC 91)",
+                        activeColor: .purple,
                         theme: theme,
                         s: s
                     )
@@ -490,7 +501,7 @@ public struct DualSenseHUDView: View {
                 VStack(spacing: s.d(6)) {
                     Text(dpadHeaderTitle)
                         .font(.system(size: s.f(11), weight: .black, design: .monospaced))
-                        .foregroundColor(controller.isL1Held ? .blue : (controller.isR1Held ? .orange : theme.textSecondary))
+                        .foregroundColor(controller.isModeMenuHeld ? .cyan : (controller.isTrackSelectorHeld ? .pink : (controller.isL1Held ? .blue : (controller.isR1Held ? .orange : theme.textSecondary))))
                         .lineLimit(1)
 
                     ZStack {
@@ -605,9 +616,9 @@ public struct DualSenseHUDView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Create Button (Shows ||| Glyph & Live Chord Type)
+    // MARK: - Create Button (QWERTY Track Selector)
     private func createButtonView(s: UIScale) -> some View {
-        Button(action: { controller.cycleChordType() }) {
+        Button(action: { controller.selectQwertyTrack((controller.qwertyTrackId % 4) + 1) }) {
             VStack(spacing: s.d(2)) {
                 HStack(spacing: s.d(3)) {
                     ForEach(0..<3) { _ in
@@ -615,11 +626,11 @@ public struct DualSenseHUDView: View {
                             .fill(controller.telemetry.create ? Color.cyan : theme.textSecondary)
                             .frame(width: s.d(2), height: s.d(8))
                     }
-                    Text("CHORD")
+                    Text("TRACK")
                         .font(.system(size: s.f(8), weight: .black, design: .monospaced))
                         .foregroundColor(controller.telemetry.create ? .cyan : theme.textSecondary)
                 }
-                Text(controller.chordType.rawValue.uppercased())
+                Text("T\(controller.qwertyTrackId) \(controller.selectedQwertyTrackName.uppercased())")
                     .font(.system(size: s.f(9), weight: .black, design: .monospaced))
                     .foregroundColor(controller.telemetry.create ? .white : .cyan)
                     .lineLimit(1)
@@ -630,11 +641,11 @@ public struct DualSenseHUDView: View {
             .cornerRadius(s.d(6))
         }
         .buttonStyle(.plain)
-        .help("Create: Cycle Chord Types (Triad, 7th, 9th, Sus4, Power)")
+        .help("Hold Create + D-Pad: ← Track 1, ↑ Track 2, → Track 3, ↓ Track 4")
         .fixedSize()
     }
 
-    // MARK: - Options Button (Shows ☰ Glyph & Live Scale Name)
+    // MARK: - Options Button (Held Operating-Mode Menu)
     private func optionsButtonView(s: UIScale) -> some View {
         Button(action: { controller.cycleScale() }) {
             VStack(spacing: s.d(2)) {
@@ -646,11 +657,11 @@ public struct DualSenseHUDView: View {
                                 .frame(width: s.d(8), height: max(1, s.d(1.5)))
                         }
                     }
-                    Text("SCALE")
+                    Text("MODE")
                         .font(.system(size: s.f(8), weight: .black, design: .monospaced))
                         .foregroundColor(controller.telemetry.options ? .orange : theme.textSecondary)
                 }
-                Text(controller.scaleName.uppercased())
+                Text(controller.operatingMode.shortBadge)
                     .font(.system(size: s.f(9), weight: .black, design: .monospaced))
                     .foregroundColor(controller.telemetry.options ? .white : .orange)
                     .lineLimit(1)
@@ -661,7 +672,7 @@ public struct DualSenseHUDView: View {
             .cornerRadius(s.d(6))
         }
         .buttonStyle(.plain)
-        .help("Options: Cycle Musical Scale (Major, Minor, Dorian, etc.)")
+        .help("Hold Options + D-Pad: ← Sound & Tracks, ↑ Chords, → Melodic, ↓ Drums. Tap Options to cycle scale.")
         .fixedSize()
     }
 
@@ -1082,6 +1093,8 @@ public struct DualSenseHUDView: View {
     }
 
     private var dpadHeaderTitle: String {
+        if controller.isModeMenuHeld { return "MODE SELECT (OPTIONS)" }
+        if controller.isTrackSelectorHeld { return "TRACK SELECT (CREATE)" }
         switch controller.operatingMode {
         case .melodic:
             return "MELODIC (1 - 4)"
@@ -1116,6 +1129,22 @@ public struct DualSenseHUDView: View {
     private enum DpadPos { case up, down, left, right }
 
     private func dpadLabel(for pos: DpadPos) -> String {
+        if controller.isModeMenuHeld {
+            switch pos {
+            case .left: return "SOUND"
+            case .up: return "CHORD"
+            case .right: return "MELODIC"
+            case .down: return "DRUMS"
+            }
+        }
+        if controller.isTrackSelectorHeld {
+            switch pos {
+            case .left: return "T1 BASS"
+            case .up: return "T2 CHRD"
+            case .right: return "T3 LEAD"
+            case .down: return "T4 ARP"
+            }
+        }
         switch controller.operatingMode {
         case .melodic:
             switch pos {
@@ -1229,27 +1258,22 @@ public struct DualSenseHUDView: View {
         }
     }
 
-    // MARK: - Mode Selector Overlay (R2 Trigger Menu)
+    // MARK: - Mode Menu Overlay (Options + D-Pad)
     private func modeHeaderView(s: UIScale) -> some View {
         HStack(spacing: s.d(8)) {
             Image(systemName: "slider.horizontal.2.square.on.square")
                 .font(.system(size: s.f(15), weight: .black))
                 .foregroundColor(.cyan)
 
-            Text("SELECT OPERATING MODE")
+            Text("OPTIONS + D-PAD: SELECT MODE")
                 .font(.system(size: s.f(13), weight: .black, design: .monospaced))
                 .foregroundColor(.white)
 
             Spacer()
 
-            HStack(spacing: s.d(4)) {
-                Text("R2 DEPTH:")
-                    .font(.system(size: s.f(9), weight: .bold, design: .monospaced))
-                    .foregroundColor(Color(white: 0.6))
-                Text(String(format: "%.0f%%", controller.telemetry.rightTrigger * 100))
-                    .font(.system(size: s.f(11), weight: .black, design: .monospaced))
-                    .foregroundColor(.orange)
-            }
+            Text("RELEASE OPTIONS TO CLOSE")
+                .font(.system(size: s.f(9), weight: .bold, design: .monospaced))
+                .foregroundColor(Color(white: 0.6))
             .padding(.horizontal, s.d(8))
             .padding(.vertical, s.d(4))
             .background(Color.white.opacity(0.12))
@@ -1260,31 +1284,37 @@ public struct DualSenseHUDView: View {
 
     private func modeCardRow(idx: Int, s: UIScale) -> some View {
         let mode = OperatingMode.allCases[idx]
-        let isSelected = controller.telemetry.menuSelectionIndex == idx
         let isCurrentActive = controller.operatingMode == mode
+        let direction: String
+        switch mode {
+        case .companion: direction = "←"
+        case .chords: direction = "↑"
+        case .melodic: direction = "→"
+        case .drums: direction = "↓"
+        }
 
         return Button(action: {
-            controller.menuSelectionIndex = idx
             controller.setOperatingMode(mode)
-            controller.telemetry.isMenuSelectorOpen = false
-            controller.isMenuSelectorOpen = false
         }) {
             HStack(spacing: s.d(12)) {
                 ZStack {
                     Circle()
-                        .fill(isSelected ? Color.cyan : Color.white.opacity(0.1))
+                        .fill(isCurrentActive ? Color.cyan : Color.white.opacity(0.1))
                         .frame(width: s.d(36), height: s.d(36))
 
                     Image(systemName: mode.icon)
                         .font(.system(size: s.f(15), weight: .bold))
-                        .foregroundColor(isSelected ? .black : .white)
+                        .foregroundColor(isCurrentActive ? .black : .white)
                 }
 
                 VStack(alignment: .leading, spacing: s.d(2)) {
                     HStack(spacing: s.d(6)) {
+                        Text(direction)
+                            .font(.system(size: s.f(15), weight: .black, design: .monospaced))
+                            .foregroundColor(.orange)
                         Text(mode.rawValue)
                             .font(.system(size: s.f(12), weight: .black, design: .monospaced))
-                            .foregroundColor(isSelected ? .cyan : .white)
+                            .foregroundColor(isCurrentActive ? .cyan : .white)
 
                         if isCurrentActive {
                             Text("ACTIVE")
@@ -1299,13 +1329,13 @@ public struct DualSenseHUDView: View {
 
                     Text(mode.description)
                         .font(.system(size: s.f(10), weight: .medium))
-                        .foregroundColor(isSelected ? .white : Color(white: 0.7))
+                        .foregroundColor(isCurrentActive ? .white : Color(white: 0.7))
                         .lineLimit(1)
                 }
 
                 Spacer()
 
-                if isSelected {
+                if isCurrentActive {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: s.f(16), weight: .bold))
                         .foregroundColor(.cyan)
@@ -1314,13 +1344,13 @@ public struct DualSenseHUDView: View {
             .padding(s.d(10))
             .background(
                 RoundedRectangle(cornerRadius: s.d(10))
-                    .fill(isSelected ? Color.cyan.opacity(0.18) : Color(white: 0.14))
+                    .fill(isCurrentActive ? Color.cyan.opacity(0.18) : Color(white: 0.14))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: s.d(10))
-                    .stroke(isSelected ? Color.cyan : Color.white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+                    .stroke(isCurrentActive ? Color.cyan : Color.white.opacity(0.12), lineWidth: isCurrentActive ? 2 : 1)
             )
-            .shadow(color: isSelected ? Color.cyan.opacity(0.3) : .clear, radius: s.d(8))
+            .shadow(color: isCurrentActive ? Color.cyan.opacity(0.3) : .clear, radius: s.d(8))
         }
         .buttonStyle(.plain)
     }
@@ -1330,14 +1360,14 @@ public struct DualSenseHUDView: View {
             Image(systemName: "hand.tap.fill")
                 .font(.system(size: s.f(11)))
                 .foregroundColor(.orange)
-            Text("Pull R2 deeper or use D-Pad to navigate • Release R2 to select")
+            Text("Hold Options, then press a D-Pad direction • Selection is immediate")
                 .font(.system(size: s.f(10), weight: .bold, design: .monospaced))
                 .foregroundColor(Color(white: 0.8))
         }
         .padding(.top, s.d(4))
     }
 
-    private func menuSelectorOverlayView(s: UIScale) -> some View {
+    private func modeMenuOverlayView(s: UIScale) -> some View {
         ZStack {
             Color.black.opacity(isDarkMode ? 0.78 : 0.55)
                 .ignoresSafeArea()

@@ -7,6 +7,7 @@ local sync = {}
 local isSyncing = false
 local configRef = nil
 local hudRef = nil
+local controlsRef = nil
 
 local DUALSYNTH_STATE_NOTIFICATION = "DualSynthStateBroadcast"
 local QWERTY_STATE_NOTIFICATION = "QwertyMidiStateBroadcast"
@@ -16,9 +17,10 @@ local function log(msg)
   print("[Sync]: " .. tostring(msg))
 end
 
-function sync.init(config, hud)
+function sync.init(config, hud, controls)
   configRef = config
   hudRef = hud
+  controlsRef = controls
   _G.activeWatchers = _G.activeWatchers or {}
 
   -- Stop previous watcher if reloading
@@ -86,6 +88,14 @@ function sync.init(config, hud)
       end
     end
 
+    if userInfo.activeTrack ~= nil then
+      local trackId = math.floor(tonumber(userInfo.activeTrack) or 0)
+      if trackId >= 1 and trackId <= 4 and state.activeTrack ~= trackId and controlsRef and controlsRef.selectTrack then
+        controlsRef.selectTrack(trackId)
+        stateChanged = true
+      end
+    end
+
     if stateChanged then
       log("Synced state from DualSynth: Root=" .. tostring(state.currentRoot) .. " Scale=" .. tostring(state.currentScaleIdx) .. " BPM=" .. tostring(state.arpBpm))
       if hudRef and hudRef.updateWebviewHud then
@@ -110,7 +120,8 @@ function sync.broadcastState(state)
     scaleIdx = (state.currentScaleIdx or 1) - 1, -- Swift 0-indexed
     bpm = state.arpBpm or 120,
     octaveShift = state.octaveShift or 0,
-    chordIdx = (state.chordIdx or 1) - 1
+    chordIdx = (state.chordIdx or 1) - 1,
+    activeTrack = state.activeTrack or 1
   }
 
   hs.distributednotifications.post(QWERTY_STATE_NOTIFICATION, nil, payload)

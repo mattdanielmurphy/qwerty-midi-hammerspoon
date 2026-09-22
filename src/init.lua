@@ -26,7 +26,7 @@ _G.activeWatchers = _G.activeWatchers or {}
 
 arpeggiator.setHudModule(hud)
 hud.setControlsModule(controls)
-sync.init(config, hud)
+sync.init(config, hud, controls)
 _G.activeWatchers.sync = sync
 _G.activeWatchers.hud = hud
 _G.activeWatchers.state = state

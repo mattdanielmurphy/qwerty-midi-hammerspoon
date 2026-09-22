@@ -369,6 +369,11 @@ local function selectTrack(id)
     color = trk.color or "#64d8f0"
   })
 
+  local sync = _G.activeWatchers and _G.activeWatchers.sync
+  if sync and sync.broadcastState then
+    sync.broadcastState(state)
+  end
+
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   end

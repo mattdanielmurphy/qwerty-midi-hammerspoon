@@ -27,7 +27,7 @@ The Sony DualSense provides high input density, low latency, and continuous modu
 
 | Component | Hardware Specification | Functional Mapping |
 | :--- | :--- | :--- |
-| **Triggers (L2, R2)** | 2× continuous analog Hall-effect axes | Continuous velocity gating, dynamic envelope/filter control |
+| **Triggers (L2, R2)** | 2× continuous analog Hall-effect axes | L2 expression/cutoff (CC #11/#74), R2 FX/reverb send (CC #91) |
 | **Thumbsticks** | 2× dual-axis potentiometers (4 analog axes) | 4-channel continuous modulation (X/Y pitch, cutoff, panning, wet/dry) |
 | **Shoulder Bumpers (L1, R1)** | 2× tactile digital switches | Momentary layer/shift modifiers |
 | **Face Buttons / D-Pad** | 8× digital switches | Scale degrees, chord triggers, track routing |
@@ -86,7 +86,7 @@ To prevent state desynchronization, all major modifier keys are **momentary**, n
              +-------------------------------------------------------+
                       /                                     \
              [ L2: Analog Axis ]                   [ R2: Analog Axis ]
-             Filter / Envelope Sweep               Dynamic Velocity / Gate
+             Expression / Cutoff                    FX / Reverb Send (CC #91)
 ```
 
 ### Functional Domains
@@ -157,7 +157,7 @@ Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4 
 * **Target:** Verification of input latency, Bluetooth polling rates, and CoreMIDI reliability.
 * **Deliverables:**
   * Native Swift project using `GameController.framework` and `CoreMIDI.framework`.
-  * Basic mapping: Face buttons $\rightarrow$ diatonic notes; `R2` $\rightarrow$ velocity/gate; `L2` $\rightarrow$ CC #74.
+  * Current mapping: Sound & Tracks is the default; `L2` $\rightarrow$ CC #11/#74, `R2` $\rightarrow$ CC #91, Create + D-Pad $\rightarrow$ QWERTY Track 1–4, and Options + D-Pad $\rightarrow$ immediate mode selection.
   * Virtual MIDI endpoint creation routable to local DAWs.
 * **Completion Criteria:** Stable Bluetooth input with under $5\text{ ms}$ processing latency; continuous trigger-to-CC output.
 
