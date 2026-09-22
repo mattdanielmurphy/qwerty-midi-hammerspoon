@@ -746,7 +746,7 @@ local HTML_UI_CONTENT = [[
     --active-track-rgb: var(--bottom-track-rgb, 0, 229, 255);
   }
 
-  /* Track Buttons: 1 to 4 with distinct individual colors, dual selection, mute, solo, and waveform */
+  /* Track buttons use reserved zones: role, number, M/S controls, then status. */
   #key-18 { --trk-color: #00e5ff; --trk-rgb: 0, 229, 255; }
   #key-19 { --trk-color: #ff9100; --trk-rgb: 255, 145, 0; }
   #key-20 { --trk-color: #00e676; --trk-rgb: 0, 230, 118; }
@@ -755,13 +755,38 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-track {
     border-color: rgba(var(--trk-rgb, 255, 255, 255), 0.35);
     position: relative;
+    display: block;
   }
   .key-pad.ctrl-track .key-code {
     color: var(--trk-color, #e0e0e0);
+    position: absolute;
+    top: 3px;
+    left: 0;
+    right: 0;
+    font-size: 18px;
+    line-height: 18px;
+    text-align: center;
   }
   .key-pad.ctrl-track .key-note {
-    color: var(--trk-color, #e0e0e0);
-    font-weight: 600;
+    display: none;
+  }
+  .trk-role {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    min-width: 10px;
+    height: 10px;
+    padding: 0 1px;
+    border: 1px solid rgba(var(--trk-rgb), 0.55);
+    border-radius: 2px;
+    color: var(--trk-color);
+    background: rgba(var(--trk-rgb), 0.12);
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 10px;
+    text-align: center;
+    text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.7);
+    pointer-events: none;
   }
   .key-pad.ctrl-track .stacked-rows-icon.top-active .rect.top {
     background: var(--trk-color, #d4a359);
@@ -984,7 +1009,7 @@ local HTML_UI_CONTENT = [[
   /* Track Status Mode Tags: SUS and CHD */
   .trk-mode-tags {
     position: absolute;
-    top: 15px;
+    bottom: 3px;
     left: 4px;
     display: flex;
     gap: 2px;
@@ -992,13 +1017,16 @@ local HTML_UI_CONTENT = [[
     z-index: 4;
   }
   .trk-tag-sus, .trk-tag-chd {
+    width: 9px;
+    height: 9px;
+    padding: 0;
     font-size: 7px;
     font-weight: 800;
-    line-height: 8px;
-    padding: 1px 2px;
+    line-height: 9px;
     border-radius: 2px;
     display: none;
     letter-spacing: 0.2px;
+    text-align: center;
   }
   .trk-tag-sus.active {
     display: inline-block;
@@ -2889,6 +2917,13 @@ local HTML_UI_CONTENT = [[
 
   // ===== END KEY SELECTION VARS =====
 
+  const TRACK_ROLES = {
+    1: { letter: 'B', name: 'Bass' },
+    2: { letter: 'C', name: 'Chords' },
+    3: { letter: 'L', name: 'Lead' },
+    4: { letter: 'A', name: 'Arp' }
+  };
+
   function initGrid(layout) {
     try {
       const l = (layout && (layout.number || layout.upper || layout.home || layout.lower)) ? layout : LAYOUT_DATA;
@@ -2933,6 +2968,12 @@ local HTML_UI_CONTENT = [[
               pad.appendChild(dotSpan);
               if (k.code >= 18 && k.code <= 21) {
                 const trkNum = k.code - 17;
+                const role = TRACK_ROLES[trkNum];
+                const roleBadge = document.createElement('span');
+                roleBadge.className = 'trk-role';
+                roleBadge.textContent = role.letter;
+                roleBadge.title = role.name;
+                pad.appendChild(roleBadge);
                 const msBadges = document.createElement('div');
                 msBadges.className = 'trk-ms-badges';
                 const mBadge = document.createElement('span');
@@ -2963,10 +3004,12 @@ local HTML_UI_CONTENT = [[
                 modeTags.className = 'trk-mode-tags';
                 const susTag = document.createElement('span');
                 susTag.className = 'trk-tag-sus';
-                susTag.textContent = 'SUS';
+                susTag.textContent = 'S';
+                susTag.title = 'Sustain active';
                 const chdTag = document.createElement('span');
                 chdTag.className = 'trk-tag-chd';
-                chdTag.textContent = 'CHD';
+                chdTag.textContent = 'C';
+                chdTag.title = 'Chord mode active';
                 modeTags.appendChild(susTag);
                 modeTags.appendChild(chdTag);
                 pad.appendChild(modeTags);
@@ -3019,6 +3062,12 @@ local HTML_UI_CONTENT = [[
             pad.appendChild(dotSpan);
             if (k.code >= 18 && k.code <= 21) {
               const trkNum = k.code - 17;
+              const role = TRACK_ROLES[trkNum];
+              const roleBadge = document.createElement('span');
+              roleBadge.className = 'trk-role';
+              roleBadge.textContent = role.letter;
+              roleBadge.title = role.name;
+              pad.appendChild(roleBadge);
               const msBadges = document.createElement('div');
               msBadges.className = 'trk-ms-badges';
               const mBadge = document.createElement('span');
@@ -3049,10 +3098,12 @@ local HTML_UI_CONTENT = [[
               modeTags.className = 'trk-mode-tags';
               const susTag = document.createElement('span');
               susTag.className = 'trk-tag-sus';
-              susTag.textContent = 'SUS';
+              susTag.textContent = 'S';
+              susTag.title = 'Sustain active';
               const chdTag = document.createElement('span');
               chdTag.className = 'trk-tag-chd';
-              chdTag.textContent = 'CHD';
+              chdTag.textContent = 'C';
+              chdTag.title = 'Chord mode active';
               modeTags.appendChild(susTag);
               modeTags.appendChild(chdTag);
               pad.appendChild(modeTags);
@@ -4981,7 +5032,7 @@ local HTML_UI_CONTENT = [[
                   const isSus = k.trkSustainMode !== 'off';
                   susTag.classList.toggle('active', isSus);
                   susTag.classList.toggle('classic', k.trkSustainMode === 'classic');
-                  susTag.textContent = k.trkSustainMode === 'classic' ? 'ALL' : 'SUS';
+                  susTag.textContent = 'S';
                 }
               }
               if (k.trkChordMode !== undefined) {
