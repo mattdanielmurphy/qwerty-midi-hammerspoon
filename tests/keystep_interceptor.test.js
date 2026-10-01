@@ -67,3 +67,34 @@ test("swallows only marker notes and forwards played notes to the QWERTY output"
   expect(source).toContain("if not MODE_NOTES[metadata.note] then forwardNote(\"noteOff\", metadata) end");
   expect(source).toContain("getQwertyOutput()");
 });
+
+test("maps 30..240 BPM linearly to 0..127 Rate CC with ~137 BPM at halfway", () => {
+  expect(source).toContain("local function bpmToRate(bpm)");
+  expect(source).toContain("local function rateToBpm(rateVal)");
+  expect(source).toContain("((b - 30) / (240 - 30)) * 127");
+  expect(source).toContain("30 + (r / 127) * (240 - 30)");
+  expect(source).toContain("KeyStep.bpmToRate = bpmToRate");
+  expect(source).toContain("KeyStep.rateToBpm = rateToBpm");
+
+  const bpmToRate = (b) => Math.round(((Math.max(30, Math.min(240, b)) - 30) / 210) * 127);
+  const rateToBpm = (r) => Math.round(30 + (Math.max(0, Math.min(127, r)) / 127) * 210);
+
+  expect(bpmToRate(30)).toBe(0);
+  expect(bpmToRate(240)).toBe(127);
+  expect(bpmToRate(135)).toBe(64);
+  expect(bpmToRate(137)).toBe(65);
+
+  expect(rateToBpm(0)).toBe(30);
+  expect(rateToBpm(127)).toBe(240);
+  expect(rateToBpm(64)).toBe(136);
+});
+
+test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate", () => {
+  expect(source).toContain("local CLOCK_HISTORY_MAX = 24");
+  expect(source).toContain("local TARGET_WINDOW_SECONDS = 0.20");
+  expect(source).toContain("local MIN_WINDOW_PULSES = 4");
+  expect(source).toContain("local MAX_WINDOW_PULSES = 16");
+  expect(source).toContain("diff > 8.0");
+  expect(source).toContain("alpha = 0.85");
+  expect(source).toContain("state.smoothBpm");
+});

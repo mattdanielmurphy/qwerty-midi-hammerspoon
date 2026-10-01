@@ -53,13 +53,26 @@ local ARP_MODES = {
   [8] = "Down x2",
 }
 
+-- KeyStep Rate knob physical range is 30 to 240 BPM.
+-- Linear mapping: 30 BPM -> Rate 0, ~136-137 BPM -> Rate 64 (halfway), 240 BPM -> Rate 127.
+local function bpmToRate(bpm)
+  local b = math.max(30, math.min(240, bpm))
+  return math.floor(((b - 30) / (240 - 30)) * 127 + 0.5)
+end
+
+local function rateToBpm(rateVal)
+  local r = math.max(0, math.min(127, rateVal))
+  return math.floor(30 + (r / 127) * (240 - 30) + 0.5)
+end
+
 local config = {
   -- Marker notes are channel-agnostic because direct and sequenced notes
   -- share the KeyStep User Channel.
   outputChannel = 0,
-  -- MIDI CC data is seven-bit. Override this for a different rate encoding.
+  -- MIDI CC data is seven-bit (0..127) mapped across KeyStep's 30..240 BPM range
+  -- with 120 BPM at center (64).
   rateCcValue = function(bpm)
-    return math.max(0, math.min(127, math.floor(bpm + 0.5)))
+    return bpmToRate(bpm)
   end,
 }
 
@@ -67,6 +80,9 @@ local state = {
   mode = 1,
   division = "1/16",
   bpm = 120,
+  rate = 64,
+  smoothBpm = 120,
+  clockHistory = {},
   connected = false,
   deviceName = nil,
   lastEvent = nil,
@@ -146,6 +162,7 @@ end
 local function clearClockTiming()
   state.lastClockTime = nil
   state.clockDeltas = {}
+  state.clockHistory = {}
   state.clocksSinceLastNote = 0
   state.clockWindowStart = nil
   state.clockWindowCount = 0
@@ -200,15 +217,20 @@ local function formatState()
   )
 end
 
-local function publishChange()
-  print(formatState())
+local lastPublishAt = 0
+local function publishChange(force)
+  local now = nowSeconds()
+  if force or (now - lastPublishAt >= 0.5) then
+    lastPublishAt = now
+    print(formatState())
+  end
 end
 
 local function setMode(mode)
   if state.mode == mode then return end
   state.mode = mode
   sendCC(102, mode)
-  publishChange()
+  publishChange(true)
   updateMonitor()
   local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(mode)) or (ARP_MODES[mode] or ("Mode " .. tostring(mode)))
   sendToHud("mode", mode, true, { mode = mode, modeName = modeName })
@@ -219,19 +241,20 @@ local function setDivision(division)
   if state.division == division.label then return end
   state.division = division.label
   sendCC(103, division.ccValue)
-  publishChange()
+  publishChange(true)
   updateMonitor()
   sendToHud("division", division.ccValue, true, { division = division.label })
 end
 
 local function setBpm(bpm)
-  local roundedBpm = math.floor(bpm + 0.5)
+  local roundedBpm = math.max(30, math.min(240, math.floor(bpm + 0.5)))
   if state.bpm == roundedBpm then return end
   state.bpm = roundedBpm
+  state.smoothBpm = roundedBpm
   local rateVal = config.rateCcValue(roundedBpm)
   state.rate = rateVal
   sendCC(104, config.rateCcValue(roundedBpm))
-  publishChange()
+  publishChange(false)
   updateMonitor()
   sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm })
   sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm })
@@ -241,8 +264,9 @@ local function setRate(rateVal)
   local roundedRate = math.max(0, math.min(127, math.floor(rateVal + 0.5)))
   if state.rate == roundedRate then return end
   state.rate = roundedRate
-  local bpm = math.floor(30 + (roundedRate / 127) * (240 - 30) + 0.5)
+  local bpm = rateToBpm(roundedRate)
   state.bpm = bpm
+  state.smoothBpm = bpm
   sendCC(104, roundedRate)
   publishChange()
   updateMonitor()
@@ -276,6 +300,11 @@ local function nearestDivisionByPulses(pulses)
   return nearest
 end
 
+local CLOCK_HISTORY_MAX = 24
+local TARGET_WINDOW_SECONDS = 0.20
+local MIN_WINDOW_PULSES = 4
+local MAX_WINDOW_PULSES = 16
+
 local function handleClock(timestamp)
   state.clockPulseCount = state.clockPulseCount + 1
   state.clocksSinceLastNote = (state.clocksSinceLastNote or 0) + 1
@@ -285,24 +314,59 @@ local function handleClock(timestamp)
   state.lastClockTime = timestamp
   local delta = previous and (timestamp - previous) or 0
   if delta > CLOCK_RESET_SECONDS then
+    state.clockHistory = {}
     state.clockWindowStart = timestamp
     state.clockWindowCount = 0
   end
 
-  if not state.clockWindowStart then
-    state.clockWindowStart = timestamp
-    state.clockWindowCount = 0
-  else
-    state.clockWindowCount = (state.clockWindowCount or 0) + 1
-    if state.clockWindowCount >= CLOCK_PULSES_PER_QUARTER then
-      local elapsed = timestamp - state.clockWindowStart
-      state.clockWindowStart = timestamp
-      state.clockWindowCount = 0
-      -- Valid BPM range: 30 to 240 (elapsed between 0.25s and 2.0s)
-      if elapsed >= 0.2 and elapsed <= 2.5 then
-        local instantBpm = 60 / elapsed
-        local newBpm = state.bpm and (state.bpm * 0.6 + instantBpm * 0.4) or instantBpm
-        setBpm(newBpm)
+  local history = state.clockHistory or {}
+  table.insert(history, timestamp)
+  while #history > CLOCK_HISTORY_MAX do
+    table.remove(history, 1)
+  end
+  state.clockHistory = history
+
+  local count = #history
+  if count >= MIN_WINDOW_PULSES then
+    -- Adaptive sliding window: span at least TARGET_WINDOW_SECONDS (200ms) or up to MAX_WINDOW_PULSES
+    local k = MIN_WINDOW_PULSES - 1
+    while k < (count - 1) and k < MAX_WINDOW_PULSES and (timestamp - history[count - k]) < TARGET_WINDOW_SECONDS do
+      k = k + 1
+    end
+
+    local elapsed = timestamp - history[count - k]
+    if elapsed > 0.03 then
+      -- 24 PPQN: instant BPM derived from sliding window of k pulses over elapsed seconds.
+      -- If k == CLOCK_PULSES_PER_QUARTER (24 pulses), this evaluates directly to 60 / elapsed.
+      local instantBpm = (60 * k) / (CLOCK_PULSES_PER_QUARTER * elapsed)
+
+      -- Valid KeyStep BPM range: 30 to 240
+      if instantBpm >= 25 and instantBpm <= 255 then
+        local currentBpm = state.smoothBpm or state.bpm or 120
+        local diff = math.abs(instantBpm - currentBpm)
+
+        -- Dynamic slew rate: snap immediately on fast knob turns, smooth in steady-state
+        local alpha
+        if diff > 8.0 then
+          alpha = 0.85
+        elseif diff > 3.0 then
+          alpha = 0.55
+        elseif diff > 1.2 then
+          alpha = 0.25
+        else
+          alpha = 0.10
+        end
+
+        currentBpm = currentBpm * (1.0 - alpha) + instantBpm * alpha
+        state.smoothBpm = currentBpm
+
+        -- Deadband / hysteresis to prevent 1-BPM jitter flickering in steady state
+        local lastBpm = state.bpm or 120
+        if math.abs(currentBpm - lastBpm) >= 0.65 then
+          local roundedBpm = math.floor(currentBpm + 0.5)
+          roundedBpm = math.max(30, math.min(240, roundedBpm))
+          setBpm(roundedBpm)
+        end
       end
     end
   end
@@ -677,5 +741,8 @@ if not _G.activeWatchers.keyStepDeviceWatcherRegistered then
     if controller then controller.checkConnection() end
   end)
 end
+
+KeyStep.bpmToRate = bpmToRate
+KeyStep.rateToBpm = rateToBpm
 
 return KeyStep

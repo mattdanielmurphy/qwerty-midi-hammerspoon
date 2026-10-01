@@ -5418,14 +5418,23 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
-  // Rate (smooth 0-127) & BPM
+  // Rate (smooth 0-127) & BPM (30..240 BPM, ~137 BPM at halfway 64)
   if (controlId === 'rate' || controlId === 'bpm') {
+    const ksBpmToRate = (b) => {
+      const clamped = Math.max(30, Math.min(240, b));
+      return Math.round(((clamped - 30) / (240 - 30)) * 127);
+    };
+    const ksRateToBpm = (r) => {
+      const clamped = Math.max(0, Math.min(127, r));
+      return Math.round(30 + (clamped / 127) * (240 - 30));
+    };
+
     let rate = extra.rate !== undefined ? extra.rate : (controlId === 'rate' ? value : null);
     let bpm = extra.bpm !== undefined ? extra.bpm : (controlId === 'bpm' ? value : null);
     if (rate === null && bpm !== null) {
-      rate = Math.max(0, Math.min(127, Math.round(((bpm - 30) / (240 - 30)) * 127)));
+      rate = ksBpmToRate(bpm);
     } else if (bpm === null && rate !== null) {
-      bpm = Math.round(30 + (rate / 127) * (240 - 30));
+      bpm = ksRateToBpm(rate);
     }
     rate = rate !== null ? rate : 64;
     bpm = bpm !== null ? bpm : 120;
@@ -5682,9 +5691,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let startY = 0;
     let startRate = 64;
 
+    const ksRateToBpm = (r) => {
+      const clamped = Math.max(0, Math.min(127, r));
+      return Math.round(30 + (clamped / 127) * (240 - 30));
+    };
+
     const setSmoothRate = (newRate) => {
       const clampedRate = Math.max(0, Math.min(127, Math.round(newRate)));
-      const bpm = Math.round(30 + (clampedRate / 127) * (240 - 30));
+      const bpm = ksRateToBpm(clampedRate);
       window.updateKeyStepState('rate', clampedRate, true, { rate: clampedRate, bpm: bpm });
       postMidi({ type: 'keystepRate', rate: clampedRate, bpm: bpm });
     };
