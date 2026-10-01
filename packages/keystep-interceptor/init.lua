@@ -19,4 +19,7 @@ return {
   showMonitor = keyStep.showMonitor,
   hideMonitor = keyStep.hideMonitor,
   toggleMonitor = keyStep.toggleMonitor,
+  getFullState = keyStep.getFullState,
+  syncToHud = keyStep.syncToHud,
+  analyzeSequenceAndInferKnobs = keyStep.analyzeSequenceAndInferKnobs,
 }

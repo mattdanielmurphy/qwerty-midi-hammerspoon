@@ -65,10 +65,29 @@ local function rateToBpm(rateVal)
   return math.floor(30 + (r / 127) * (240 - 30) + 0.5)
 end
 
+local function loadSetting(key, default)
+  if hs and hs.settings then
+    local v = hs.settings.get(key)
+    if v ~= nil then return v end
+  end
+  return default
+end
+
+local function persistSetting(key, val)
+  if hs and hs.settings then
+    hs.settings.set(key, val)
+  end
+end
+
 local config = {
   -- Marker notes are channel-agnostic because direct and sequenced notes
   -- share the KeyStep User Channel.
   outputChannel = 0,
+  -- Rate knob defaults to standard MIDI Master Volume (CC 7)
+  rateCc = 7,
+  -- 8-position stepped knobs mapped to configurable CC controllers
+  modeCc = 16, -- General Purpose Controller 1 (or 102 fallback)
+  divCc = 17,  -- General Purpose Controller 2 (or 103 fallback)
   -- MIDI CC data is seven-bit (0..127) mapped across KeyStep's 30..240 BPM range
   -- with 120 BPM at center (64).
   rateCcValue = function(bpm)
@@ -76,12 +95,14 @@ local config = {
   end,
 }
 
+local MAX_SEQUENCE_HISTORY = 32
+
 local state = {
-  mode = 1,
-  division = "1/16",
-  bpm = 120,
-  rate = 64,
-  smoothBpm = 120,
+  mode = loadSetting("qwertyMidi_ks_mode", 1),
+  division = loadSetting("qwertyMidi_ks_division", "1/16"),
+  bpm = loadSetting("qwertyMidi_ks_bpm", 120),
+  rate = loadSetting("qwertyMidi_ks_rate", 64),
+  smoothBpm = loadSetting("qwertyMidi_ks_bpm", 120),
   clockHistory = {},
   connected = false,
   deviceName = nil,
@@ -98,13 +119,14 @@ local state = {
   pitchBend = 8192,
   modWheel = 0,
   sustain = 0,
-  seqArpMode = "arp",
+  seqArpMode = loadSetting("qwertyMidi_ks_seqArpMode", "arp"),
   playing = false,
   recording = false,
   shift = false,
   hold = false,
   octave = 0,
   activeKeys = {},
+  sequenceHistory = {},
 }
 
 local function sendToHud(controlId, value, pressed, extra)
@@ -229,21 +251,29 @@ end
 local function setMode(mode)
   if state.mode == mode then return end
   state.mode = mode
+  persistSetting("qwertyMidi_ks_mode", mode)
+  -- 8-position knob: map 1..8 across full 0..127 CC range
+  local modeCcVal = math.floor(((mode - 1) / 7) * 127 + 0.5)
+  if config.modeCc then sendCC(config.modeCc, modeCcVal) end
   sendCC(102, mode)
   publishChange(true)
   updateMonitor()
   local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(mode)) or (ARP_MODES[mode] or ("Mode " .. tostring(mode)))
-  sendToHud("mode", mode, true, { mode = mode, modeName = modeName })
+  sendToHud("mode", mode, true, { mode = mode, modeName = modeName, cc = config.modeCc, ccValue = modeCcVal })
 end
 
 local function setDivision(division)
   if not division then return end
   if state.division == division.label then return end
   state.division = division.label
+  persistSetting("qwertyMidi_ks_division", division.label)
+  -- 8-position knob: map 1..8 across full 0..127 CC range
+  local divCcVal = math.floor(((division.ccValue - 1) / 7) * 127 + 0.5)
+  if config.divCc then sendCC(config.divCc, divCcVal) end
   sendCC(103, division.ccValue)
   publishChange(true)
   updateMonitor()
-  sendToHud("division", division.ccValue, true, { division = division.label })
+  sendToHud("division", division.ccValue, true, { division = division.label, cc = config.divCc, ccValue = divCcVal })
 end
 
 local function setBpm(bpm)
@@ -251,27 +281,51 @@ local function setBpm(bpm)
   if state.bpm == roundedBpm then return end
   state.bpm = roundedBpm
   state.smoothBpm = roundedBpm
+  persistSetting("qwertyMidi_ks_bpm", roundedBpm)
   local rateVal = config.rateCcValue(roundedBpm)
   state.rate = rateVal
+  persistSetting("qwertyMidi_ks_rate", rateVal)
+  -- Rate knob is mapped to Master Volume (CC 7) by default
+  sendCC(config.rateCc or 7, rateVal)
   sendCC(104, config.rateCcValue(roundedBpm))
+  -- Synchronize Master Volume with QWERTY MIDI engine
+  if _G.activeWatchers and _G.activeWatchers.state then
+    _G.activeWatchers.state.topRowVolume = rateVal
+    _G.activeWatchers.state.bottomRowVolume = rateVal
+  end
+  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+    _G.activeWatchers.hud.updateWebviewHud()
+  end
   publishChange(false)
   updateMonitor()
-  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm })
-  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm })
+  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, cc = config.rateCc or 7, ccValue = rateVal })
+  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, cc = config.rateCc or 7, ccValue = rateVal })
 end
 
 local function setRate(rateVal)
   local roundedRate = math.max(0, math.min(127, math.floor(rateVal + 0.5)))
   if state.rate == roundedRate then return end
   state.rate = roundedRate
+  persistSetting("qwertyMidi_ks_rate", roundedRate)
   local bpm = rateToBpm(roundedRate)
   state.bpm = bpm
   state.smoothBpm = bpm
+  persistSetting("qwertyMidi_ks_bpm", bpm)
+  -- Rate knob is mapped to Master Volume (CC 7) by default
+  sendCC(config.rateCc or 7, roundedRate)
   sendCC(104, roundedRate)
+  -- Synchronize Master Volume with QWERTY MIDI engine
+  if _G.activeWatchers and _G.activeWatchers.state then
+    _G.activeWatchers.state.topRowVolume = roundedRate
+    _G.activeWatchers.state.bottomRowVolume = roundedRate
+  end
+  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+    _G.activeWatchers.hud.updateWebviewHud()
+  end
   publishChange()
   updateMonitor()
-  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm })
-  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm })
+  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, cc = config.rateCc or 7, ccValue = roundedRate })
+  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, cc = config.rateCc or 7, ccValue = roundedRate })
 end
 
 local function nearestDivision(ratio)
@@ -375,17 +429,28 @@ end
 local function handleSequenceNote(note, channel, timestamp)
   recordEvent("Sequence note " .. tostring(note), timestamp)
 
+  local pulses = state.clocksSinceLastNote or 0
+  state.clocksSinceLastNote = 0
+
+  table.insert(state.sequenceHistory, {
+    note = note,
+    channel = channel,
+    time = timestamp,
+    pulses = pulses
+  })
+  while #state.sequenceHistory > MAX_SEQUENCE_HISTORY do
+    table.remove(state.sequenceHistory, 1)
+  end
+
   local mode = MODE_NOTES[note]
   if mode then
     if state.seqArpMode ~= "seq" then
       state.seqArpMode = "seq"
+      persistSetting("qwertyMidi_ks_seqArpMode", "seq")
       sendToHud("seq_arp", 1, true, { mode = "seq" })
     end
     setMode(mode)
   end
-
-  local pulses = state.clocksSinceLastNote
-  state.clocksSinceLastNote = 0
 
   -- If MIDI clock pulses are running, pulse count between sequence notes is exact
   -- and completely independent of the Rate knob.
@@ -486,6 +551,23 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     if MODE_NOTES[metadata.note] and (metadata.velocity <= SEQUENCE_MARKER_VELOCITY or metadata.note >= 120) then
       handleSequenceNote(metadata.note, metadata.channel, timestamp)
     else
+      if state.playing then
+        local pulses = state.clocksSinceLastNote or 0
+        state.clocksSinceLastNote = 0
+        table.insert(state.sequenceHistory, {
+          note = metadata.note,
+          channel = metadata.channel,
+          time = timestamp,
+          pulses = pulses
+        })
+        while #state.sequenceHistory > MAX_SEQUENCE_HISTORY do
+          table.remove(state.sequenceHistory, 1)
+        end
+        if pulses and pulses >= 2 and pulses <= 36 then
+          local div = nearestDivisionByPulses(pulses)
+          if div then setDivision(div) end
+        end
+      end
       forwardNote("noteOn", metadata)
       state.activeKeys[metadata.note] = metadata.velocity
       sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
@@ -568,22 +650,117 @@ function KeyStep.isConnected()
   return inputDevice ~= nil
 end
 
+function KeyStep.analyzeSequenceAndInferKnobs()
+  -- 1. Rate Knob from recent clock pulses
+  if state.clockHistory and #state.clockHistory >= MIN_WINDOW_PULSES then
+    local now = nowSeconds()
+    local lastClock = state.clockHistory[#state.clockHistory]
+    if (now - lastClock) <= 1.5 then
+      local currentBpm = state.smoothBpm or state.bpm
+      if currentBpm and math.abs(currentBpm - (state.bpm or 120)) >= 0.65 then
+        local roundedBpm = math.max(30, math.min(240, math.floor(currentBpm + 0.5)))
+        setBpm(roundedBpm)
+      end
+    end
+  end
+
+  -- 2. Mode Knob from most recent sequence marker note
+  if state.sequenceHistory and #state.sequenceHistory > 0 then
+    for i = #state.sequenceHistory, 1, -1 do
+      local item = state.sequenceHistory[i]
+      local markerMode = MODE_NOTES[item.note]
+      if markerMode then
+        if state.seqArpMode ~= "seq" then
+          state.seqArpMode = "seq"
+          persistSetting("qwertyMidi_ks_seqArpMode", "seq")
+          sendToHud("seq_arp", 1, true, { mode = "seq" })
+        end
+        if state.mode ~= markerMode then
+          setMode(markerMode)
+        end
+        break
+      end
+    end
+
+    -- 3. Time Division Knob from recent note pulse deltas
+    local pulseDeltas = {}
+    for i = 1, #state.sequenceHistory do
+      local p = state.sequenceHistory[i].pulses
+      if p and p >= 2 and p <= 48 then
+        table.insert(pulseDeltas, p)
+      end
+    end
+
+    if #pulseDeltas > 0 then
+      local minP = math.huge
+      for _, p in ipairs(pulseDeltas) do
+        if p < minP then minP = p end
+      end
+      local div = nearestDivisionByPulses(minP)
+      if div and div.label ~= state.division then
+        setDivision(div)
+      end
+    end
+  end
+end
+
+function KeyStep.getFullState()
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
+  local divIdx = 3
+  for i, d in ipairs(DIVISIONS) do
+    if d.label == state.division then
+      divIdx = i
+      break
+    end
+  end
+  return {
+    connected = state.connected,
+    deviceName = state.deviceName,
+    mode = state.mode,
+    modeName = modeName,
+    division = state.division,
+    divIdx = divIdx,
+    rate = state.rate or 64,
+    bpm = state.bpm or 120,
+    seqArp = state.seqArpMode or "arp",
+    playing = state.playing == true,
+    recording = state.recording == true,
+    hold = state.hold == true,
+    shift = state.shift == true,
+    octave = state.octave or 0,
+    pitchBend = state.pitchBend or 8192,
+    modWheel = state.modWheel or 0,
+    rateCc = config.rateCc or 7,
+    modeCc = config.modeCc or 16,
+    divCc = config.divCc or 17,
+  }
+end
+
+function KeyStep.syncToHud()
+  KeyStep.analyzeSequenceAndInferKnobs()
+
+  if not hudRef then return end
+  local s = KeyStep.getFullState()
+  sendToHud("connection", s.connected and 1 or 0, s.connected, { deviceName = s.deviceName })
+  sendToHud("mode", s.mode, true, { mode = s.mode, modeName = s.modeName, cc = config.modeCc, ccValue = math.floor(((s.mode - 1) / 7) * 127 + 0.5) })
+  sendToHud("division", s.divIdx, true, { division = s.division, cc = config.divCc, ccValue = math.floor(((s.divIdx - 1) / 7) * 127 + 0.5) })
+  sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 7, ccValue = s.rate })
+  sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 7, ccValue = s.rate })
+  sendToHud("seq_arp", s.seqArp == "seq" and 1 or 0, true, { mode = s.seqArp })
+  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.playing and "play" or "stop" })
+  sendToHud("octave", s.octave, true, { octave = s.octave })
+  sendToHud("hold", s.hold and 127 or 0, s.hold, { hold = s.hold })
+  sendToHud("shift", s.shift and 1 or 0, s.shift, { shift = s.shift })
+  sendToHud("pitch_bend", s.pitchBend, true, { pitch = s.pitchBend })
+  sendToHud("mod_wheel", s.modWheel, true, { cc = 1, value = s.modWheel })
+end
+
 function KeyStep.setHud(hudInstance)
   hudRef = hudInstance
   if hudRef and hudRef.updateConnectionStatus then
     hudRef.updateConnectionStatus(inputDevice ~= nil)
   end
-  if inputDevice then
-    local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
-    sendToHud("connection", 1, true, { deviceName = state.deviceName })
-    sendToHud("mode", state.mode, true, { mode = state.mode, modeName = modeName })
-    sendToHud("division", 3, true, { division = state.division })
-    sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
-    sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
-    sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
-    sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
-    sendToHud("octave", state.octave, true, { octave = state.octave })
-  end
+  KeyStep.syncToHud()
 end
 
 function KeyStep.handleGuiAction(actionType, data)
@@ -744,5 +921,8 @@ end
 
 KeyStep.bpmToRate = bpmToRate
 KeyStep.rateToBpm = rateToBpm
+KeyStep.getFullState = KeyStep.getFullState
+KeyStep.syncToHud = KeyStep.syncToHud
+KeyStep.analyzeSequenceAndInferKnobs = KeyStep.analyzeSequenceAndInferKnobs
 
 return KeyStep

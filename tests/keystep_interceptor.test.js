@@ -98,3 +98,39 @@ test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate
   expect(source).toContain("alpha = 0.85");
   expect(source).toContain("state.smoothBpm");
 });
+
+test("maps Rate knob to Master Volume CC #7 by default and synchronizes volume levels", () => {
+  expect(source).toContain("rateCc = 7");
+  expect(source).toContain("sendCC(config.rateCc or 7, rateVal)");
+  expect(source).toContain("sendCC(config.rateCc or 7, roundedRate)");
+  expect(source).toContain("state.topRowVolume = rateVal");
+  expect(source).toContain("state.bottomRowVolume = rateVal");
+});
+
+test("maps 8-position stepped knobs (Mode and Time Div) across full 0..127 CC range", () => {
+  expect(source).toContain("modeCc = 16");
+  expect(source).toContain("divCc = 17");
+  expect(source).toContain("math.floor(((mode - 1) / 7) * 127 + 0.5)");
+  expect(source).toContain("math.floor(((division.ccValue - 1) / 7) * 127 + 0.5)");
+
+  // Verify 8-step mathematical progression
+  const calcStep = (idx) => Math.round(((idx - 1) / 7) * 127);
+  expect(calcStep(1)).toBe(0);
+  expect(calcStep(2)).toBe(18);
+  expect(calcStep(3)).toBe(36);
+  expect(calcStep(4)).toBe(54);
+  expect(calcStep(5)).toBe(73);
+  expect(calcStep(6)).toBe(91);
+  expect(calcStep(7)).toBe(109);
+  expect(calcStep(8)).toBe(127);
+});
+
+test("immediately recalls last known knob positions and analyzes sequence to infer changes", () => {
+  expect(source).toContain("loadSetting(\"qwertyMidi_ks_mode\"");
+  expect(source).toContain("loadSetting(\"qwertyMidi_ks_division\"");
+  expect(source).toContain("loadSetting(\"qwertyMidi_ks_rate\"");
+  expect(source).toContain("loadSetting(\"qwertyMidi_ks_bpm\"");
+  expect(source).toContain("KeyStep.analyzeSequenceAndInferKnobs");
+  expect(source).toContain("KeyStep.getFullState");
+  expect(source).toContain("KeyStep.syncToHud");
+});

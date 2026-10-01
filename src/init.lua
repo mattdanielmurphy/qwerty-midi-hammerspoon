@@ -62,6 +62,9 @@ function _G.toggleMidiMode(newState)
     if keystep and keystep.connect and not keystep.isConnected() then
       pcall(function() keystep.connect("Arturia KeyStep 32") end)
     end
+    if keystep and keystep.syncToHud then
+      pcall(function() keystep.syncToHud() end)
+    end
   else
     -- Stop all key repeats before tearing down
     if controls.stopAllControlRepeats then

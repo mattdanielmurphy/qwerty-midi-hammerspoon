@@ -2613,18 +2613,18 @@ local HTML_UI_CONTENT = [[
             </div>
 
             <!-- Knob 2: Time Div (1/4 -> 1/32, then 1/4T -> 1/32T) -->
-            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (1/4 -> 1/32, then 1/4 T -> 1/32 T)">
+            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (8 Positions, CC 17)">
               <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Time Div</span>
               <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
             </div>
 
-            <!-- Knob 3: Rate (smooth 0-127) -->
-            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate (smooth 0-127)">
+            <!-- Knob 3: Rate / Master Volume (CC 7) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #7 (0-127)">
               <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
               <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
-              <span class="ks-knob-title">Rate</span>
-              <span class="ks-knob-val" id="ks-knob-val-rate">120 BPM</span>
+              <span class="ks-knob-title">Rate / Vol</span>
+              <span class="ks-knob-val" id="ks-knob-val-rate">Vol 64 (120 BPM)</span>
             </div>
           </div>
 
@@ -4725,6 +4725,9 @@ local HTML_UI_CONTENT = [[
       } else if (data.nanokeyConnected !== undefined) {
         if (typeof setKeyStepConnected === 'function') setKeyStepConnected(data.nanokeyConnected);
       }
+      if (data.keystepState && typeof window.syncFullKeyStepState === 'function') {
+        window.syncFullKeyStepState(data.keystepState);
+      }
 
       renderCount++;
       if (renderCount >= 100) {
@@ -5299,6 +5302,7 @@ window._ksInternalState = {
   seqArp: 'arp',
   division: '1/16',
   bpm: 120,
+  rate: 64,
   playing: false,
   recording: false,
   hold: false,
@@ -5307,6 +5311,13 @@ window._ksInternalState = {
   pitchBend: 8192,
   modWheel: 0,
 };
+try {
+  const savedKs = localStorage.getItem('qwertyMidi_ks_state');
+  if (savedKs) {
+    const parsed = JSON.parse(savedKs);
+    Object.assign(window._ksInternalState, parsed);
+  }
+} catch(e) {}
 
 window.setKeyStepConnected = function(connected) {
   window.keystepConnected = !!connected;
@@ -5545,11 +5556,41 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     if (btnUp) btnUp.classList.toggle('active', oct > 0);
     return;
   }
+
+  try {
+    localStorage.setItem('qwertyMidi_ks_state', JSON.stringify(window._ksInternalState));
+  } catch(e) {}
 };
 window.updateNanoKeyState = window.updateKeyStepState;
 
+window.syncFullKeyStepState = function(stateObj) {
+  if (!stateObj) return;
+  if (stateObj.mode !== undefined) window.updateKeyStepState('mode', stateObj.mode);
+  if (stateObj.division !== undefined) {
+    const divIdx = stateObj.divIdx || (DIVISION_NAMES.indexOf(stateObj.division) + 1) || 3;
+    window.updateKeyStepState('division', divIdx, true, { division: stateObj.division });
+  }
+  if (stateObj.rate !== undefined || stateObj.bpm !== undefined) {
+    window.updateKeyStepState('rate', stateObj.rate, true, { rate: stateObj.rate, bpm: stateObj.bpm });
+  }
+  if (stateObj.seqArp !== undefined) {
+    window.updateKeyStepState('seq_arp', stateObj.seqArp === 'seq' ? 1 : 0, true, { mode: stateObj.seqArp });
+  }
+  if (stateObj.octave !== undefined) window.updateKeyStepState('octave', stateObj.octave);
+  if (stateObj.pitchBend !== undefined) window.updateKeyStepState('pitch_bend', stateObj.pitchBend);
+  if (stateObj.modWheel !== undefined) window.updateKeyStepState('mod_wheel', stateObj.modWheel);
+  if (stateObj.playing !== undefined) window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
+  if (stateObj.hold !== undefined) window.updateKeyStepState('hold', stateObj.hold ? 127 : 0, stateObj.hold);
+  if (stateObj.shift !== undefined) window.updateKeyStepState('shift', stateObj.shift ? 1 : 0, stateObj.shift);
+  if (stateObj.connected !== undefined) window.setKeyStepConnected(stateObj.connected);
+};
+
 // Interactive event handlers for KeyStep 32 hardware GUI
 document.addEventListener('DOMContentLoaded', () => {
+  if (window.syncFullKeyStepState && window._ksInternalState) {
+    window.syncFullKeyStepState(window._ksInternalState);
+  }
+
   const postMidi = (msg) => {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage(msg);

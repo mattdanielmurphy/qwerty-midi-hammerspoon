@@ -842,6 +842,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
   local payload = {
     keystepConnected = isKeyStepConnected(),
+    keystepState = _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.getFullState and _G.activeWatchers.keystep.getFullState() or nil,
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
@@ -1038,6 +1039,9 @@ local function createMidiWebview()
       lastHeartbeat = os.time()
       evalFailCount = 0
       updateWebviewHud()
+      if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.syncToHud then
+        _G.activeWatchers.keystep.syncToHud()
+      end
     elseif body.type == "pong" then
       lastPongTime = os.time()
       lastHeartbeat = os.time()
