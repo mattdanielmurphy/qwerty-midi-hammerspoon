@@ -37,6 +37,15 @@ test("quantizes straight and triplet note intervals and emits dedicated CCs", ()
   expect(source).toContain("sendCC(104, config.rateCcValue(roundedBpm))");
 });
 
+test("detects time division by counting 24-PPQN clock pulses between sequence notes", () => {
+  expect(source).toContain("nearestDivisionByPulses");
+  expect(source).toContain("state.clocksSinceLastNote");
+  expect(source).toContain("pulses = 24");
+  expect(source).toContain("pulses = 12");
+  expect(source).toContain("pulses = 6");
+  expect(source).toContain("pulses = 3");
+});
+
 test("clears stale timing on transport stop and guards paused streams", () => {
   expect(source).toContain('commandType == "systemStopSequence"');
   expect(source).toContain("delta > CLOCK_RESET_SECONDS");

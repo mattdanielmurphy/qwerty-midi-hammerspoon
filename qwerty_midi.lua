@@ -2780,14 +2780,14 @@ local MODE_NOTES = {
 }
 
 local DIVISIONS = {
-  { label = "1/4",   ratio = 1.0,        ccValue = 1 },
-  { label = "1/8",   ratio = 0.5,        ccValue = 2 },
-  { label = "1/16",  ratio = 0.25,       ccValue = 3 },
-  { label = "1/32",  ratio = 0.125,      ccValue = 4 },
-  { label = "1/4T",  ratio = 2 / 3,      ccValue = 5 },
-  { label = "1/8T",  ratio = 1 / 3,      ccValue = 6 },
-  { label = "1/16T", ratio = 1 / 6,      ccValue = 7 },
-  { label = "1/32T", ratio = 1 / 12,     ccValue = 8 },
+  { label = "1/4",   pulses = 24, ratio = 1.0,        ccValue = 1 },
+  { label = "1/8",   pulses = 12, ratio = 0.5,        ccValue = 2 },
+  { label = "1/16",  pulses = 6,  ratio = 0.25,       ccValue = 3 },
+  { label = "1/32",  pulses = 3,  ratio = 0.125,      ccValue = 4 },
+  { label = "1/4T",  pulses = 16, ratio = 2 / 3,      ccValue = 5 },
+  { label = "1/8T",  pulses = 8,  ratio = 1 / 3,      ccValue = 6 },
+  { label = "1/16T", pulses = 4,  ratio = 1 / 6,      ccValue = 7 },
+  { label = "1/32T", pulses = 2,  ratio = 1 / 12,     ccValue = 8 },
 }
 
 local inputDevice = nil
@@ -2833,6 +2833,7 @@ local state = {
   lastClockTime = nil,
   clockDeltas = {},
   lastSequenceNoteTime = nil,
+  clocksSinceLastNote = 0,
   pitchBend = 8192,
   modWheel = 0,
   sustain = 0,
@@ -2900,10 +2901,12 @@ end
 local function clearClockTiming()
   state.lastClockTime = nil
   state.clockDeltas = {}
+  state.clocksSinceLastNote = 0
 end
 
 local function clearNoteTiming()
   state.lastSequenceNoteTime = nil
+  state.clocksSinceLastNote = 0
 end
 
 local function getQwertyOutput()
@@ -3013,8 +3016,22 @@ local function nearestDivision(ratio)
   return nearest
 end
 
+local function nearestDivisionByPulses(pulses)
+  local nearest = nil
+  local nearestError = math.huge
+  for _, division in ipairs(DIVISIONS) do
+    local err = math.abs(pulses - division.pulses)
+    if err < nearestError then
+      nearest = division
+      nearestError = err
+    end
+  end
+  return nearest
+end
+
 local function handleClock(timestamp)
   state.clockPulseCount = state.clockPulseCount + 1
+  state.clocksSinceLastNote = (state.clocksSinceLastNote or 0) + 1
   recordEvent("MIDI clock", timestamp)
   local previous = state.lastClockTime
   state.lastClockTime = timestamp
@@ -3047,6 +3064,19 @@ local function handleSequenceNote(note, channel, timestamp)
       sendToHud("seq_arp", 1, true, { mode = "seq" })
     end
     setMode(mode)
+  end
+
+  local pulses = state.clocksSinceLastNote
+  state.clocksSinceLastNote = 0
+
+  -- If MIDI clock pulses are running, pulse count between sequence notes is exact
+  -- and completely independent of the Rate knob.
+  if pulses and pulses >= 2 and pulses <= 36 then
+    local div = nearestDivisionByPulses(pulses)
+    if div then
+      setDivision(div)
+      return
+    end
   end
 
   local previous = state.lastSequenceNoteTime
