@@ -10,7 +10,9 @@ const monitorHtml = await Bun.file(
   new URL("../packages/keystep-interceptor/keystep_ui_html.lua", import.meta.url),
 ).text();
 
-test("maps velocity-1 KeyStep marker notes C8 through G8 to mode positions 1 through 8", () => {
+test("maps sequence marker notes C10 through G10 (120..127) and C8..G8 (108..115) to mode positions 1 through 8", () => {
+  expect(source).toContain("[120] = 1, [121] = 2, [122] = 3, [123] = 4");
+  expect(source).toContain("[124] = 5, [125] = 6, [126] = 7, [127] = 8");
   expect(source).toContain("[108] = 1, [109] = 2, [110] = 3, [111] = 4");
   expect(source).toContain("[112] = 5, [113] = 6, [114] = 7, [115] = 8");
   expect(source).toContain("local SEQUENCE_MARKER_VELOCITY = 1");
@@ -28,7 +30,7 @@ test("derives BPM from a moving average of 24 PPQN clock pulses", () => {
 });
 
 test("quantizes straight and triplet note intervals and emits dedicated CCs", () => {
-  for (const label of ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"]) {
+  for (const label of ["1/4", "1/8", "1/16", "1/32", "1/4T", "1/8T", "1/16T", "1/32T"]) {
     expect(source).toContain(`label = "${label}"`);
   }
   expect(source).toContain("sendCC(103, division.ccValue)");

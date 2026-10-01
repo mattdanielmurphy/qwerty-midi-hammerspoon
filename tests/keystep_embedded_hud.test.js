@@ -54,15 +54,15 @@ test("renders authentic KeyStep 32 hardware silhouette and controls", () => {
   expect(htmlSource).toContain('id="ks-mod-fill"');
 });
 
-test("embeds 32 slim keys spanning notes 48 (C3) through 79 (G5)", () => {
+test("embeds 32 slim keys spanning notes 41 (F) through 72 (C)", () => {
   // 19 White keys
-  const whiteNotes = [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79];
+  const whiteNotes = [41, 43, 45, 47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72];
   for (const n of whiteNotes) {
     expect(htmlSource).toContain(`id="ks-key-${n}" data-note="${n}"`);
   }
 
   // 13 Black keys
-  const blackNotes = [49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 75, 78];
+  const blackNotes = [42, 44, 46, 49, 51, 54, 56, 58, 61, 63, 66, 68, 70];
   for (const n of blackNotes) {
     expect(htmlSource).toContain(`id="ks-key-${n}" data-note="${n}"`);
   }

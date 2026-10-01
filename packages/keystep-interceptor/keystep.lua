@@ -16,18 +16,22 @@ local NOTE_RESET_SECONDS = 2.0
 local SEQUENCE_MARKER_VELOCITY = 1
 
 local MODE_NOTES = {
+  -- C10..G10 (120..127): exact sequencer marker notes emitted by KeyStep 32
+  [120] = 1, [121] = 2, [122] = 3, [123] = 4,
+  [124] = 5, [125] = 6, [126] = 7, [127] = 8,
+  -- Also preserve alternate/legacy octaves (108..115: C8/C9..G8/G9)
   [108] = 1, [109] = 2, [110] = 3, [111] = 4,
   [112] = 5, [113] = 6, [114] = 7, [115] = 8,
 }
 
 local DIVISIONS = {
   { label = "1/4",   ratio = 1.0,        ccValue = 1 },
-  { label = "1/4T",  ratio = 2 / 3,      ccValue = 2 },
-  { label = "1/8",   ratio = 0.5,        ccValue = 3 },
-  { label = "1/8T",  ratio = 1 / 3,      ccValue = 4 },
-  { label = "1/16",  ratio = 0.25,       ccValue = 5 },
-  { label = "1/16T", ratio = 1 / 6,      ccValue = 6 },
-  { label = "1/32",  ratio = 0.125,      ccValue = 7 },
+  { label = "1/8",   ratio = 0.5,        ccValue = 2 },
+  { label = "1/16",  ratio = 0.25,       ccValue = 3 },
+  { label = "1/32",  ratio = 0.125,      ccValue = 4 },
+  { label = "1/4T",  ratio = 2 / 3,      ccValue = 5 },
+  { label = "1/8T",  ratio = 1 / 3,      ccValue = 6 },
+  { label = "1/16T", ratio = 1 / 6,      ccValue = 7 },
   { label = "1/32T", ratio = 1 / 12,     ccValue = 8 },
 }
 
@@ -201,10 +205,12 @@ local function setMode(mode)
   sendCC(102, mode)
   publishChange()
   updateMonitor()
-  sendToHud("mode", mode, true, { mode = mode, modeName = ARP_MODES[mode] or ("Seq " .. tostring(mode)) })
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(mode)) or (ARP_MODES[mode] or ("Mode " .. tostring(mode)))
+  sendToHud("mode", mode, true, { mode = mode, modeName = modeName })
 end
 
 local function setDivision(division)
+  if not division then return end
   if state.division == division.label then return end
   state.division = division.label
   sendCC(103, division.ccValue)
@@ -217,10 +223,26 @@ local function setBpm(bpm)
   local roundedBpm = math.floor(bpm + 0.5)
   if state.bpm == roundedBpm then return end
   state.bpm = roundedBpm
+  local rateVal = config.rateCcValue(roundedBpm)
+  state.rate = rateVal
   sendCC(104, config.rateCcValue(roundedBpm))
   publishChange()
   updateMonitor()
-  sendToHud("bpm", roundedBpm, true, { bpm = roundedBpm })
+  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm })
+  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm })
+end
+
+local function setRate(rateVal)
+  local roundedRate = math.max(0, math.min(127, math.floor(rateVal + 0.5)))
+  if state.rate == roundedRate then return end
+  state.rate = roundedRate
+  local bpm = math.floor(30 + (roundedRate / 127) * (240 - 30) + 0.5)
+  state.bpm = bpm
+  sendCC(104, roundedRate)
+  publishChange()
+  updateMonitor()
+  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm })
+  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm })
 end
 
 local function nearestDivision(ratio)
@@ -261,11 +283,16 @@ local function handleClock(timestamp)
 end
 
 local function handleSequenceNote(note, channel, timestamp)
-
   recordEvent("Sequence note " .. tostring(note), timestamp)
 
   local mode = MODE_NOTES[note]
-  if mode then setMode(mode) end
+  if mode then
+    if state.seqArpMode ~= "seq" then
+      state.seqArpMode = "seq"
+      sendToHud("seq_arp", 1, true, { mode = "seq" })
+    end
+    setMode(mode)
+  end
 
   local previous = state.lastSequenceNoteTime
   state.lastSequenceNoteTime = timestamp
@@ -347,7 +374,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     state.lastRawNote = metadata.note
     state.lastRawNoteChannel = metadata.channel
     recordEvent("Note " .. tostring(metadata.note) .. " on MIDI " .. tostring((metadata.channel or 0) + 1), timestamp)
-    if MODE_NOTES[metadata.note] and metadata.velocity == SEQUENCE_MARKER_VELOCITY then
+    if MODE_NOTES[metadata.note] and (metadata.velocity <= SEQUENCE_MARKER_VELOCITY or metadata.note >= 120) then
       handleSequenceNote(metadata.note, metadata.channel, timestamp)
     else
       forwardNote("noteOn", metadata)
@@ -402,10 +429,12 @@ function KeyStep.connect(targetName)
   if hudRef and hudRef.updateConnectionStatus then
     hudRef.updateConnectionStatus(true)
   end
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
   sendToHud("connection", 1, true, { deviceName = deviceName })
-  sendToHud("mode", state.mode, true, { mode = state.mode, modeName = ARP_MODES[state.mode] or ("Seq " .. tostring(state.mode)) })
-  sendToHud("division", 5, true, { division = state.division })
-  sendToHud("bpm", state.bpm, true, { bpm = state.bpm })
+  sendToHud("mode", state.mode, true, { mode = state.mode, modeName = modeName })
+  sendToHud("division", 3, true, { division = state.division })
+  sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
+  sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
   sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
   sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
   sendToHud("octave", state.octave, true, { octave = state.octave })
@@ -436,10 +465,12 @@ function KeyStep.setHud(hudInstance)
     hudRef.updateConnectionStatus(inputDevice ~= nil)
   end
   if inputDevice then
+    local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
     sendToHud("connection", 1, true, { deviceName = state.deviceName })
-    sendToHud("mode", state.mode, true, { mode = state.mode, modeName = ARP_MODES[state.mode] or ("Seq " .. tostring(state.mode)) })
-    sendToHud("division", 5, true, { division = state.division })
-    sendToHud("bpm", state.bpm, true, { bpm = state.bpm })
+    sendToHud("mode", state.mode, true, { mode = state.mode, modeName = modeName })
+    sendToHud("division", 3, true, { division = state.division })
+    sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
+    sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
     sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
     sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
     sendToHud("octave", state.octave, true, { octave = state.octave })
@@ -517,8 +548,11 @@ function KeyStep.handleGuiAction(actionType, data)
     state.seqArpMode = (data.mode == "seq" or data.mode == "arp") and data.mode or (state.seqArpMode == "arp" and "seq" or "arp")
     sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
   elseif actionType == "rate" then
+    local rateVal = tonumber(data.rate)
     local bpm = tonumber(data.bpm)
-    if bpm and bpm >= 30 and bpm <= 240 then
+    if rateVal and rateVal >= 0 and rateVal <= 127 then
+      setRate(rateVal)
+    elseif bpm and bpm >= 30 and bpm <= 240 then
       setBpm(bpm)
     end
   end

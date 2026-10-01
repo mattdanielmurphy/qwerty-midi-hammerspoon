@@ -7,8 +7,10 @@ test('KeyStep 32 hardware silhouette and controls exist in WebKit HUD', () => {
   expect(source).toContain('id="keystep-badge"');
   expect(source).toContain('id="keystep-view"');
   expect(source).toContain('.keystep-view');
-  expect(source).toContain('.ks-control-bay');
-  expect(source).toContain('.ks-keybed-bay');
+  expect(source).toContain('.ks-left-cheek');
+  expect(source).toContain('.ks-main-section');
+  expect(source).toContain('.ks-top-bar');
+  expect(source).toContain('.ks-keybed');
 
   // Brand header & connection status dot
   expect(source).toContain('ARTURIA');
@@ -42,16 +44,16 @@ test('KeyStep 32 hardware silhouette and controls exist in WebKit HUD', () => {
   expect(source).toContain('id="ks-mod-val"');
 });
 
-test('KeyStep 32 has 32 slimkeys with exact note ranges 48..79', () => {
-  // 19 White keys: C3(48), D3(50), E3(52), F3(53), G3(55), A3(57), B3(59), C4(60), ... G5(79)
-  const whiteNotes = [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79];
+test('KeyStep 32 has 32 slimkeys with exact note ranges 41..72 (F to C)', () => {
+  // 19 White keys: F(41), G(43), A(45), B(47), C(48), D(50), E(52), F(53), G(55), A(57), B(59), C(60), ... C(72)
+  const whiteNotes = [41, 43, 45, 47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72];
   expect(whiteNotes.length).toBe(19);
   for (const n of whiteNotes) {
     expect(source).toContain(`id="ks-key-${n}"`);
   }
 
-  // 13 Black keys: C#3(49), D#3(51), F#3(54), G#3(56), A#3(58), C#4(61), ... F#5(78)
-  const blackNotes = [49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 75, 78];
+  // 13 Black keys: F#(42), G#(44), A#(46), C#(49), D#(51), F#(54), G#(56), A#(58), C#(61), D#(63), F#(66), G#(68), A#(70)
+  const blackNotes = [42, 44, 46, 49, 51, 54, 56, 58, 61, 63, 66, 68, 70];
   expect(blackNotes.length).toBe(13);
   for (const n of blackNotes) {
     expect(source).toContain(`id="ks-key-${n}"`);

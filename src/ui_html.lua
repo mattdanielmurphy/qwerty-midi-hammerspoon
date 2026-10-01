@@ -1739,12 +1739,13 @@ local HTML_UI_CONTENT = [[
     height: 310px;
     min-height: 310px;
     display: flex;
-    gap: 12px;
-    background: linear-gradient(180deg, #f3f5f8 0%, #e2e6eb 100%);
+    flex-direction: row;
+    gap: 10px;
+    background: linear-gradient(180deg, #f7f8fa 0%, #e5e8ed 100%);
     border-radius: 10px;
-    padding: 10px 14px;
-    border: 1px solid #c8ced6;
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -2px 4px rgba(0, 0, 0, 0.15);
+    padding: 10px 12px;
+    border: 1px solid #c4cad3;
+    box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -2px 4px rgba(0, 0, 0, 0.15);
     position: relative;
     user-select: none;
     box-sizing: border-box;
@@ -1754,192 +1755,70 @@ local HTML_UI_CONTENT = [[
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 
-  /* Left Panel: Master Control Bay */
-  .ks-control-bay {
-    width: 275px;
-    min-width: 275px;
-    background: #15171b;
-    border-radius: 8px;
-    padding: 8px 10px;
-    border: 1px solid #282b33;
-    box-shadow: inset 0 2px 6px rgba(0,0,0,0.8), 0 1px 1px rgba(255,255,255,0.4);
+  /* ── Left Cheek: Hold, Shift, Octave, Touch Strips ── */
+  .ks-left-cheek {
+    width: 124px;
+    min-width: 124px;
+    max-width: 124px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    gap: 6px;
+    padding-right: 8px;
+    border-right: 1.5px solid #d1d5db;
     box-sizing: border-box;
   }
 
-  /* Arturia Header */
-  .ks-header {
+  .ks-cheek-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding-bottom: 5px;
+    flex-direction: column;
+    gap: 1px;
+    margin-bottom: 4px;
   }
-  .ks-brand {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .ks-logo-badge {
-    background: #ffffff;
-    color: #15171b;
+  .ks-brand-title {
+    font-size: 13px;
     font-weight: 900;
-    font-size: 10px;
-    padding: 1px 4px;
-    border-radius: 3px;
-    letter-spacing: 0.5px;
+    letter-spacing: 1.4px;
+    color: #1e293b;
     line-height: 1;
   }
-  .ks-title {
-    font-size: 11px;
+  .ks-brand-sub {
+    font-size: 6.5px;
     font-weight: 800;
-    letter-spacing: 1.2px;
-    color: #e2e8f0;
-    text-transform: uppercase;
-  }
-  .ks-subtitle {
-    font-size: 7.5px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.6px;
     color: #64748b;
     text-transform: uppercase;
   }
-  .ks-status-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #22c55e;
-    box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
-  }
 
-  /* Top Row: Knobs & Switch */
-  .ks-knobs-row {
+  .ks-cheek-btn-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 6px;
-    background: rgba(0,0,0,0.3);
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.05);
+    align-items: flex-start;
+    margin-bottom: 2px;
   }
-  .ks-knob-unit {
+  .ks-cheek-btn-wrap {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    flex: 1;
-    cursor: pointer;
+    gap: 2px;
   }
-  .ks-knob-hdr {
-    font-size: 7.5px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    color: #94a3b8;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-  .ks-knob-dial {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #2e323b 0%, #1a1c22 100%);
-    border: 1.5px solid #475569;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.25);
-    position: relative;
-    transition: transform 0.12s ease-out;
-  }
-  .ks-knob-notch {
-    position: absolute;
-    top: 2px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2.5px;
-    height: 9px;
-    background: #38bdf8;
-    border-radius: 2px;
-    box-shadow: 0 0 5px rgba(56, 189, 248, 0.8);
-  }
-  .ks-knob-val {
-    font-size: 8px;
+  .ks-cheek-reset-label {
+    font-size: 6.5px;
     font-weight: 700;
-    color: #38bdf8;
-    white-space: nowrap;
+    color: #94a3b8;
     text-align: center;
-    max-width: 58px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    letter-spacing: 0.5px;
+    margin: -1px 0 3px 0;
   }
 
-  /* Rate LED */
-  .ks-rate-led {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #475569;
-    margin-bottom: 1px;
-    transition: background-color 0.05s ease, box-shadow 0.05s ease;
-  }
-  .ks-rate-led.flash {
-    background: #38bdf8 !important;
-    box-shadow: 0 0 8px #38bdf8, 0 0 14px rgba(56, 189, 248, 0.8) !important;
-  }
-
-  /* Slide Switch */
-  .ks-switch-unit {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    cursor: pointer;
-  }
-  .ks-switch-track {
-    width: 38px;
-    height: 18px;
-    background: #0f1115;
-    border-radius: 10px;
-    border: 1px solid #334155;
-    position: relative;
-    padding: 2px;
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-  }
-  .ks-switch-thumb {
-    width: 14px;
-    height: 12px;
-    background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
-    border-radius: 4px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4);
-    transition: transform 0.15s ease;
-  }
-  .ks-switch-track.seq .ks-switch-thumb {
-    transform: translateX(18px);
-    background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
-  }
-
-  /* Middle Row: Transport & Function Buttons */
-  .ks-buttons-row {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-  }
-  .ks-btn-subrow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 5px;
-  }
   .ks-btn {
-    flex: 1;
+    width: 100%;
     height: 24px;
-    background: linear-gradient(180deg, #24272f 0%, #17191e 100%);
-    border: 1px solid #334155;
+    background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
+    border: 1px solid #94a3b8;
+    border-bottom: 2px solid #64748b;
     border-radius: 4px;
-    color: #cbd5e1;
+    color: #1e293b;
     font-size: 8px;
     font-weight: 800;
     display: flex;
@@ -1947,98 +1826,75 @@ local HTML_UI_CONTENT = [[
     justify-content: center;
     gap: 4px;
     cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
-    transition: all 0.1s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15), inset 0 1px 0 #ffffff;
+    transition: all 0.08s ease;
     user-select: none;
     box-sizing: border-box;
-    padding: 0 3px;
+    padding: 0 2px;
   }
   .ks-btn:hover {
+    background: #ffffff;
     border-color: #64748b;
-    background: #2a2e38;
   }
   .ks-btn:active {
     transform: translateY(1px);
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+    border-bottom-width: 1px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
   }
   .ks-btn-led {
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background: #475569;
+    background: #cbd5e1;
     flex-shrink: 0;
   }
   .ks-btn.active .ks-btn-led {
-    background: #38bdf8;
-    box-shadow: 0 0 6px #38bdf8;
+    background: #0284c7;
+    box-shadow: 0 0 6px #0284c7;
   }
-  .ks-btn-stop.active {
-    border-color: #f97316;
-    color: #ffedd5;
-  }
-  .ks-btn-stop.active .ks-btn-led {
-    background: #f97316;
-    box-shadow: 0 0 6px #f97316;
-  }
-  .ks-btn-play.active {
-    border-color: #22c55e;
-    color: #f0fdf4;
-    background: linear-gradient(180deg, #15803d 0%, #14532d 100%);
-    box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
-  }
-  .ks-btn-play.active .ks-btn-led {
-    background: #4ade80;
-    box-shadow: 0 0 8px #4ade80;
-  }
-  .ks-btn-rec.active {
-    border-color: #ef4444;
-    color: #fef2f2;
-    background: linear-gradient(180deg, #b91c1c 0%, #7f1d1d 100%);
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
-  }
-  .ks-btn-rec.active .ks-btn-led {
-    background: #f87171;
-    box-shadow: 0 0 8px #f87171;
-  }
-  .ks-btn-hold.active {
-    border-color: #f59e0b;
-    color: #fef3c7;
-    background: linear-gradient(180deg, #b45309 0%, #78350f 100%);
-  }
-  .ks-btn-hold.active .ks-btn-led {
-    background: #fbbf24;
-    box-shadow: 0 0 6px #fbbf24;
-  }
-  .ks-btn-shift.active {
-    border-color: #38bdf8;
-    color: #f0f9ff;
-    background: linear-gradient(180deg, #0369a1 0%, #0c4a6e 100%);
-  }
-  .ks-btn-shift.active .ks-btn-led {
-    background: #38bdf8;
-    box-shadow: 0 0 6px #38bdf8;
-  }
-  .ks-oct-badge {
-    background: #0f1115;
-    border: 1px solid #334155;
-    border-radius: 3px;
-    font-size: 8px;
-    font-weight: 800;
-    color: #e2e8f0;
-    padding: 2px 5px;
-    white-space: nowrap;
+  .ks-btn-sublabel {
+    font-size: 6.5px;
+    font-weight: 700;
+    color: #64748b;
     text-align: center;
+    letter-spacing: 0.2px;
+    line-height: 1;
   }
 
-  /* Bottom Row: Capacitive Touch Strips */
-  .ks-strips-row {
+  .ks-btn-shift {
+    border-color: #0284c7;
+    color: #0369a1;
+  }
+  .ks-btn-shift.active {
+    background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 100%);
+    border-color: #0284c7;
+    color: #0c4a6e;
+  }
+  .ks-btn-shift.active .ks-btn-led {
+    background: #0284c7;
+    box-shadow: 0 0 6px #0284c7;
+  }
+  .ks-btn-hold.active {
+    background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%);
+    border-color: #d97706;
+    color: #92400e;
+  }
+  .ks-btn-hold.active .ks-btn-led {
+    background: #d97706;
+    box-shadow: 0 0 6px #d97706;
+  }
+
+  /* Strips Section */
+  .ks-cheek-strips {
     display: flex;
     gap: 8px;
-    height: 95px;
-    background: rgba(0,0,0,0.3);
-    padding: 6px 8px;
+    height: 145px;
+    background: #0d0f12;
+    padding: 6px;
     border-radius: 6px;
-    border: 1px solid rgba(255,255,255,0.05);
+    border: 1px solid #272a30;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.8);
+    box-sizing: border-box;
   }
   .ks-strip-col {
     flex: 1;
@@ -2046,30 +1902,27 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     gap: 3px;
   }
-  .ks-strip-label {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 7.5px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    color: #94a3b8;
-    text-transform: uppercase;
-  }
-  .ks-strip-val {
-    font-size: 7.5px;
-    font-weight: 700;
-    color: #38bdf8;
-  }
   .ks-touch-well {
     flex: 1;
-    background: #090a0c;
-    border-radius: 4px;
-    border: 1px solid #1e222a;
+    background: #121418;
+    border-radius: 3px;
+    border: 1px solid #22262e;
     position: relative;
     cursor: pointer;
     overflow: hidden;
-    box-shadow: inset 0 2px 4px rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    box-sizing: border-box;
+  }
+  .ks-strip-arrow {
+    font-size: 6px;
+    color: #475569;
+    user-select: none;
+    pointer-events: none;
+    line-height: 1;
   }
   .ks-pitch-center-line {
     position: absolute;
@@ -2077,7 +1930,7 @@ local HTML_UI_CONTENT = [[
     left: 0;
     right: 0;
     height: 1px;
-    background: rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.2);
   }
   .ks-pitch-thumb {
     position: absolute;
@@ -2104,70 +1957,344 @@ local HTML_UI_CONTENT = [[
     pointer-events: none;
     transition: height 0.05s ease-out;
   }
+  .ks-strip-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 7px;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    padding: 0 1px;
+  }
+  .ks-strip-name {
+    color: #cbd5e1;
+  }
+  .ks-strip-val {
+    color: #38bdf8;
+    font-family: monospace;
+    font-size: 7px;
+  }
 
-  /* Right Panel: 32-Key Slimkey Keybed */
-  .ks-keybed-bay {
+  /* ── Main Section: Top Bar + Silkscreen + Keybed ── */
+  .ks-main-section {
     flex: 1;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    background: #ffffff;
-    border-radius: 8px;
-    padding: 6px 8px 8px 8px;
-    border: 1px solid #cbd5e1;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,1);
-    box-sizing: border-box;
     overflow: hidden;
   }
 
-  /* Silkscreen Annotations */
-  .ks-silkscreen-strip {
-    height: 16px;
+  /* Top Bar */
+  .ks-top-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 4px;
-    border-bottom: 1px solid #e2e8f0;
-    margin-bottom: 4px;
+    gap: 10px;
+    height: 82px;
+    margin-bottom: 2px;
   }
-  .ks-silk-section {
+
+  /* Knobs Inset (Light silver recessed bay) */
+  .ks-knobs-inset {
     display: flex;
     align-items: center;
-    gap: 4px;
-    font-size: 7px;
+    gap: 12px;
+    background: linear-gradient(180deg, #e5e8ed 0%, #d5d9e0 100%);
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #b8bec8;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.8);
+  }
+
+  /* Seq / Arp Toggle Switch */
+  .ks-switch-unit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    cursor: pointer;
+  }
+  .ks-switch-lbl {
+    font-size: 7.5px;
+    font-weight: 800;
+    color: #475569;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .ks-switch-track {
+    width: 14px;
+    height: 32px;
+    background: #0f1115;
+    border-radius: 4px;
+    border: 1px solid #334155;
+    position: relative;
+    padding: 1px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+  .ks-switch-thumb {
+    width: 10px;
+    height: 14px;
+    background: linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+    border-radius: 2px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.4);
+    transition: transform 0.15s ease;
+  }
+  .ks-switch-track.seq .ks-switch-thumb {
+    transform: translateY(-16px);
+    background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+  }
+
+  /* Knob Unit */
+  .ks-knob-unit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    cursor: pointer;
+    min-width: 62px;
+    position: relative;
+  }
+  .ks-knob-dial {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #333842 0%, #1a1c22 100%);
+    border: 2px solid #525a68;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.3);
+    position: relative;
+    transition: transform 0.1s ease-out;
+  }
+  .ks-knob-notch {
+    position: absolute;
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2.5px;
+    height: 10px;
+    background: #38bdf8;
+    border-radius: 2px;
+    box-shadow: 0 0 5px rgba(56, 189, 248, 0.9);
+  }
+  .ks-knob-title {
+    font-size: 7.5px;
     font-weight: 800;
     letter-spacing: 0.3px;
+    color: #334155;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1;
+    margin-top: 2px;
+  }
+  .ks-knob-val {
+    font-size: 8px;
+    font-weight: 700;
+    color: #0369a1;
+    white-space: nowrap;
+    text-align: center;
+    max-width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1;
+  }
+  .ks-rate-led {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #94a3b8;
+    margin-bottom: 1px;
+    transition: background-color 0.05s ease, box-shadow 0.05s ease;
+  }
+  .ks-rate-led.flash {
+    background: #0284c7 !important;
+    box-shadow: 0 0 8px #0284c7, 0 0 14px rgba(2, 132, 199, 0.8) !important;
+  }
+
+  /* Transport Buttons Section */
+  .ks-transport-section {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .ks-trans-btn-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .ks-btn-trans {
+    width: 32px;
+    height: 30px;
+    font-size: 9px;
+  }
+  .ks-trans-sub {
+    font-size: 6.5px;
+    font-weight: 700;
+    color: #64748b;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .ks-btn-stop.active {
+    border-color: #ea580c;
+    color: #9a3412;
+    background: linear-gradient(180deg, #ffedd5 0%, #fed7aa 100%);
+  }
+  .ks-btn-stop.active .ks-btn-led {
+    background: #ea580c;
+    box-shadow: 0 0 6px #ea580c;
+  }
+  .ks-btn-play.active {
+    border-color: #16a34a;
+    color: #14532d;
+    background: linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%);
+  }
+  .ks-btn-play.active .ks-btn-led {
+    background: #16a34a;
+    box-shadow: 0 0 6px #16a34a;
+  }
+  .ks-btn-rec.active {
+    border-color: #dc2626;
+    color: #7f1d1d;
+    background: linear-gradient(180deg, #fee2e2 0%, #fecaca 100%);
+  }
+  .ks-btn-rec.active .ks-btn-led {
+    background: #dc2626;
+    box-shadow: 0 0 6px #dc2626;
+  }
+
+  /* Arturia Brand */
+  .ks-arturia-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+  .ks-arturia-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ks-arturia-badge {
+    background: #1e293b;
+    color: #ffffff;
+    font-weight: 900;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    line-height: 1;
+  }
+  .ks-arturia-wordmark {
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    color: #1e293b;
+  }
+  .ks-arturia-slogan {
+    font-size: 6.5px;
+    font-weight: 800;
+    letter-spacing: 0.6px;
     color: #64748b;
     text-transform: uppercase;
   }
-  .ks-silk-section strong {
-    color: #1e293b;
+  .ks-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+  }
+  .ks-oct-badge {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    color: #f8fafc;
+    padding: 1px 6px;
+    white-space: nowrap;
+    text-align: center;
+    margin-top: 2px;
   }
 
-  /* Piano Keys Container */
-  .ks-keys-container {
-    flex: 1;
-    position: relative;
+  /* Silkscreen Legend Bar (directly above keys) */
+  .ks-silkscreen-bar {
     display: flex;
-    height: 100%;
+    align-items: center;
+    height: 18px;
+    background: #eef1f5;
+    border: 1px solid #cbd5e1;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    padding: 0 4px;
+    box-sizing: border-box;
+    font-size: 7px;
+    font-weight: 800;
+    color: #475569;
+    text-transform: uppercase;
     user-select: none;
   }
+  .ks-silk-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+  }
+  .ks-silk-header {
+    color: #0284c7;
+    font-weight: 900;
+    white-space: nowrap;
+    margin-right: 2px;
+  }
+  .ks-silk-midi-ch {
+    flex: 16;
+  }
+  .ks-silk-gate {
+    flex: 5;
+    border-left: 1px solid #cbd5e1;
+    padding-left: 4px;
+  }
+  .ks-silk-swing {
+    flex: 11;
+    border-left: 1px solid #cbd5e1;
+    padding-left: 4px;
+  }
+  .ks-silk-items-16, .ks-silk-items-gate, .ks-silk-items-swing {
+    display: flex;
+    width: 100%;
+    justify-content: space-around;
+    font-size: 6.5px;
+    color: #64748b;
+  }
 
-  /* White Keys Row (19 Keys) */
+  /* Keybed Container */
+  .ks-keybed-container {
+    height: 190px;
+    position: relative;
+    display: flex;
+    background: #ffffff;
+    border: 1px solid #b0b8c4;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    user-select: none;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
   .ks-white-keys {
     display: flex;
     width: 100%;
     height: 100%;
-    gap: 1.5px;
   }
   .ks-key-w {
     flex: 1;
     height: 100%;
-    background: linear-gradient(180deg, #ffffff 0%, #f1f4f8 85%, #e1e6ed 100%);
-    border: 1px solid #b0b8c4;
-    border-bottom: 3px solid #8e98a6;
-    border-radius: 0 0 5px 5px;
-    box-shadow: inset 0 1px 0 #ffffff, 0 3px 5px rgba(0,0,0,0.12);
+    background: linear-gradient(180deg, #ffffff 0%, #f1f4f8 85%, #dce2ea 100%);
+    border-right: 1px solid #b0b8c4;
+    border-bottom: 3.5px solid #8e98a6;
+    border-radius: 0 0 4px 4px;
+    box-shadow: inset 0 1px 0 #ffffff;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -2176,7 +2303,10 @@ local HTML_UI_CONTENT = [[
     cursor: pointer;
     box-sizing: border-box;
     position: relative;
-    transition: transform 0.05s ease, background 0.08s ease, border-color 0.08s ease;
+    transition: transform 0.05s ease, background 0.08s ease;
+  }
+  .ks-key-w:last-child {
+    border-right: none;
   }
   .ks-key-w:hover {
     background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
@@ -2189,7 +2319,7 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 12px rgba(56, 189, 248, 0.7), inset 0 1px 2px rgba(255,255,255,0.8) !important;
   }
   .ks-key-w .ks-key-name {
-    font-size: 8px;
+    font-size: 7.5px;
     font-weight: 800;
     color: #64748b;
     pointer-events: none;
@@ -2198,29 +2328,21 @@ local HTML_UI_CONTENT = [[
     color: #0369a1 !important;
     font-weight: 900 !important;
   }
-  .ks-key-w .ks-key-sub {
-    font-size: 6.5px;
-    font-weight: 700;
-    color: #94a3b8;
-    pointer-events: none;
-    line-height: 1;
-    margin-top: 1px;
-  }
 
-  /* Black Keys (13 Keys) */
+  /* Black Keys */
   .ks-black-keys {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    height: 62%;
+    height: 60%;
     pointer-events: none;
   }
   .ks-key-b {
     position: absolute;
     width: 3.4%;
     height: 100%;
-    background: linear-gradient(180deg, #2a2d34 0%, #151619 80%, #0b0c0e 100%);
+    background: linear-gradient(180deg, #2a2d34 0%, #151619 80%, #08090a 100%);
     border: 1px solid #111215;
     border-bottom: 2.5px solid #000000;
     border-radius: 0 0 3px 3px;
@@ -2405,151 +2527,214 @@ local HTML_UI_CONTENT = [[
 
     <!-- Arturia KeyStep 32 Authentic Hardware View -->
     <div class="keystep-view" id="keystep-view" style="display: none;">
-      <!-- LEFT PANEL: Master Control Bay -->
-      <div class="ks-control-bay">
-        <div class="ks-header">
-          <div class="ks-brand">
-            <span class="ks-logo-badge">A</span>
-            <span class="ks-title">ARTURIA</span>
-            <span class="ks-subtitle">KeyStep 32</span>
-          </div>
-          <div class="ks-status-dot" id="ks-status-dot" title="KeyStep 32 Hardware Connected"></div>
+      <!-- LEFT CHEEK: Model branding, Hold/Shift, Oct-/Oct+, Capacitive Pitch & Mod Strips -->
+      <div class="ks-left-cheek ks-control-bay">
+        <div class="ks-cheek-header">
+          <span class="ks-brand-title">KEYSTEP</span>
+          <span class="ks-brand-sub">KeyStep 32 · CONTROLLER & SEQUENCER</span>
         </div>
 
-        <!-- Top Knob Row: Switch + Mode + Div + Rate -->
-        <div class="ks-knobs-row">
-          <!-- Seq / Arp Toggle Switch -->
-          <div class="ks-switch-unit" id="ks-switch-seq-arp" title="Click to toggle Seq / Arp Mode">
-            <span class="ks-knob-hdr">MODE</span>
-            <div class="ks-switch-track" id="ks-switch-track">
-              <div class="ks-switch-thumb"></div>
-            </div>
-            <span class="ks-knob-val" id="ks-switch-val">ARP</span>
-          </div>
-
-          <!-- Seq / Arp Mode Knob (8 positions) -->
-          <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Click to cycle Seq / Arp Mode">
-            <span class="ks-knob-hdr">PATTERN</span>
-            <div class="ks-knob-dial" id="ks-knob-mode"><div class="ks-knob-notch"></div></div>
-            <span class="ks-knob-val" id="ks-knob-val-mode">Up</span>
-          </div>
-
-          <!-- Time Div Knob (8 positions) -->
-          <div class="ks-knob-unit" id="ks-knob-div-unit" title="Click to cycle Time Division">
-            <span class="ks-knob-hdr">TIME DIV</span>
-            <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
-            <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
-          </div>
-
-          <!-- Rate Knob + Blinking Tempo LED -->
-          <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / BPM">
-            <div class="ks-rate-led" id="ks-rate-led"></div>
-            <span class="ks-knob-hdr">RATE</span>
-            <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
-            <span class="ks-knob-val" id="ks-knob-val-rate">120 BPM</span>
-          </div>
-        </div>
-
-        <!-- Middle Buttons Row: Transport & Functions -->
-        <div class="ks-buttons-row">
-          <div class="ks-btn-subrow">
-            <button class="ks-btn ks-btn-stop active" id="ks-btn-stop" title="Stop Sequencer / Arpeggiator">
-              <span class="ks-btn-led"></span>■ STOP
-            </button>
-            <button class="ks-btn ks-btn-play" id="ks-btn-play" title="Play / Pause Sequencer / Arpeggiator">
-              <span class="ks-btn-led"></span>▶ PLAY
-            </button>
-            <button class="ks-btn ks-btn-rec" id="ks-btn-rec" title="Record Sequence">
-              <span class="ks-btn-led"></span>● REC
-            </button>
-            <button class="ks-btn ks-btn-tap" id="ks-btn-tap" title="Tap Tempo">
-              <span class="ks-btn-led"></span>TAP
-            </button>
-          </div>
-          <div class="ks-btn-subrow">
-            <button class="ks-btn ks-btn-shift" id="ks-btn-shift" title="Shift Function Modifier">
-              <span class="ks-btn-led"></span>SHIFT
-            </button>
+        <!-- Row 1: Hold (Chord) & Shift -->
+        <div class="ks-cheek-btn-row">
+          <div class="ks-cheek-btn-wrap">
             <button class="ks-btn ks-btn-hold" id="ks-btn-hold" title="Hold / Sustain">
               <span class="ks-btn-led"></span>HOLD
             </button>
-            <button class="ks-btn" id="ks-btn-oct-down" title="Octave Down">OCT -</button>
-            <button class="ks-btn" id="ks-btn-oct-up" title="Octave Up">OCT +</button>
-            <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+            <span class="ks-btn-sublabel">Chord</span>
+          </div>
+          <div class="ks-cheek-btn-wrap">
+            <button class="ks-btn ks-btn-shift" id="ks-btn-shift" title="Shift Function Modifier">
+              <span class="ks-btn-led"></span>SHIFT
+            </button>
           </div>
         </div>
 
-        <!-- Bottom Strips Row: Pitch & Mod Touch Strips -->
-        <div class="ks-strips-row">
+        <!-- Row 2: Oct - (Transpose) & Oct + (Kbd Play) -->
+        <div class="ks-cheek-btn-row">
+          <div class="ks-cheek-btn-wrap">
+            <button class="ks-btn" id="ks-btn-oct-down" title="Octave Down">OCT -</button>
+            <span class="ks-btn-sublabel">Transpose</span>
+          </div>
+          <div class="ks-cheek-btn-wrap">
+            <button class="ks-btn" id="ks-btn-oct-up" title="Octave Up">OCT +</button>
+            <span class="ks-btn-sublabel">Kbd Play</span>
+          </div>
+        </div>
+        <div class="ks-cheek-reset-label">- Reset -</div>
+
+        <!-- Capacitive Touch Strips: Pitch Bend & Mod Wheel -->
+        <div class="ks-cheek-strips">
           <div class="ks-strip-col">
-            <div class="ks-strip-label">
-              <span>PITCH</span>
-              <span class="ks-strip-val" id="ks-pitch-val">±0</span>
-            </div>
             <div class="ks-touch-well" id="ks-pitch-strip" title="Pitch Bend Touch Strip">
+              <span class="ks-strip-arrow">▲</span>
               <div class="ks-pitch-center-line"></div>
               <div class="ks-pitch-thumb" id="ks-pitch-thumb"></div>
+              <span class="ks-strip-arrow">▼</span>
+            </div>
+            <div class="ks-strip-footer">
+              <span class="ks-strip-name">Pitch</span>
+              <span class="ks-strip-val" id="ks-pitch-val">±0</span>
             </div>
           </div>
           <div class="ks-strip-col">
-            <div class="ks-strip-label">
-              <span>MOD</span>
-              <span class="ks-strip-val" id="ks-mod-val">0</span>
-            </div>
             <div class="ks-touch-well" id="ks-mod-strip" title="Modulation Touch Strip (CC #1)">
+              <span class="ks-strip-arrow">▲</span>
               <div class="ks-mod-fill" id="ks-mod-fill"></div>
+              <span class="ks-strip-arrow">▼</span>
+            </div>
+            <div class="ks-strip-footer">
+              <span class="ks-strip-name">Mod</span>
+              <span class="ks-strip-val" id="ks-mod-val">0</span>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- RIGHT PANEL: 32-Key Slimkey Keybed -->
-      <div class="ks-keybed-bay">
-        <div class="ks-silkscreen-strip">
-          <div class="ks-silk-section"><strong>MIDI CH:</strong> 1..16</div>
-          <div class="ks-silk-section"><strong>GATE:</strong> 10% · 25% · 50% · 75% · 90%</div>
-          <div class="ks-silk-section"><strong>SWING:</strong> OFF · 53%..75%</div>
-          <div class="ks-silk-section"><strong>SEQ PLAY</strong></div>
+      <!-- MAIN SECTION: Top Control Bar + Silkscreen Annotations + 32-Key Bed -->
+      <div class="ks-main-section ks-keybed-bay">
+        <!-- Top Bar: Recessed Knobs Inset + Transport Buttons + Arturia Brand -->
+        <div class="ks-top-bar">
+          <!-- Silver Recessed Knobs Inset -->
+          <div class="ks-knobs-inset">
+            <!-- Seq / Arp Toggle Switch -->
+            <div class="ks-switch-unit" id="ks-switch-seq-arp" title="Click to toggle Seq / Arp Mode">
+              <span class="ks-switch-lbl">Seq</span>
+              <div class="ks-switch-track" id="ks-switch-track">
+                <div class="ks-switch-thumb"></div>
+              </div>
+              <span class="ks-switch-lbl">Arp</span>
+            </div>
+
+            <!-- Knob 1: Seq / Arp Mode (Settings 1-8) -->
+            <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Seq / Arp Mode (Settings 1-8)">
+              <div class="ks-knob-dial" id="ks-knob-mode"><div class="ks-knob-notch"></div></div>
+              <span class="ks-knob-title">Seq / Arp Mode</span>
+              <span class="ks-knob-val" id="ks-knob-val-mode">1: Up</span>
+            </div>
+
+            <!-- Knob 2: Time Div (1/4 -> 1/32, then 1/4T -> 1/32T) -->
+            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (1/4 -> 1/32, then 1/4 T -> 1/32 T)">
+              <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
+              <span class="ks-knob-title">Time Div</span>
+              <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
+            </div>
+
+            <!-- Knob 3: Rate (smooth 0-127) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate (smooth 0-127)">
+              <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
+              <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
+              <span class="ks-knob-title">Rate</span>
+              <span class="ks-knob-val" id="ks-knob-val-rate">120 BPM</span>
+            </div>
+          </div>
+
+          <!-- Transport Buttons -->
+          <div class="ks-transport-section">
+            <div class="ks-trans-btn-wrap">
+              <button class="ks-btn ks-btn-trans ks-btn-tap" id="ks-btn-tap" title="Tap Tempo">
+                <span class="ks-btn-led"></span>TAP
+              </button>
+              <span class="ks-trans-sub">Rest / Tie</span>
+            </div>
+            <div class="ks-trans-btn-wrap">
+              <button class="ks-btn ks-btn-trans ks-btn-rec" id="ks-btn-rec" title="Record">
+                <span class="ks-btn-led"></span>●
+              </button>
+              <span class="ks-trans-sub">Append</span>
+            </div>
+            <div class="ks-trans-btn-wrap">
+              <button class="ks-btn ks-btn-trans ks-btn-stop active" id="ks-btn-stop" title="Stop">
+                <span class="ks-btn-led"></span>■
+              </button>
+              <span class="ks-trans-sub">Clear Last</span>
+            </div>
+            <div class="ks-trans-btn-wrap">
+              <button class="ks-btn ks-btn-trans ks-btn-play" id="ks-btn-play" title="Play / Pause">
+                <span class="ks-btn-led"></span>▶/||
+              </button>
+              <span class="ks-trans-sub">Restart</span>
+            </div>
+          </div>
+
+          <!-- Arturia Brand -->
+          <div class="ks-arturia-brand">
+            <div class="ks-arturia-row">
+              <span class="ks-arturia-badge">A</span>
+              <span class="ks-arturia-wordmark">ARTURIA</span>
+              <div class="ks-status-dot" id="ks-status-dot" title="KeyStep 32 Connected"></div>
+            </div>
+            <span class="ks-arturia-slogan">YOUR EXPERIENCE · YOUR SOUND</span>
+            <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+          </div>
         </div>
-        <div class="ks-keys-container">
+
+        <!-- Silkscreen Legend Bar (directly above the 32 keys) -->
+        <div class="ks-silkscreen-bar">
+          <div class="ks-silk-group ks-silk-midi-ch">
+            <span class="ks-silk-header">Keyboard MIDI CH</span>
+            <div class="ks-silk-items-16">
+              <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span>
+              <span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span>
+            </div>
+          </div>
+          <div class="ks-silk-group ks-silk-gate">
+            <span class="ks-silk-header">Gate</span>
+            <div class="ks-silk-items-gate">
+              <span>10%</span><span>25%</span><span>50%</span><span>75%</span><span>90%</span>
+            </div>
+          </div>
+          <div class="ks-silk-group ks-silk-swing">
+            <span class="ks-silk-header">Swing</span>
+            <div class="ks-silk-items-swing">
+              <span>Off</span><span>53%</span><span>55%</span><span>57%</span><span>59%</span><span>61%</span><span>64%</span><span>67%</span><span>70%</span><span>73%</span><span>75%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 32-Key Slimkey Keybed (Starts on F, ends on C) -->
+        <div class="ks-keybed-container">
           <!-- 19 White Keys -->
           <div class="ks-white-keys">
-            <div class="ks-key-w" id="ks-key-48" data-note="48"><span class="ks-key-name">C3</span><span class="ks-key-sub">CH 1</span></div>
-            <div class="ks-key-w" id="ks-key-50" data-note="50"><span class="ks-key-name">D3</span><span class="ks-key-sub">CH 3</span></div>
-            <div class="ks-key-w" id="ks-key-52" data-note="52"><span class="ks-key-name">E3</span><span class="ks-key-sub">CH 5</span></div>
-            <div class="ks-key-w" id="ks-key-53" data-note="53"><span class="ks-key-name">F3</span><span class="ks-key-sub">CH 6</span></div>
-            <div class="ks-key-w" id="ks-key-55" data-note="55"><span class="ks-key-name">G3</span><span class="ks-key-sub">CH 8</span></div>
-            <div class="ks-key-w" id="ks-key-57" data-note="57"><span class="ks-key-name">A3</span><span class="ks-key-sub">CH 10</span></div>
-            <div class="ks-key-w" id="ks-key-59" data-note="59"><span class="ks-key-name">B3</span><span class="ks-key-sub">CH 12</span></div>
-            <div class="ks-key-w" id="ks-key-60" data-note="60"><span class="ks-key-name">C4</span><span class="ks-key-sub">CH 13</span></div>
-            <div class="ks-key-w" id="ks-key-62" data-note="62"><span class="ks-key-name">D4</span><span class="ks-key-sub">CH 15</span></div>
-            <div class="ks-key-w" id="ks-key-64" data-note="64"><span class="ks-key-name">E4</span><span class="ks-key-sub">10%</span></div>
-            <div class="ks-key-w" id="ks-key-65" data-note="65"><span class="ks-key-name">F4</span><span class="ks-key-sub">25%</span></div>
-            <div class="ks-key-w" id="ks-key-67" data-note="67"><span class="ks-key-name">G4</span><span class="ks-key-sub">75%</span></div>
-            <div class="ks-key-w" id="ks-key-69" data-note="69"><span class="ks-key-name">A4</span><span class="ks-key-sub">SWING</span></div>
-            <div class="ks-key-w" id="ks-key-71" data-note="71"><span class="ks-key-name">B4</span><span class="ks-key-sub">55%</span></div>
-            <div class="ks-key-w" id="ks-key-72" data-note="72"><span class="ks-key-name">C5</span><span class="ks-key-sub">57%</span></div>
-            <div class="ks-key-w" id="ks-key-74" data-note="74"><span class="ks-key-name">D5</span><span class="ks-key-sub">61%</span></div>
-            <div class="ks-key-w" id="ks-key-76" data-note="76"><span class="ks-key-name">E5</span><span class="ks-key-sub">67%</span></div>
-            <div class="ks-key-w" id="ks-key-77" data-note="77"><span class="ks-key-name">F5</span><span class="ks-key-sub">70%</span></div>
-            <div class="ks-key-w" id="ks-key-79" data-note="79"><span class="ks-key-name">G5</span><span class="ks-key-sub">PLAY</span></div>
+            <div class="ks-key-w" id="ks-key-41" data-note="41"><span class="ks-key-name">F</span></div>
+            <div class="ks-key-w" id="ks-key-43" data-note="43"><span class="ks-key-name">G</span></div>
+            <div class="ks-key-w" id="ks-key-45" data-note="45"><span class="ks-key-name">A</span></div>
+            <div class="ks-key-w" id="ks-key-47" data-note="47"><span class="ks-key-name">B</span></div>
+            <div class="ks-key-w" id="ks-key-48" data-note="48"><span class="ks-key-name">C</span></div>
+            <div class="ks-key-w" id="ks-key-50" data-note="50"><span class="ks-key-name">D</span></div>
+            <div class="ks-key-w" id="ks-key-52" data-note="52"><span class="ks-key-name">E</span></div>
+            <div class="ks-key-w" id="ks-key-53" data-note="53"><span class="ks-key-name">F</span></div>
+            <div class="ks-key-w" id="ks-key-55" data-note="55"><span class="ks-key-name">G</span></div>
+            <div class="ks-key-w" id="ks-key-57" data-note="57"><span class="ks-key-name">A</span></div>
+            <div class="ks-key-w" id="ks-key-59" data-note="59"><span class="ks-key-name">B</span></div>
+            <div class="ks-key-w" id="ks-key-60" data-note="60"><span class="ks-key-name">C</span></div>
+            <div class="ks-key-w" id="ks-key-62" data-note="62"><span class="ks-key-name">D</span></div>
+            <div class="ks-key-w" id="ks-key-64" data-note="64"><span class="ks-key-name">E</span></div>
+            <div class="ks-key-w" id="ks-key-65" data-note="65"><span class="ks-key-name">F</span></div>
+            <div class="ks-key-w" id="ks-key-67" data-note="67"><span class="ks-key-name">G</span></div>
+            <div class="ks-key-w" id="ks-key-69" data-note="69"><span class="ks-key-name">A</span></div>
+            <div class="ks-key-w" id="ks-key-71" data-note="71"><span class="ks-key-name">B</span></div>
+            <div class="ks-key-w" id="ks-key-72" data-note="72"><span class="ks-key-name">C</span></div>
           </div>
 
           <!-- 13 Black Keys -->
           <div class="ks-black-keys">
-            <div class="ks-key-b" id="ks-key-49" data-note="49" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#3</span></div>
-            <div class="ks-key-b" id="ks-key-51" data-note="51" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#3</span></div>
-            <div class="ks-key-b" id="ks-key-54" data-note="54" style="left: calc((4 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#3</span></div>
-            <div class="ks-key-b" id="ks-key-56" data-note="56" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#3</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#3</span></div>
-            <div class="ks-key-b" id="ks-key-61" data-note="61" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#4</span></div>
-            <div class="ks-key-b" id="ks-key-63" data-note="63" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#4</span></div>
-            <div class="ks-key-b" id="ks-key-66" data-note="66" style="left: calc((11 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#4</span></div>
-            <div class="ks-key-b" id="ks-key-68" data-note="68" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#4</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#4</span></div>
-            <div class="ks-key-b" id="ks-key-73" data-note="73" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#5</span></div>
-            <div class="ks-key-b" id="ks-key-75" data-note="75" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#5</span></div>
-            <div class="ks-key-b" id="ks-key-78" data-note="78" style="left: calc((18 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#5</span></div>
+            <div class="ks-key-b" id="ks-key-42" data-note="42" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
+            <div class="ks-key-b" id="ks-key-44" data-note="44" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+
+            <div class="ks-key-b" id="ks-key-49" data-note="49" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
+            <div class="ks-key-b" id="ks-key-51" data-note="51" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+
+            <div class="ks-key-b" id="ks-key-54" data-note="54" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+
+            <div class="ks-key-b" id="ks-key-61" data-note="61" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
+            <div class="ks-key-b" id="ks-key-63" data-note="63" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+
+            <div class="ks-key-b" id="ks-key-66" data-note="66" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
           </div>
         </div>
       </div>
@@ -5147,8 +5332,8 @@ window.setKeyStepConnected = function(connected) {
 };
 window.setNanokeyConnected = window.setKeyStepConnected;
 
-const ARP_MODE_NAMES = ["Up", "Down", "Inclusive", "Exclusive", "Random", "Order", "Up x2", "Down x2"];
-const DIVISION_NAMES = ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"];
+const ARP_MODE_NAMES = ["1: Up", "2: Down", "3: Inc", "4: Exc", "5: Rand", "6: Order", "7: Up x2", "8: Dwn x2"];
+const DIVISION_NAMES = ["1/4", "1/8", "1/16", "1/32", "1/4T", "1/8T", "1/16T", "1/32T"];
 
 // Bpm tempo LED blinking interval
 let _ksBpmTimer = null;
@@ -5174,7 +5359,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
-  // Keys: key_<note>
+  // Keys: key_<note> (spanning 32 keys 41..72: F to C)
   if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
     const rawNote = parseInt(controlId.replace('key_', ''), 10);
     if (!isNaN(rawNote)) {
@@ -5184,16 +5369,16 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
         delete window._activeKeyStepNotes[rawNote];
       }
 
-      // Map rawNote into 48..79 window
+      // Map rawNote into 41..72 window (F to C)
       let mapped = rawNote;
-      while (mapped < 48) mapped += 12;
-      while (mapped > 79) mapped -= 12;
+      while (mapped < 41) mapped += 12;
+      while (mapped > 72) mapped -= 12;
 
       let isStillActive = false;
       for (const nStr in window._activeKeyStepNotes) {
         let n = parseInt(nStr, 10);
-        while (n < 48) n += 12;
-        while (n > 79) n -= 12;
+        while (n < 41) n += 12;
+        while (n > 72) n -= 12;
         if (n === mapped) {
           isStillActive = true;
           break;
@@ -5234,15 +5419,24 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
-  // BPM / Rate
-  if (controlId === 'bpm') {
-    const bpm = value !== null && value !== undefined ? value : 120;
+  // Rate (smooth 0-127) & BPM
+  if (controlId === 'rate' || controlId === 'bpm') {
+    let rate = extra.rate !== undefined ? extra.rate : (controlId === 'rate' ? value : null);
+    let bpm = extra.bpm !== undefined ? extra.bpm : (controlId === 'bpm' ? value : null);
+    if (rate === null && bpm !== null) {
+      rate = Math.max(0, Math.min(127, Math.round(((bpm - 30) / (240 - 30)) * 127)));
+    } else if (bpm === null && rate !== null) {
+      bpm = Math.round(30 + (rate / 127) * (240 - 30));
+    }
+    rate = rate !== null ? rate : 64;
+    bpm = bpm !== null ? bpm : 120;
+    window._ksInternalState.rate = rate;
     window._ksInternalState.bpm = bpm;
     const valEl = document.getElementById('ks-knob-val-rate');
     const knob = document.getElementById('ks-knob-rate');
-    if (valEl) valEl.textContent = bpm + ' BPM';
+    if (valEl) valEl.textContent = `${rate} (${bpm} BPM)`;
     if (knob) {
-      const angle = -135 + ((bpm - 30) / (240 - 30)) * 270;
+      const angle = -135 + (rate / 127) * 270;
       knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;
     }
     startKsBpmLed(bpm);
@@ -5256,7 +5450,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const valEl = document.getElementById('ks-knob-val-mode');
     const knob = document.getElementById('ks-knob-mode');
     const isSeq = window._ksInternalState.seqArp === 'seq';
-    const name = isSeq ? `Seq ${modeIdx}` : (ARP_MODE_NAMES[modeIdx - 1] || `Mode ${modeIdx}`);
+    const name = isSeq ? `Seq ${modeIdx}` : (ARP_MODE_NAMES[modeIdx - 1] || `${modeIdx}`);
     if (valEl) valEl.textContent = name;
     if (knob) {
       const angle = -135 + ((modeIdx - 1) / 7) * 270;
@@ -5265,9 +5459,9 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
-  // Division (1..8)
+  // Division (1..8: 1/4 -> 1/32, then 1/4T -> 1/32T)
   if (controlId === 'division') {
-    const divIdx = value !== null && value !== undefined ? value : 5;
+    const divIdx = value !== null && value !== undefined ? value : 3;
     const valEl = document.getElementById('ks-knob-val-div');
     const knob = document.getElementById('ks-knob-div');
     const name = extra.division || DIVISION_NAMES[divIdx - 1] || '1/16';
@@ -5284,12 +5478,10 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const isSeq = (extra.mode === 'seq' || value === 1);
     window._ksInternalState.seqArp = isSeq ? 'seq' : 'arp';
     const track = document.getElementById('ks-switch-track');
-    const valEl = document.getElementById('ks-switch-val');
     if (track) track.classList.toggle('seq', isSeq);
-    if (valEl) valEl.textContent = isSeq ? 'SEQ' : 'ARP';
     const modeValEl = document.getElementById('ks-knob-val-mode');
     if (modeValEl) {
-      modeValEl.textContent = isSeq ? `Seq ${window._ksInternalState.mode}` : (ARP_MODE_NAMES[window._ksInternalState.mode - 1] || 'Up');
+      modeValEl.textContent = isSeq ? `Seq ${window._ksInternalState.mode}` : (ARP_MODE_NAMES[window._ksInternalState.mode - 1] || '1: Up');
     }
     return;
   }
@@ -5478,29 +5670,50 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       let delta = e.deltaY < 0 ? 1 : -1;
       let curIdx = DIVISION_NAMES.indexOf(document.getElementById('ks-knob-val-div')?.textContent) + 1;
-      if (curIdx < 1) curIdx = 5;
+      if (curIdx < 1) curIdx = 3;
       let nextDiv = ((curIdx - 1 + delta + 8) % 8) + 1;
       postMidi({ type: 'keystepDivision', division: nextDiv });
     }, { passive: false });
   }
 
+  // Smooth Rate 0-127 knob with wheel & drag
   const knobRate = document.getElementById('ks-knob-rate-unit');
   if (knobRate) {
-    knobRate.addEventListener('click', () => {
-      const TEMPOS = [80, 100, 120, 128, 140, 160];
-      let curBpm = window._ksInternalState.bpm || 120;
-      let nextBpm = TEMPOS[0];
-      for (let i = 0; i < TEMPOS.length; i++) {
-        if (TEMPOS[i] > curBpm) { nextBpm = TEMPOS[i]; break; }
-      }
-      postMidi({ type: 'keystepRate', bpm: nextBpm });
-    });
+    let rateDragging = false;
+    let startY = 0;
+    let startRate = 64;
+
+    const setSmoothRate = (newRate) => {
+      const clampedRate = Math.max(0, Math.min(127, Math.round(newRate)));
+      const bpm = Math.round(30 + (clampedRate / 127) * (240 - 30));
+      window.updateKeyStepState('rate', clampedRate, true, { rate: clampedRate, bpm: bpm });
+      postMidi({ type: 'keystepRate', rate: clampedRate, bpm: bpm });
+    };
+
     knobRate.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const delta = e.deltaY < 0 ? 2 : -2;
-      let curBpm = Math.max(30, Math.min(240, (window._ksInternalState.bpm || 120) + delta));
-      postMidi({ type: 'keystepRate', bpm: curBpm });
+      const delta = e.deltaY < 0 ? (e.shiftKey ? 5 : 2) : (e.shiftKey ? -5 : -2);
+      const curRate = window._ksInternalState.rate !== undefined ? window._ksInternalState.rate : 64;
+      setSmoothRate(curRate + delta);
     }, { passive: false });
+
+    knobRate.addEventListener('mousedown', (e) => {
+      rateDragging = true;
+      startY = e.clientY;
+      startRate = window._ksInternalState.rate !== undefined ? window._ksInternalState.rate : 64;
+      const onMove = (me) => {
+        if (!rateDragging) return;
+        const diff = (startY - me.clientY) * 0.8;
+        setSmoothRate(startRate + diff);
+      };
+      const onUp = () => {
+        rateDragging = false;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
   }
 });
 </script>
