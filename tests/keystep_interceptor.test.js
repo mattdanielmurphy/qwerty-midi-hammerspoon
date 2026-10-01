@@ -25,8 +25,7 @@ test("accepts Arturia KeyStep product-name suffixes such as KeyStep 32", () => {
 
 test("derives BPM from a moving average of 24 PPQN clock pulses", () => {
   expect(source).toContain("local CLOCK_PULSES_PER_QUARTER = 24");
-  expect(source).toContain("60 / (meanDelta * CLOCK_PULSES_PER_QUARTER)");
-  expect(source).toContain("local CLOCK_SAMPLE_LIMIT = 24");
+  expect(source).toContain("60 / elapsed");
 });
 
 test("quantizes straight and triplet note intervals and emits dedicated CCs", () => {

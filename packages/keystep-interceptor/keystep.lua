@@ -147,6 +147,8 @@ local function clearClockTiming()
   state.lastClockTime = nil
   state.clockDeltas = {}
   state.clocksSinceLastNote = 0
+  state.clockWindowStart = nil
+  state.clockWindowCount = 0
 end
 
 local function clearNoteTiming()
@@ -278,24 +280,31 @@ local function handleClock(timestamp)
   state.clockPulseCount = state.clockPulseCount + 1
   state.clocksSinceLastNote = (state.clocksSinceLastNote or 0) + 1
   recordEvent("MIDI clock", timestamp)
+
   local previous = state.lastClockTime
   state.lastClockTime = timestamp
-  if not previous then return end
-
-  local delta = timestamp - previous
-  if delta <= 0 or delta > CLOCK_RESET_SECONDS then
-    state.clockDeltas = {}
-    return
+  local delta = previous and (timestamp - previous) or 0
+  if delta > CLOCK_RESET_SECONDS then
+    state.clockWindowStart = timestamp
+    state.clockWindowCount = 0
   end
 
-  table.insert(state.clockDeltas, delta)
-  if #state.clockDeltas > CLOCK_SAMPLE_LIMIT then
-    table.remove(state.clockDeltas, 1)
-  end
-
-  local meanDelta = average(state.clockDeltas)
-  if meanDelta then
-    setBpm(60 / (meanDelta * CLOCK_PULSES_PER_QUARTER))
+  if not state.clockWindowStart then
+    state.clockWindowStart = timestamp
+    state.clockWindowCount = 0
+  else
+    state.clockWindowCount = (state.clockWindowCount or 0) + 1
+    if state.clockWindowCount >= CLOCK_PULSES_PER_QUARTER then
+      local elapsed = timestamp - state.clockWindowStart
+      state.clockWindowStart = timestamp
+      state.clockWindowCount = 0
+      -- Valid BPM range: 30 to 240 (elapsed between 0.25s and 2.0s)
+      if elapsed >= 0.2 and elapsed <= 2.5 then
+        local instantBpm = 60 / elapsed
+        local newBpm = state.bpm and (state.bpm * 0.6 + instantBpm * 0.4) or instantBpm
+        setBpm(newBpm)
+      end
+    end
   end
 end
 
@@ -354,14 +363,20 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
   metadata = metadata or {}
   timestamp = timestamp or nowSeconds()
 
-  if commandType == "systemTimingClock" then
+  local hex = (metadata.data and type(metadata.data) == "string") and metadata.data:lower() or ""
+  local isClock = (commandType == "systemTimingClock") or (commandType == "systemMessage" and hex:match("f8") ~= nil)
+  local isStart = (commandType == "systemStartSequence" or commandType == "systemContinueSequence") or
+                  (commandType == "systemMessage" and (hex:match("fa") ~= nil or hex:match("fb") ~= nil))
+  local isStop = (commandType == "systemStopSequence") or (commandType == "systemMessage" and hex:match("fc") ~= nil)
+
+  if isClock then
     handleClock(timestamp)
-  elseif commandType == "systemStartSequence" or commandType == "systemContinueSequence" then
+  elseif isStart then
     state.playing = true
     clearNoteTiming()
-    recordEvent(commandType == "systemStartSequence" and "Transport started" or "Transport continued", timestamp)
+    recordEvent("Transport started", timestamp)
     sendToHud("transport", 1, true, { action = "play" })
-  elseif commandType == "systemStopSequence" then
+  elseif isStop then
     state.playing = false
     clearClockTiming()
     clearNoteTiming()

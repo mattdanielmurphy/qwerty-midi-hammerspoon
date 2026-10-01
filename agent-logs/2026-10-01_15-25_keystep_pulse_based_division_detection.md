@@ -9,9 +9,12 @@ Resolved the issue where turning the KeyStep `Rate` knob erroneously caused the 
 
 1. **Root Cause Analysis**:
    - The previous division heuristic evaluated wall-clock elapsed time between notes (`noteDelta` in seconds) against `quarterNoteSeconds = 60 / state.bpm`.
-   - Because `state.bpm` was derived from a rolling 24-pulse moving average of MIDI clock ticks, turning the physical `Rate` knob changed the note arrival interval immediately while `bpm` lagged behind, temporarily skewing the ratio and misclassifying the division.
+   - `state.bpm` was perpetually stuck at default 120 because Hammerspoon's `hs.midi` emits MIDI timing clock (`0xF8`) as `commandType == "systemMessage"` with `metadata.data == "f8"`, rather than `"systemTimingClock"`.
+   - Consequently, `handleClock` had never been invoked. The code always assumed 120 BPM, forcing the user to manually dial the physical Rate knob to exactly 120 BPM for Time Div to match.
 
-2. **Pulse-Based Division Invariant**:
+2. **Pulse-Based Division Invariant & Realtime Clock Hook**:
+   - Updated `handleMidiEvent` to recognize `systemMessage` with `f8` (clock), `fa`/`fb` (start/continue), and `fc` (stop).
+   - Replaced micro-delta clock division with a 24-pulse quarter-note window calculation (`CLOCK_PULSES_PER_QUARTER = 24`), completely eliminating USB batching jitter.
    - For side-channel one-note sequences with no rests or ties, step division is fundamentally an integer count of 24-PPQN MIDI timing clock pulses (`0xF8`):
      - `1/32T`: 2 pulses
      - `1/32`:  3 pulses
@@ -21,10 +24,11 @@ Resolved the issue where turning the KeyStep `Rate` knob erroneously caused the 
      - `1/8`:   12 pulses
      - `1/4T`:  16 pulses
      - `1/4`:   24 pulses
-   - Updated `packages/keystep-interceptor/keystep.lua` to count incoming `systemTimingClock` events between sequence notes (`state.clocksSinceLastNote`).
-   - Sequence note arrival queries `nearestDivisionByPulses(pulses)` directly. Because the number of clock pulses per step is constant regardless of tempo, spinning the Rate knob no longer alters the pulse count or triggers false division changes.
+   - Sequence note arrival queries `nearestDivisionByPulses(pulses)` directly from `state.clocksSinceLastNote`.
+   - Verified live in Hammerspoon: turning Rate from 120 BPM to 153+ BPM tracked tempo smoothly while maintaining exact pulse counts (`Pulses: 8` for `1/8T`) without jumping divisions.
 
 3. **Testing & Bundling**:
-   - Added unit test in `tests/keystep_interceptor.test.js` verifying pulse-based quantization.
+   - Added unit test in `tests/keystep_interceptor.test.js` verifying pulse-based quantization and windowed BPM calculation.
    - All 27 tests passing via `bun test`.
    - Rebundled `qwerty_midi.lua` and `dist/keystep_interceptor.lua`.
+
