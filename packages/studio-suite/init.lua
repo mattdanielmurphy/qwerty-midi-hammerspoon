@@ -1,5 +1,5 @@
 -- packages/studio-suite/init.lua
--- Master Studio Suite: Synchronized dual-surface controller for QWERTY keyboard + Korg nanoKEY Studio.
+-- Master Studio Suite: Synchronized dual-surface controller for QWERTY keyboard + Arturia KeyStep 32.
 
 local config = require("config")
 local midi = require("midi")
@@ -9,7 +9,7 @@ local arpeggiator = require("arpeggiator")
 local hud = require("hud")
 local controls = require("controls")
 local settings_ui = require("settings_ui")
-local nanokey = require("nanokey")
+local keystep = require("keystep")
 
 local state = config.state
 _G.activeWatchers = _G.activeWatchers or {}
@@ -17,45 +17,34 @@ _G.activeWatchers = _G.activeWatchers or {}
 -- 1. Wire internal module dependencies
 arpeggiator.setHudModule(hud)
 hud.setControlsModule(controls)
-nanokey.setHud(hud)
+keystep.setHud(hud)
 
 -- 2. Hardware connection
-nanokey.connect("nanoKEY Studio")
+keystep.connect("Arturia KeyStep 32")
 
--- 3. Live State Synchronization between nanoKEY and QWERTY
-nanokey.setOnStateChange(function(change)
-  if change.layer then
-    state.currentLayer = change.layer
-  end
-  if hud.updateWebviewHud then
-    hud.updateWebviewHud()
-  end
-end)
-
--- 4. Master Toggle Function (QWERTY + nanoKEY Studio)
+-- 3. Master Toggle Function (QWERTY + Arturia KeyStep 32)
 function _G.toggleStudioSuite(newState)
   if _G.toggleMidiMode then
     _G.toggleMidiMode(newState)
   end
 
   if state.midiActive then
-    nanokey.connect("nanoKEY Studio")
-    hs.alert.show("🎹 Studio Suite: ACTIVE (QWERTY + nanoKEY)", 1.2)
+    keystep.connect("Arturia KeyStep 32")
+    hs.alert.show("🎹 Studio Suite: ACTIVE (QWERTY + KeyStep 32)", 1.2)
   else
-    nanokey.disconnect()
     hs.alert.show("⏹️ Studio Suite: OFF", 1.0)
   end
 end
 
--- 5. Hotkeys
+-- 4. Hotkeys
 _G.activeWatchers.studioSuiteToggle = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
   _G.toggleStudioSuite()
 end)
 
 local M = {
   id = "studio_suite",
-  name = "Surface Studio Suite (QWERTY + nanoKEY)",
-  nanokey = nanokey,
+  name = "Surface Studio Suite (QWERTY + KeyStep 32)",
+  keystep = keystep,
   musicEngine = {
     harmony = harmony,
     clock = clock,

@@ -23,9 +23,9 @@ local hud = __require("hud")
 local controls = __require("controls")
 local settings_ui = __require("settings_ui")
 local sync = __require("sync")
-local nanokey = nil
+local keystep = nil
 pcall(function()
-  nanokey = __require("nanokey")
+  keystep = __require("keystep")
 end)
 
 local function profileLog(msg)
@@ -51,10 +51,10 @@ _G.activeWatchers.controls = controls
 _G.activeWatchers.arpeggiator = arpeggiator
 
 
-if nanokey then
-  nanokey.setHud(hud)
-  _G.activeWatchers.nanokey = nanokey
-  pcall(function() nanokey.connect("nanoKEY Studio") end)
+if keystep then
+  if keystep.setHud then keystep.setHud(hud) end
+  _G.activeWatchers.keystep = keystep
+  pcall(function() keystep.connect("Arturia KeyStep 32") end)
 end
 
 function _G.toggleMidiMode(newState)
@@ -76,8 +76,8 @@ function _G.toggleMidiMode(newState)
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
-    if nanokey and nanokey.connect and not nanokey.isConnected() then
-      pcall(function() nanokey.connect("nanoKEY Studio") end)
+    if keystep and keystep.connect and not keystep.isConnected() then
+      pcall(function() keystep.connect("Arturia KeyStep 32") end)
     end
   else
     -- Stop all key repeats before tearing down
@@ -91,8 +91,8 @@ function _G.toggleMidiMode(newState)
     -- NOTE: Arpeggiator continues running in background when window is closed,
     -- allowing autonomous multi-track background playback until explicit panic or stop.
 
-    -- Keep nanokey hardware driver connected so physical controller macros and playing remain active
-    -- Do not call nanokey.disconnect() here
+    -- Keep keystep hardware driver connected so physical controller playing remains active
+    -- Do not call keystep.disconnect() here
 
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
@@ -342,8 +342,8 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       _G.activeWatchers.midiScrollTap:start()
     end
 
-    if nanokey and nanokey.checkConnection then
-      pcall(function() nanokey.checkConnection() end)
+    if keystep and keystep.checkConnection then
+      pcall(function() keystep.checkConnection() end)
     end
     
     hud.pingWebview()
@@ -371,7 +371,7 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", fun
   _G.toggleMidiMode()
 end)
 
-_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt", "ctrl", "shift" }, "R", function()
   _G.dumpMidiLogs()
   hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
   hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
@@ -2560,1034 +2560,897 @@ return quantizer
 
 end
 
-__modules["macros"] = function()
--- packages/nanokey-studio/macros.lua
--- Macro dispatch engine for Korg nanoKEY Studio hold-to-reveal layer.
+__modules["keystep_ui_html"] = function()
+local HTML = [[
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>KeyStep Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #111216;
+      --panel: #1a1c23;
+      --edge: #30333e;
+      --text: #f4f5f8;
+      --muted: #969cab;
+      --accent: #7ce2bd;
+      --warning: #ffc86b;
+      --danger: #ff7b8a;
+    }
 
-local macros = {}
+    * { box-sizing: border-box; }
 
-local MACRO_HANDLERS = {
-  ["Play/Pause"] = function()
-    hs.eventtap.keyStroke({}, "space")
-  end,
-  ["Record"] = function()
-    hs.eventtap.keyStroke({}, "r")
-  end,
-  ["Rewind"] = function()
-    hs.eventtap.keyStroke({}, ",")
-  end,
-  ["Forward"] = function()
-    hs.eventtap.keyStroke({}, ".")
-  end,
-  ["Left Half"] = function()
-    local win = hs.window.focusedWindow()
-    if win then
-      local screen = win:screen():frame()
-      win:setFrame({ x = screen.x, y = screen.y, w = screen.w / 2, h = screen.h })
-    end
-  end,
-  ["Right Half"] = function()
-    local win = hs.window.focusedWindow()
-    if win then
-      local screen = win:screen():frame()
-      win:setFrame({ x = screen.x + screen.w / 2, y = screen.y, w = screen.w / 2, h = screen.h })
-    end
-  end,
-  ["Maximize"] = function()
-    local win = hs.window.focusedWindow()
-    if win then win:maximize() end
-  end,
-  ["Restore Win"] = function()
-    local win = hs.window.focusedWindow()
-    if win then
-      local screen = win:screen():frame()
-      local w = math.floor(screen.w * 0.7)
-      local h = math.floor(screen.h * 0.7)
-      win:setFrame({
-        x = math.floor(screen.x + (screen.w - w) / 2),
-        y = math.floor(screen.y + (screen.h - h) / 2),
-        w = w,
-        h = h
-      })
-    end
-  end,
-  ["Scale Cycle"] = function()
-    local config = __require("config")
-    if config and config.state and config.SCALES then
-      config.state.currentScaleIdx = (config.state.currentScaleIdx % #config.SCALES) + 1
-      local hud = __require("hud")
-      if hud and hud.updateWebviewHud then hud.updateWebviewHud() end
-    end
-  end,
-  ["Toggle Scale Guide"] = function()
-    local config = __require("config")
-    local hud = __require("hud")
-    local nanokey = nil
-    pcall(function() nanokey = __require("nanokey") end)
-    if config and config.state then
-      config.state.scaleGuideEnabled = not (config.state.scaleGuideEnabled ~= false)
-      if config.saveSettings then config.saveSettings() end
-      if nanokey and nanokey.syncScaleGuideLeds then
-        nanokey.syncScaleGuideLeds(config.state, true)
-      end
-      if hud and hud.updateWebviewHud then
-        hud.updateWebviewHud()
-      end
-      local status = config.state.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
-      hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
-    end
-  end,
-  ["Prev Track"] = function()
-    hs.eventtap.keyStroke({}, "left")
-  end,
-  ["Next Track"] = function()
-    hs.eventtap.keyStroke({}, "right")
-  end,
-  ["Center Win"] = function()
-    local win = hs.window.focusedWindow()
-    if win then
-      local screen = win:screen():frame()
-      local w = math.floor(screen.w * 0.8)
-      local h = math.floor(screen.h * 0.8)
-      win:setFrame({
-        x = math.floor(screen.x + (screen.w - w) / 2),
-        y = math.floor(screen.y + (screen.h - h) / 2),
-        w = w,
-        h = h
-      })
-    end
-  end,
-  ["Undo"] = function()
-    hs.eventtap.keyStroke({ "cmd" }, "z")
-  end,
-  ["Redo"] = function()
-    hs.eventtap.keyStroke({ "cmd", "shift" }, "z")
-  end,
-  ["Save Project"] = function()
-    hs.eventtap.keyStroke({ "cmd" }, "s")
-  end,
-  ["Metronome"] = function()
-    hs.eventtap.keyStroke({}, "k")
-  end,
-  ["Panic All"] = function()
-    local midi = __require("midi")
-    if midi and midi.panicAllChannels then midi.panicAllChannels() end
-    hs.alert.show("🚨 MIDI PANIC (All Channels Off)", 1.5)
-  end,
-  ["Volume +"] = function()
-    local dev = hs.audiodevice.defaultOutputDevice()
-    if dev then dev:setVolume(math.min(100, (dev:volume() or 50) + 5)) end
-  end,
-  ["Volume -"] = function()
-    local dev = hs.audiodevice.defaultOutputDevice()
-    if dev then dev:setVolume(math.max(0, (dev:volume() or 50) - 5)) end
-  end,
-  ["Mute Mic"] = function()
-    local mic = hs.audiodevice.defaultInputDevice()
-    if mic then
-      local muted = mic:muted()
-      mic:setMuted(not muted)
-      hs.alert.show(not muted and "🎤 Mic MUTED" or "🎤 Mic LIVE", 1.2)
-    end
-  end,
-  ["Screenshot"] = function()
-    hs.eventtap.keyStroke({ "cmd", "shift" }, "4")
-  end,
-  ["Terminal"] = function()
-    hs.application.launchOrFocus("Terminal")
-  end,
-  ["Logic Pro"] = function()
-    hs.application.launchOrFocus("Logic Pro")
-  end,
-  ["Browser"] = function()
-    hs.application.launchOrFocus("Google Chrome")
-  end
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .monitor {
+      display: grid;
+      gap: 16px;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .header, .status, .metric, .activity {
+      border: 1px solid var(--edge);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+    }
+
+    .eyebrow, .label {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 4px 0 0;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 0 4px rgba(255, 123, 138, 0.12);
+    }
+
+    .connection.connected { color: var(--accent); }
+    .connection.connected .dot {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(124, 226, 189, 0.12);
+    }
+
+    .status { padding: 14px 16px; }
+    .status-value { margin: 7px 0 0; font-size: 15px; font-weight: 650; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric { min-height: 106px; padding: 14px; }
+    .value { margin: 10px 0 0; font-size: 27px; font-weight: 750; letter-spacing: -0.04em; }
+    .hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+
+    .activity { padding: 14px 16px; }
+    .activity-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; font-size: 13px; }
+    .activity-value { overflow: hidden; color: var(--text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-age { flex: 0 0 auto; color: var(--warning); }
+  </style>
+</head>
+<body>
+  <main class="monitor" data-ui="keystep-monitor">
+    <header class="header">
+      <div>
+        <p class="eyebrow">Side-channel parser</p>
+        <h1>Arturia KeyStep</h1>
+      </div>
+      <div class="connection" id="connection">
+        <span class="dot"></span>
+        <span id="connection-text">Waiting for device</span>
+      </div>
+    </header>
+
+    <section class="status">
+      <p class="label">Input</p>
+      <p class="status-value" id="device-name">No matching MIDI device</p>
+      <p class="hint" id="output-device">Output: waiting for QWERTY MIDI device</p>
+    </section>
+
+    <section class="metrics">
+      <article class="metric">
+        <p class="label">Seq / Arp mode</p>
+        <p class="value" id="mode">—</p>
+        <p class="hint">C8–G8 at velocity 1</p>
+      </article>
+      <article class="metric">
+        <p class="label">Time division</p>
+        <p class="value" id="division">—</p>
+        <p class="hint">Straight or triplet</p>
+      </article>
+      <article class="metric">
+        <p class="label">Rate</p>
+        <p class="value" id="bpm">—</p>
+        <p class="hint">BPM from 24 PPQN clock</p>
+      </article>
+    </section>
+
+    <section class="activity">
+      <p class="label">Live activity</p>
+      <div class="activity-row">
+        <span class="activity-value" id="last-event">Awaiting MIDI</span>
+        <span class="activity-age" id="event-age">—</span>
+      </div>
+      <div class="activity-row">
+        <span class="label">Marker rule</span>
+        <span class="activity-value" id="channel">C8–G8 · velocity 1</span>
+      </div>
+      <div class="activity-row">
+        <span class="label">Last note received</span>
+        <span class="activity-value" id="raw-note">Awaiting note</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const text = (value, fallback = "—") => value === null || value === undefined ? fallback : String(value);
+
+    window.updateKeyStepMonitor = (state) => {
+      const connected = state.connected === true;
+      const connection = document.getElementById("connection");
+      connection.classList.toggle("connected", connected);
+      document.getElementById("connection-text").textContent = connected ? "Connected" : "Waiting for device";
+      document.getElementById("device-name").textContent = connected ? text(state.deviceName) : "No matching MIDI device";
+      document.getElementById("output-device").textContent = state.outputDeviceName
+        ? `Output: ${state.outputDeviceName}`
+        : "Output: QWERTY MIDI device unavailable";
+      document.getElementById("mode").textContent = state.mode ? `Position ${state.mode}` : "—";
+      document.getElementById("division").textContent = text(state.division);
+      document.getElementById("bpm").textContent = state.bpm ? `${state.bpm} BPM` : "—";
+      document.getElementById("last-event").textContent = text(state.lastEvent, "Awaiting MIDI");
+      document.getElementById("event-age").textContent = Number.isFinite(state.eventAge) ? `${state.eventAge}s ago` : "—";
+      document.getElementById("channel").textContent = `C8–G8 · velocity 1 · ${state.clockPulseCount || 0} clocks`;
+      document.getElementById("raw-note").textContent = Number.isFinite(state.lastRawNote)
+        ? `Note ${state.lastRawNote} on MIDI ${(state.lastRawNoteChannel || 0) + 1}`
+        : "Awaiting note";
+    };
+  </script>
+</body>
+</html>
+]]
+
+return HTML
+
+end
+
+__modules["keystep"] = function()
+-- KeyStep side-channel control interceptor for Hammerspoon.
+--
+-- The KeyStep does not expose its Seq/Arp mode, rate, or time division as
+-- ordinary MIDI CCs. When its sequencer is running, those controls can be
+-- inferred from its sequence notes and MIDI timing clock instead.
+
+local hsMidi = require("hs.midi")
+local Monitor = __require("keystep_ui")
+
+local KeyStep = {}
+
+local CLOCK_PULSES_PER_QUARTER = 24
+local CLOCK_SAMPLE_LIMIT = 24
+local CLOCK_RESET_SECONDS = 0.5
+local NOTE_RESET_SECONDS = 2.0
+local SEQUENCE_MARKER_VELOCITY = 1
+
+local MODE_NOTES = {
+  [108] = 1, [109] = 2, [110] = 3, [111] = 4,
+  [112] = 5, [113] = 6, [114] = 7, [115] = 8,
 }
 
-function macros.execute(macroName)
-  if not macroName then return false end
-  local handler = MACRO_HANDLERS[macroName]
-  if handler then
-    handler()
-    if macroName ~= "Toggle Scale Guide" and macroName ~= "Scale Cycle" and macroName ~= "Panic All" and macroName ~= "Mute Mic" then
-      hs.alert.show("⚡ Macro: " .. macroName, 0.8)
-    end
-    return true
-  else
-    print("[nanoKEY-Macro]: No handler defined for macro '" .. tostring(macroName) .. "'")
-    return false
-  end
-end
+local DIVISIONS = {
+  { label = "1/4",   ratio = 1.0,        ccValue = 1 },
+  { label = "1/4T",  ratio = 2 / 3,      ccValue = 2 },
+  { label = "1/8",   ratio = 0.5,        ccValue = 3 },
+  { label = "1/8T",  ratio = 1 / 3,      ccValue = 4 },
+  { label = "1/16",  ratio = 0.25,       ccValue = 5 },
+  { label = "1/16T", ratio = 1 / 6,      ccValue = 6 },
+  { label = "1/32",  ratio = 0.125,      ccValue = 7 },
+  { label = "1/32T", ratio = 1 / 12,     ccValue = 8 },
+}
 
-return macros
-
-end
-
-__modules["nanokey"] = function()
-local macros = __require("macros")
-local midi = nil
-pcall(function() midi = __require("midi") end)
-local harmony = nil
-pcall(function() harmony = __require("harmony") end)
-local quantizer = nil
-pcall(function() quantizer = __require("quantizer") end)
-local config = nil
-pcall(function() config = __require("config") end)
-
-local nanoKey = {}
-local midiDevice = nil
-local activeLayer = "base"
-local sustainHeld = false
-local sceneHeld = false
+local inputDevice = nil
+local outputDevice = nil
+local monitor = nil
+local monitorRefreshTimer = nil
+local running = false
 local hudRef = nil
-local onStateChangeCallback = nil
-local activePadChords = {}
 
-
-local function log(msg)
-  local line = os.date("%H:%M:%S") .. " [nanoKEY Studio]: " .. tostring(msg)
-  print(line)
-  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
-  if f then
-    f:write(line .. "\n")
-    f:close()
-  end
-  local f2 = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
-  if f2 then
-    f2:write(line .. "\n")
-    f2:close()
-  end
-end
-
-function nanoKey.setHud(hudInstance)
-  hudRef = hudInstance
-end
-
-function nanoKey.setOnStateChange(cb)
-  onStateChangeCallback = cb
-end
-
-function nanoKey.getLayer()
-  return activeLayer
-end
-
-local function computeActiveLayer()
-  local prevLayer = activeLayer
-  if sustainHeld and sceneHeld then
-    activeLayer = "macro_both"
-  elseif sustainHeld then
-    activeLayer = "macro_sustain"
-  elseif sceneHeld then
-    activeLayer = "macro_scene"
-  else
-    activeLayer = "base"
-  end
-
-  if activeLayer ~= prevLayer then
-    log("Switched active layer to: " .. activeLayer)
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("layer", nil, false, activeLayer, { layer = activeLayer })
-    end
-    if onStateChangeCallback then
-      onStateChangeCallback({ layer = activeLayer, sustainHeld = sustainHeld, sceneHeld = sceneHeld })
-    end
-  end
-end
-
-function nanoKey.setLayer(newLayer)
-  if activeLayer ~= newLayer then
-    activeLayer = newLayer
-    log("Manually set active layer to: " .. activeLayer)
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("layer", nil, false, activeLayer, { layer = activeLayer })
-    end
-    if onStateChangeCallback then
-      onStateChangeCallback({ layer = activeLayer })
-    end
-  end
-end
-
--- Map pad MIDI note numbers:
--- Pre-assigned Korg nanoKEY Studio hardware Pad map:
--- Row 1 (Top: Pads 1..4): Arp Type (43), Arp Range (48), Key Sync (50), Wireless (49)
--- Row 2 (Bottom: Pads 5..8): Gate Type - (36), Gate Type + (38), Scale - (42), Scale + (46)
-local KORG_KONTROL_PAD_MAP = {
-  [43] = 1, [48] = 2, [50] = 3, [49] = 4,
-  [36] = 5, [38] = 6, [42] = 7, [46] = 8
+local ARP_MODES = {
+  [1] = "Up",
+  [2] = "Down",
+  [3] = "Inclusive",
+  [4] = "Exclusive",
+  [5] = "Random",
+  [6] = "Order",
+  [7] = "Up x2",
+  [8] = "Down x2",
 }
 
-local function noteToPadIndex(note, ch)
-  if not note then return nil end
-  -- Channel 1 (ch = 0) is strictly reserved for keyboard keys — NEVER trigger pads via note
-  if ch == 0 then return nil end
-
-  if ch == 9 or ch == 1 then
-    if KORG_KONTROL_PAD_MAP[note] then
-      return KORG_KONTROL_PAD_MAP[note]
-    elseif note >= 36 and note <= 43 then
-      return note - 35
-    elseif note >= 64 and note <= 71 then
-      return note - 63
-    end
-  end
-  return nil
-end
-
--- Support CC-mapped pads on any channel (including Global / Channel 1):
--- Hardware pre-assigned CCs: 43 (Pad 1), 48 (Pad 2), 50 (Pad 3), 49 (Pad 4),
---                            36 (Pad 5), 38 (Pad 6), 42 (Pad 7), 46 (Pad 8)
--- Contiguous fallback ranges: CC 80..87, CC 102..109, CC 112..119
-local function ccToPadIndex(cc)
-  if not cc then return nil end
-  if KORG_KONTROL_PAD_MAP[cc] then
-    return KORG_KONTROL_PAD_MAP[cc]
-  end
-  if cc >= 80 and cc <= 87 then
-    return cc - 79
-  elseif cc >= 102 and cc <= 109 then
-    return cc - 101
-  elseif cc >= 112 and cc <= 119 then
-    return cc - 111
-  end
-  return nil
-end
-
-local KNOB_NAMES = {
-  [1] = "Cutoff",
-  [2] = "Peak",
-  [3] = "Drive",
-  [4] = "Volume",
-  [5] = "Attack",
-  [6] = "Decay",
-  [7] = "Sustain",
-  [8] = "Release"
+local config = {
+  -- Marker notes are channel-agnostic because direct and sequenced notes
+  -- share the KeyStep User Channel.
+  outputChannel = 0,
+  -- MIDI CC data is seven-bit. Override this for a different rate encoding.
+  rateCcValue = function(bpm)
+    return math.max(0, math.min(127, math.floor(bpm + 0.5)))
+  end,
 }
 
--- Pre-assigned knob base offset: CC 20..27 (20->Knob 1 .. 27->Knob 8)
-local activeKnobOffset = 19
+local state = {
+  mode = 1,
+  division = "1/16",
+  bpm = 120,
+  connected = false,
+  deviceName = nil,
+  lastEvent = nil,
+  lastEventAt = nil,
+  clockPulseCount = 0,
+  lastRawNote = nil,
+  lastRawNoteChannel = nil,
+  outputDeviceName = nil,
+  lastClockTime = nil,
+  clockDeltas = {},
+  lastSequenceNoteTime = nil,
+  pitchBend = 8192,
+  modWheel = 0,
+  sustain = 0,
+  seqArpMode = "arp",
+  playing = false,
+  recording = false,
+  shift = false,
+  hold = false,
+  octave = 0,
+  activeKeys = {},
+}
 
-local function resolveKnobIndex(cc)
-  if not cc or cc == 19 then return nil end
-  -- Pre-assigned hardware default (CC 20..27):
-  if cc >= 20 and cc <= 27 then
-    activeKnobOffset = 19
-    return cc - 19
+local function sendToHud(controlId, value, pressed, extra)
+  if hudRef and hudRef.updateKeyStepControl then
+    hudRef.updateKeyStepControl(controlId, value, pressed, extra)
   end
+end
 
-  -- Auto-detect alternative hardware offsets if explicitly using them:
-  if cc >= 16 and cc <= 18 then
-    activeKnobOffset = 15
-    return cc - 15
-  elseif cc >= 14 and cc <= 15 then
-    activeKnobOffset = 13
-    return cc - 13
+local function nowSeconds()
+  return hs.timer.absoluteTime() / 1000000000
+end
+
+local function monitorState()
+  local age = nil
+  if state.lastEventAt then
+    age = math.max(0, math.floor(nowSeconds() - state.lastEventAt))
   end
+  return {
+    mode = state.mode,
+    division = state.division,
+    bpm = state.bpm,
+    connected = state.connected,
+    deviceName = state.deviceName,
+    lastEvent = state.lastEvent,
+    eventAge = age,
+    clockPulseCount = state.clockPulseCount,
+    lastRawNote = state.lastRawNote,
+    lastRawNoteChannel = state.lastRawNoteChannel,
+    outputDeviceName = state.outputDeviceName,
+  }
+end
 
-  local idx = cc - activeKnobOffset
-  if idx >= 1 and idx <= 8 then
-    return idx
+local function updateMonitor()
+  if monitor then monitor:update(monitorState()) end
+end
+
+local function ensureMonitorRefreshTimer()
+  if monitorRefreshTimer then return end
+  monitorRefreshTimer = hs.timer.doEvery(1, updateMonitor)
+end
+
+local function recordEvent(event, timestamp)
+  state.lastEvent = event
+  state.lastEventAt = timestamp or nowSeconds()
+  updateMonitor()
+end
+
+local function average(values)
+  if #values == 0 then return nil end
+  local total = 0
+  for _, value in ipairs(values) do total = total + value end
+  return total / #values
+end
+
+local function clearClockTiming()
+  state.lastClockTime = nil
+  state.clockDeltas = {}
+end
+
+local function clearNoteTiming()
+  state.lastSequenceNoteTime = nil
+end
+
+local function getQwertyOutput()
+  local active = _G.activeWatchers and _G.activeWatchers.midiDevice
+  if active then return active end
+
+  for _, deviceName in ipairs(hsMidi.devices() or {}) do
+    if deviceName:match("IAC") or deviceName:match("Bus") then
+      return hsMidi.new(deviceName)
+    end
+  end
+  for _, sourceName in ipairs(hsMidi.virtualSources() or {}) do
+    if sourceName:match("IAC") or sourceName:match("Bus") then
+      return hsMidi.newVirtualSource(sourceName)
+    end
   end
   return nil
 end
 
-function nanoKey.handleMidiEvent(commandType, description, metadata)
-  metadata = metadata or {}
-  local cc = metadata.controllerNumber
-  local val = metadata.controllerValue or metadata.value or 0
-  local note = metadata.note or metadata.noteNumber or metadata.pitch
-  local vel = metadata.velocity or 0
-  local ch = metadata.channel or 0
-  local dataHex = metadata.data or ""
-  local sysexDataHex = metadata.sysexData or ""
-
-  -- Telemetry logging for all MIDI events
-  if commandType == "controlChange" then
-    log(string.format("MIDI CC: #%s = %s (ch=%s)", tostring(cc), tostring(val), tostring(ch)))
-  elseif commandType == "noteOn" or commandType == "noteOff" then
-    log(string.format("MIDI %s: note=%s vel=%s (ch=%s)", commandType, tostring(note), tostring(vel), tostring(ch)))
-  elseif commandType == "systemExclusive" then
-    log(string.format("MIDI SysEx: len=%d data=%s", #dataHex, dataHex))
-  end
-
-  -- 1. Check for Sustain Button (CC #64 pre-assigned/standard, or CC #54 fallback, or CC #25 on channel 15)
-  -- Sustain button is momentary (127 on press, 0 on release). CC #64 avoids collision with Knob 6 (CC #25).
-  if commandType == "controlChange" and (cc == 64 or cc == 54 or (cc == 25 and ch == 15 and (val == 0 or val == 127))) then
-    if val and val > 0 then
-      local wasSustainHeld = sustainHeld
-      sustainHeld = true
-      computeActiveLayer()
-      if not wasSustainHeld and sceneHeld then
-        macros.execute("Toggle Scale Guide")
-      end
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", val, true, activeLayer)
-      end
-    else
-      sustainHeld = false
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_sustain", 0, false, activeLayer)
-      end
-    end
-    return true
-  end
-
-  -- 2. Check for Scene Button and Function Buttons via Native Korg SysEx (f0 42 40 00 01 36 05 00 00 41 ...)
-  if commandType == "systemExclusive" then
-    local fullHex = string.lower(dataHex .. sysexDataHex)
-    if string.find(fullHex, "4140407f") then
-      local wasSceneHeld = sceneHeld
-      sceneHeld = true
-      computeActiveLayer()
-      if not wasSceneHeld and sustainHeld then
-        macros.execute("Toggle Scale Guide")
-      end
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_scene", 127, true, activeLayer)
-      end
-      return true
-    elseif string.find(fullHex, "41404000") then
-      sceneHeld = false
-      computeActiveLayer()
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_scene", 0, false, activeLayer)
-      end
-      return true
-    elseif string.find(fullHex, "414001") then
-      log("SysEx Native Button: Octave Up / Scale Increment (+1)")
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_oct_up", 127, true, activeLayer)
-      end
-      return true
-    elseif string.find(fullHex, "414000") then
-      log("SysEx Native Button: Octave Down / Scale Decrement (-1)")
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("btn_oct_down", 127, true, activeLayer)
-      end
-      return true
-    end
-  end
-
-  -- 3. KAOSS Touchpad (Touch X = CC #1 or CC #28; Touch Y = CC #19 or CC #2 or CC #29)
-  if commandType == "controlChange" and cc then
-    if cc == 1 or cc == 28 or cc == 19 or cc == 2 or cc == 29 then
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("cc_" .. cc, val, true, activeLayer, { cc = cc, value = val })
-      end
-      return false
-    end
-  end
-
-  -- 4. Rotary Knobs (8 knobs labelled by Korg Gadget defaults: Cutoff, Peak, Drive, Volume, ADSR)
-  if commandType == "controlChange" and cc then
-    local knobIdx = resolveKnobIndex(cc)
-    if knobIdx and knobIdx >= 1 and knobIdx <= 8 then
-      local knobName = KNOB_NAMES[knobIdx] or ("Knob " .. knobIdx)
-      log(string.format("Knob %d [%s] (CC #%d) = %d [offset=%d]", knobIdx, knobName, cc, val or 0, activeKnobOffset))
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("knob_" .. knobIdx, val, true, activeLayer, {
-          cc = cc,
-          value = val,
-          knob = knobIdx,
-          name = knobName
-        })
-      end
-      return false
-    end
-  end
-
-  -- 5. Pad Triggers (Control Change on any channel e.g. CC 80..87, or Note on Ch 2 / Ch 10)
-  local padIdx = nil
-  local isDown = false
-  local isUp = false
-  local padVel = 100
-
-  if commandType == "controlChange" and cc then
-    padIdx = ccToPadIndex(cc)
-    if padIdx then
-      isDown = (val and val > 0)
-      isUp = (val == 0 or val == nil)
-      padVel = (val and val > 0) and val or 100
-    end
-  elseif (commandType == "noteOn" or commandType == "noteOff") and note then
-    padIdx = noteToPadIndex(note, ch)
-    if padIdx then
-      isDown = (commandType == "noteOn" and vel and vel > 0)
-      isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
-      padVel = vel or 100
-    end
-  end
-
-  if padIdx then
-    if isDown then
-      -- Macro Layer 1: Sustain Held -> Transport & Window Management + Scale Guide
-      if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
-        local padSustainMacros = {
-          [1] = "Play/Pause", [2] = "Record", [3] = "Rewind", [4] = "Forward",
-          [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Toggle Scale Guide"
-        }
-        local mName = padSustainMacros[padIdx]
-        if mName then
-          macros.execute(mName)
-          if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { macro = mName, cc = cc, note = note })
-          end
-          return true
-        end
-      -- Macro Layer 2: Scene Held -> Presets & System Tools
-      elseif activeLayer == "macro_scene" then
-        local padSceneMacros = {
-          [1] = "Preset 1", [2] = "Preset 2", [3] = "Preset 3", [4] = "Preset 4",
-          [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Toggle Scale Guide"
-        }
-        local mName = padSceneMacros[padIdx]
-        if mName then
-          macros.execute(mName)
-          if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, { macro = mName, cc = cc, note = note })
-          end
-          return true
-        end
-      else
-        -- Base Performance mode pad hit: Send Diatonic Chord to MIDI output
-        local st = config and config.state or {}
-        local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
-        local ch = st.bottomRowChannel or 0
-        local bpm = st.arpBpm or 120.0
-        local quantMode = st.inputQuantizeMode or "Off"
-
-        activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
-
-        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
-          quantizer.queueNoteOn("nk_pad_" .. padIdx, chordInfo.pitches, padVel, ch, bpm, quantMode, function(pitches, vel, channel)
-            if midi then
-              for _, p in ipairs(pitches) do
-                midi.sendMidiNote("noteOn", p, vel, channel)
-              end
-            end
-            if hudRef and hudRef.updateNanoKeyControl then
-              for _, p in ipairs(pitches) do
-                hudRef.updateNanoKeyControl("key_" .. p, vel, true, activeLayer, { fromPad = padIdx })
-              end
-            end
-          end)
-        else
-          if midi then
-            for _, p in ipairs(chordInfo.pitches) do
-              midi.sendMidiNote("noteOn", p, padVel, ch)
-            end
-          end
-          if hudRef and hudRef.updateNanoKeyControl then
-            for _, p in ipairs(chordInfo.pitches) do
-              hudRef.updateNanoKeyControl("key_" .. p, padVel, true, activeLayer, { fromPad = padIdx })
-            end
-          end
-        end
-
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("pad_" .. padIdx, padVel, true, activeLayer, {
-            note = note,
-            cc = cc,
-            velocity = padVel,
-            chord = chordInfo.name,
-            roman = chordInfo.roman,
-            pitches = chordInfo.pitches
-          })
-        end
-      end
-      return true
-    elseif isUp then
-      if activeLayer == "base" then
-        local saved = activePadChords[padIdx]
-        local pitchesToRelease = saved and saved.pitches or {}
-        local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
-        local st = config and config.state or {}
-        local quantMode = st.inputQuantizeMode or "Off"
-
-        if quantizer and quantMode and quantMode ~= "Off" and quantMode ~= "None" then
-          quantizer.queueNoteOff("nk_pad_" .. padIdx, function(pitches, channel)
-            if midi then
-              for _, p in ipairs(pitches) do
-                midi.sendMidiNote("noteOff", p, 0, channel)
-              end
-            end
-            if hudRef and hudRef.updateNanoKeyControl then
-              for _, p in ipairs(pitches) do
-                hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
-              end
-            end
-          end)
-        else
-          if midi then
-            for _, p in ipairs(pitchesToRelease) do
-              midi.sendMidiNote("noteOff", p, 0, ch)
-            end
-          end
-          if hudRef and hudRef.updateNanoKeyControl then
-            for _, p in ipairs(pitchesToRelease) do
-              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
-            end
-          end
-        end
-        activePadChords[padIdx] = nil
-      end
-
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("pad_" .. padIdx, 0, false, activeLayer, { note = note, cc = cc })
-      end
-      return true
-    end
-  end
-
-  -- 6. Keyboard Keys on Channel 1 (ch == 0, Notes 24 to 108 = C1 to C8, octave-folded in GUI)
-  if ch == 0 and note and note >= 24 and note <= 108 then
-    local isDown = (commandType == "noteOn" and vel and vel > 0)
-    local isUp = (commandType == "noteOff" or (commandType == "noteOn" and vel == 0))
-
-    if isDown then
-      -- If Scene is held, keys can also trigger shortcuts
-      if activeLayer == "macro_scene" then
-        local macroNote = note
-        while macroNote < 48 do macroNote = macroNote + 12 end
-        while macroNote > 72 do macroNote = macroNote - 12 end
-        local keyMacros = {
-          [48] = "Preset 1", [49] = "Preset 2", [50] = "Preset 3", [51] = "Preset 4",
-          [52] = "Preset 5", [53] = "Preset 6", [54] = "Preset 7", [55] = "Preset 8",
-          [56] = "Browser", [57] = "Terminal", [58] = "Editor", [59] = "Logic Pro",
-          [60] = "Mute Mic", [61] = "Screenshot", [62] = "Volume -", [63] = "Volume +",
-          [64] = "Center Win", [65] = "Prev Track", [66] = "Next Track", [67] = "Undo",
-          [68] = "Redo", [69] = "Save Project", [70] = "Export Audio", [71] = "Metronome",
-          [72] = "Panic All"
-        }
-        local mName = keyMacros[macroNote]
-        if mName then
-          macros.execute(mName)
-          if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { macro = mName })
-          end
-          return true
-        end
-      end
-
-      -- Base performance key down
-      local st = config and config.state or {}
-      local quantMode = st.inputQuantizeMode or "Off"
-
-      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
-        local bpm = st.arpBpm or 120.0
-        quantizer.queueNoteOn("nk_key_" .. note, { note }, vel, ch, bpm, quantMode, function(pitches, v, c)
-          -- Note: The nanoKEY hardware keys transmit Note On/Off directly to CoreMIDI/DAW.
-          -- We do NOT call midi.sendMidiNote here to prevent duplicate notes.
-          if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("key_" .. pitches[1], v, true, activeLayer, { note = pitches[1], velocity = v })
-          end
-        end)
-      else
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("key_" .. note, vel, true, activeLayer, { note = note, velocity = vel })
-        end
-      end
-      return false
-    elseif isUp then
-      local st = config and config.state or {}
-      local quantMode = st.inputQuantizeMode or "Off"
-
-      if quantMode and quantMode ~= "Off" and quantMode ~= "None" and quantizer then
-        quantizer.queueNoteOff("nk_key_" .. note, function(pitches, c)
-          -- Note: Hardware sends Note Off directly to CoreMIDI/DAW.
-          if hudRef and hudRef.updateNanoKeyControl then
-            hudRef.updateNanoKeyControl("key_" .. pitches[1], 0, false, activeLayer, { note = pitches[1] })
-          end
-        end)
-      else
-        if hudRef and hudRef.updateNanoKeyControl then
-          hudRef.updateNanoKeyControl("key_" .. note, 0, false, activeLayer, { note = note })
-        end
-      end
-      return false
-    end
-  end
-
-  return false
+local function sendCC(controller, value)
+  if not outputDevice then return end
+  outputDevice:sendCommand("controlChange", {
+    controllerNumber = controller,
+    controllerValue = value,
+    channel = config.outputChannel,
+  })
 end
 
-function nanoKey.handleGuiAction(actionType, data)
-  data = data or {}
-  if actionType == "key" then
-    local note = tonumber(data.note)
-    local isDown = (data.pressed == true)
-    if note and midi then
-      midi.sendMidiNote(isDown and "noteOn" or "noteOff", note, isDown and 100 or 0, 0)
-    end
-    if hudRef and hudRef.updateNanoKeyControl and note then
-      hudRef.updateNanoKeyControl("key_" .. note, isDown and 100 or 0, isDown, activeLayer, { note = note })
-    end
-  elseif actionType == "pad" then
-    local padIdx = tonumber(data.pad)
-    local isDown = (data.pressed == true)
-    if padIdx and padIdx >= 1 and padIdx <= 8 then
-      if isDown then
-        if activeLayer == "macro_sustain" or activeLayer == "macro_both" then
-          local padSustainMacros = {
-            [1] = "Play/Pause", [2] = "Record", [3] = "Rewind", [4] = "Forward",
-            [5] = "Left Half", [6] = "Right Half", [7] = "Maximize", [8] = "Restore Win"
-          }
-          local mName = padSustainMacros[padIdx]
-          if mName then macros.execute(mName) end
-        elseif activeLayer == "macro_scene" then
-          local padSceneMacros = {
-            [1] = "Preset 1", [2] = "Preset 2", [3] = "Preset 3", [4] = "Preset 4",
-            [5] = "Scale Cycle", [6] = "Browser", [7] = "Logic Pro", [8] = "Panic All"
-          }
-          local mName = padSceneMacros[padIdx]
-          if mName then macros.execute(mName) end
-        else
-          local st = config and config.state or {}
-          local chordInfo = harmony and harmony.getDiatonicPadChord(padIdx, st) or { pitches = { 48, 52, 55 }, name = "Chord " .. padIdx, roman = "I" }
-          local ch = st.bottomRowChannel or 0
-          activePadChords[padIdx] = { pitches = chordInfo.pitches, channel = ch }
-          if midi then
-            for _, p in ipairs(chordInfo.pitches) do
-              midi.sendMidiNote("noteOn", p, 100, ch)
-            end
-          end
-          if hudRef and hudRef.updateNanoKeyControl then
-            for _, p in ipairs(chordInfo.pitches) do
-              hudRef.updateNanoKeyControl("key_" .. p, 100, true, activeLayer, { fromPad = padIdx })
-            end
-          end
-        end
-      else
-        if activeLayer == "base" then
-          local saved = activePadChords[padIdx]
-          local pitchesToRelease = saved and saved.pitches or {}
-          local ch = saved and saved.channel or (config and config.state and config.state.bottomRowChannel or 0)
-          if midi then
-            for _, p in ipairs(pitchesToRelease) do
-              midi.sendMidiNote("noteOff", p, 0, ch)
-            end
-          end
-          if hudRef and hudRef.updateNanoKeyControl then
-            for _, p in ipairs(pitchesToRelease) do
-              hudRef.updateNanoKeyControl("key_" .. p, 0, false, activeLayer, { fromPad = padIdx })
-            end
-          end
-          activePadChords[padIdx] = nil
-        end
-      end
-      if hudRef and hudRef.updateNanoKeyControl then
-        hudRef.updateNanoKeyControl("pad_" .. padIdx, isDown and 100 or 0, isDown, activeLayer)
-      end
-    end
-  elseif actionType == "sustain" then
-    if data.toggle then
-      sustainHeld = not sustainHeld
-    elseif data.pressed ~= nil then
-      sustainHeld = (data.pressed == true)
-    end
-    computeActiveLayer()
-    if midi then
-      midi.sendSustainCC(sustainHeld and 127 or 0)
-    end
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("btn_sustain", sustainHeld and 127 or 0, sustainHeld, activeLayer)
-    end
-  elseif actionType == "scene" then
-    if data.toggle then
-      sceneHeld = not sceneHeld
-    elseif data.pressed ~= nil then
-      sceneHeld = (data.pressed == true)
-    end
-    computeActiveLayer()
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("btn_scene", sceneHeld and 127 or 0, sceneHeld, activeLayer)
-    end
-  elseif actionType == "guide" then
-    local st = config and config.state or {}
-    if data.toggle then
-      st.scaleGuideEnabled = not (st.scaleGuideEnabled ~= false)
-    elseif data.enabled ~= nil then
-      st.scaleGuideEnabled = (data.enabled == true)
-    end
-    if config and config.saveSettings then config.saveSettings() end
-    nanoKey.syncScaleGuideLeds(st, true)
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("btn_guide", st.scaleGuideEnabled and 127 or 0, st.scaleGuideEnabled, activeLayer)
-    end
-    if hudRef and hudRef.updateWebviewHud then
-      hudRef.updateWebviewHud()
-    end
-    local status = st.scaleGuideEnabled and "ON (Gold/Accented)" or "OFF"
-    hs.alert.show("🎹 Scale Guide: " .. status, 1.2)
-  end
+local function forwardNote(commandType, metadata)
+  if not outputDevice then return end
+  outputDevice:sendCommand(commandType, {
+    note = metadata.note,
+    velocity = metadata.velocity or 0,
+    channel = metadata.channel or 0,
+  })
 end
 
-local lastLitScalePitches = {}
+local function formatState()
+  return string.format(
+    "[KeyStep] Mode: %s | Div: %s | Rate: %s BPM",
+    state.mode or "?",
+    state.division or "?",
+    state.bpm or "?"
+  )
+end
 
-function nanoKey.syncScaleGuideLeds(st, force)
-  st = st or (config and config.state) or {}
-  if not midiDevice then return end
+local function publishChange()
+  print(formatState())
+end
 
-  local enabled = st.scaleGuideEnabled ~= false
-  local root = st.currentRoot or 0
-  local scaleIdx = st.currentScaleIdx or 1
+local function setMode(mode)
+  if state.mode == mode then return end
+  state.mode = mode
+  sendCC(102, mode)
+  publishChange()
+  updateMonitor()
+  sendToHud("mode", mode, true, { mode = mode, modeName = ARP_MODES[mode] or ("Seq " .. tostring(mode)) })
+end
 
-  if not enabled then
-    for p, _ in pairs(lastLitScalePitches) do
-      pcall(function()
-        midiDevice:sendCommand("noteOff", { note = tonumber(p), velocity = 0, channel = 0 })
-      end)
+local function setDivision(division)
+  if state.division == division.label then return end
+  state.division = division.label
+  sendCC(103, division.ccValue)
+  publishChange()
+  updateMonitor()
+  sendToHud("division", division.ccValue, true, { division = division.label })
+end
+
+local function setBpm(bpm)
+  local roundedBpm = math.floor(bpm + 0.5)
+  if state.bpm == roundedBpm then return end
+  state.bpm = roundedBpm
+  sendCC(104, config.rateCcValue(roundedBpm))
+  publishChange()
+  updateMonitor()
+  sendToHud("bpm", roundedBpm, true, { bpm = roundedBpm })
+end
+
+local function nearestDivision(ratio)
+  local nearest = nil
+  local nearestError = math.huge
+  for _, division in ipairs(DIVISIONS) do
+    local error = math.abs(ratio - division.ratio)
+    if error < nearestError then
+      nearest = division
+      nearestError = error
     end
-    lastLitScalePitches = {}
+  end
+  return nearest
+end
+
+local function handleClock(timestamp)
+  state.clockPulseCount = state.clockPulseCount + 1
+  recordEvent("MIDI clock", timestamp)
+  local previous = state.lastClockTime
+  state.lastClockTime = timestamp
+  if not previous then return end
+
+  local delta = timestamp - previous
+  if delta <= 0 or delta > CLOCK_RESET_SECONDS then
+    state.clockDeltas = {}
     return
   end
 
-  local guideInfo = harmony and harmony.getScaleGuideInfo and harmony.getScaleGuideInfo(root, scaleIdx, 48, 72)
-  if not guideInfo or not guideInfo.pitches then return end
-
-  local newLitPitches = {}
-  for pStr, info in pairs(guideInfo.pitches) do
-    local p = tonumber(pStr)
-    if info.inScale then
-      newLitPitches[p] = true
-      if force or not lastLitScalePitches[p] then
-        pcall(function()
-          midiDevice:sendCommand("noteOn", { note = p, velocity = 127, channel = 0 })
-        end)
-      end
-    else
-      if lastLitScalePitches[p] then
-        pcall(function()
-          midiDevice:sendCommand("noteOff", { note = p, velocity = 0, channel = 0 })
-        end)
-      end
-    end
+  table.insert(state.clockDeltas, delta)
+  if #state.clockDeltas > CLOCK_SAMPLE_LIMIT then
+    table.remove(state.clockDeltas, 1)
   end
-  lastLitScalePitches = newLitPitches
+
+  local meanDelta = average(state.clockDeltas)
+  if meanDelta then
+    setBpm(60 / (meanDelta * CLOCK_PULSES_PER_QUARTER))
+  end
 end
 
-function nanoKey.connect(targetName)
-  targetName = targetName or "nanoKEY Studio"
-  local devices = hs.midi.devices()
-  local foundName = nil
+local function handleSequenceNote(note, channel, timestamp)
 
-  for _, name in ipairs(devices) do
-    if string.find(string.lower(name), string.lower(targetName)) then
-      foundName = name
-      break
+  recordEvent("Sequence note " .. tostring(note), timestamp)
+
+  local mode = MODE_NOTES[note]
+  if mode then setMode(mode) end
+
+  local previous = state.lastSequenceNoteTime
+  state.lastSequenceNoteTime = timestamp
+  if not previous or not state.bpm then return end
+
+  local noteDelta = timestamp - previous
+  if noteDelta <= 0 or noteDelta > NOTE_RESET_SECONDS then return end
+
+  local quarterNoteSeconds = 60 / state.bpm
+  local ratio = noteDelta / quarterNoteSeconds
+  setDivision(nearestDivision(ratio))
+end
+
+local function findDevice(targetName)
+  for _, deviceName in ipairs(hsMidi.devices() or {}) do
+    local lowered = string.lower(deviceName)
+    if lowered == "keystep" or lowered:match("^arturia keystep") then
+      return deviceName
+    end
+    if targetName and lowered == string.lower(targetName) then
+      return deviceName
     end
   end
+  return nil
+end
 
-  if not foundName then
-    log("nanoKEY Studio not detected in connected devices. Will auto-connect when plugged in.")
+function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
+  if not running and not inputDevice then return end
+  metadata = metadata or {}
+  timestamp = timestamp or nowSeconds()
+
+  if commandType == "systemTimingClock" then
+    handleClock(timestamp)
+  elseif commandType == "systemStartSequence" or commandType == "systemContinueSequence" then
+    state.playing = true
+    clearNoteTiming()
+    recordEvent(commandType == "systemStartSequence" and "Transport started" or "Transport continued", timestamp)
+    sendToHud("transport", 1, true, { action = "play" })
+  elseif commandType == "systemStopSequence" then
+    state.playing = false
+    clearClockTiming()
+    clearNoteTiming()
+    recordEvent("Transport stopped", timestamp)
+    sendToHud("transport", 0, false, { action = "stop" })
+  elseif commandType == "pitchBend" then
+    local pitchVal = metadata.pitchChange or 8192
+    state.pitchBend = pitchVal
+    if outputDevice then
+      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = metadata.channel or config.outputChannel })
+    end
+    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
+    recordEvent("Pitch bend " .. tostring(pitchVal), timestamp)
+  elseif commandType == "controlChange" then
+    local ccNum = metadata.controllerNumber
+    local ccVal = metadata.controllerValue or 0
+    if ccNum == 1 then
+      state.modWheel = ccVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      end
+      sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal })
+      recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
+    elseif ccNum == 64 then
+      state.sustain = ccVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 64, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      end
+      sendToHud("sustain", ccVal, ccVal >= 64, { cc = 64, value = ccVal })
+      recordEvent("Sustain " .. tostring(ccVal), timestamp)
+    else
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = ccNum, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      end
+    end
+  elseif commandType == "polyphonicKeyPressure" or commandType == "channelPressure" then
+    local pressure = metadata.pressure or metadata.value or 0
+    sendToHud("aftertouch", pressure, true, { note = metadata.note, pressure = pressure })
+  elseif commandType == "noteOn" and (metadata.velocity or 0) > 0 then
+    state.lastRawNote = metadata.note
+    state.lastRawNoteChannel = metadata.channel
+    recordEvent("Note " .. tostring(metadata.note) .. " on MIDI " .. tostring((metadata.channel or 0) + 1), timestamp)
+    if MODE_NOTES[metadata.note] and metadata.velocity == SEQUENCE_MARKER_VELOCITY then
+      handleSequenceNote(metadata.note, metadata.channel, timestamp)
+    else
+      forwardNote("noteOn", metadata)
+      state.activeKeys[metadata.note] = metadata.velocity
+      sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
+        note = metadata.note,
+        velocity = metadata.velocity,
+        channel = metadata.channel
+      })
+    end
+  elseif commandType == "noteOff" or (commandType == "noteOn" and (metadata.velocity or 0) == 0) then
+    -- Marker note-offs must be swallowed too, so they cannot affect Logic.
+    if not MODE_NOTES[metadata.note] then forwardNote("noteOff", metadata) end
+    if not MODE_NOTES[metadata.note] then
+      state.activeKeys[metadata.note] = nil
+      sendToHud("key_" .. tostring(metadata.note), 0, false, {
+        note = metadata.note,
+        channel = metadata.channel
+      })
+    end
+  end
+end
+
+function KeyStep.connect(targetName)
+  local deviceName = findDevice(targetName)
+  if not deviceName then
+    print("[KeyStep] Not detected. Waiting for KeyStep or Arturia KeyStep.")
     return false
   end
 
-  if midiDevice and midiDevice:name() == foundName then
-    return true
+  if not outputDevice then
+    outputDevice = getQwertyOutput()
+    state.outputDeviceName = outputDevice and outputDevice:name() or nil
   end
 
-  log("Connecting to: " .. foundName)
-  midiDevice = hs.midi.new(foundName)
-  if not midiDevice then
-    log("Failed to open MIDI port for: " .. foundName)
+  if inputDevice and inputDevice:name() == deviceName then return true end
+
+  inputDevice = hsMidi.new(deviceName)
+  if not inputDevice then
+    print("[KeyStep] Failed to open MIDI input: " .. deviceName)
     return false
   end
 
-  _G.activeWatchers = _G.activeWatchers or {}
-  _G.activeWatchers.nanoKeyMidiDevice = midiDevice
-
-  midiDevice:callback(function(obj, devName, cmdType, desc, metadata)
-    nanoKey.handleMidiEvent(cmdType, desc, metadata)
+  running = true
+  inputDevice:callback(function(_, _, commandType, description, metadata)
+    KeyStep.handleMidiEvent(commandType, description, metadata)
   end)
-
-  log("Connected! Listening for nanoKEY Studio performance, CC #25 Sustain, and Scene SysEx.")
-  nanoKey.syncScaleGuideLeds(nil, true)
-  if hudRef and hudRef.updateNanoKeyControl then
-    hudRef.updateNanoKeyControl("connection", 1, true, activeLayer, { deviceName = foundName })
-  end
+  state.connected = true
+  state.deviceName = deviceName
+  recordEvent("Listening for MIDI", nowSeconds())
+  print("[KeyStep] Listening on " .. deviceName)
   if hudRef and hudRef.updateConnectionStatus then
     hudRef.updateConnectionStatus(true)
   end
+  sendToHud("connection", 1, true, { deviceName = deviceName })
+  sendToHud("mode", state.mode, true, { mode = state.mode, modeName = ARP_MODES[state.mode] or ("Seq " .. tostring(state.mode)) })
+  sendToHud("division", 5, true, { division = state.division })
+  sendToHud("bpm", state.bpm, true, { bpm = state.bpm })
+  sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
+  sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+  sendToHud("octave", state.octave, true, { octave = state.octave })
   return true
 end
 
-function nanoKey.disconnect()
-  if midiDevice then
-    nanoKey.syncScaleGuideLeds({ scaleGuideEnabled = false }, true)
-    _G.activeWatchers = _G.activeWatchers or {}
-    _G.activeWatchers.nanoKeyMidiDevice = nil
-    midiDevice = nil
-    log("Disconnected.")
-    if hudRef and hudRef.updateNanoKeyControl then
-      hudRef.updateNanoKeyControl("connection", 0, false, activeLayer, { deviceName = nil })
-    end
-    if hudRef and hudRef.updateConnectionStatus then
-      hudRef.updateConnectionStatus(false)
-    end
+function KeyStep.disconnect()
+  if inputDevice then inputDevice:callback(nil) end
+  inputDevice = nil
+  state.connected = false
+  state.deviceName = nil
+  clearClockTiming()
+  clearNoteTiming()
+  recordEvent("MIDI device disconnected", nowSeconds())
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(false)
+  end
+  sendToHud("connection", 0, false, { deviceName = nil })
+end
+
+function KeyStep.isConnected()
+  return inputDevice ~= nil
+end
+
+function KeyStep.setHud(hudInstance)
+  hudRef = hudInstance
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(inputDevice ~= nil)
+  end
+  if inputDevice then
+    sendToHud("connection", 1, true, { deviceName = state.deviceName })
+    sendToHud("mode", state.mode, true, { mode = state.mode, modeName = ARP_MODES[state.mode] or ("Seq " .. tostring(state.mode)) })
+    sendToHud("division", 5, true, { division = state.division })
+    sendToHud("bpm", state.bpm, true, { bpm = state.bpm })
+    sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
+    sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+    sendToHud("octave", state.octave, true, { octave = state.octave })
   end
 end
 
-function nanoKey.isConnected()
-  return midiDevice ~= nil
-end
-
-function nanoKey.checkConnection()
-  local devices = hs.midi.devices()
-  local found = false
-  for _, name in ipairs(devices) do
-    if string.find(string.lower(name), "nanokey") then
-      found = true
-      break
-    end
+function KeyStep.handleGuiAction(actionType, data)
+  data = data or {}
+  if not outputDevice then
+    outputDevice = getQwertyOutput()
   end
-  if found and not nanoKey.isConnected() then
-    nanoKey.connect()
-  elseif not found and nanoKey.isConnected() then
-    nanoKey.disconnect()
-  end
-  return nanoKey.isConnected()
-end
-
-function nanoKey.enableNativeMode()
-  if midiDevice and midiDevice.sendSysex then
-    log("Sending Korg Native Mode SysEx Handshake...")
-    midiDevice:sendSysex("f07e7f0601f7")
-    hs.timer.doAfter(0.1, function()
-      if midiDevice and midiDevice.sendSysex then
-        midiDevice:sendSysex("f0424000013601000012f7")
+  if actionType == "key" then
+    local note = tonumber(data.note)
+    local isDown = (data.pressed == true)
+    local vel = tonumber(data.velocity) or 100
+    local ch = tonumber(data.channel) or config.outputChannel or 0
+    if note then
+      if outputDevice then
+        outputDevice:sendCommand(isDown and "noteOn" or "noteOff", { note = note, velocity = isDown and vel or 0, channel = ch })
       end
-    end)
-    hs.timer.doAfter(0.25, function()
-      if midiDevice and midiDevice.sendSysex then
-        midiDevice:sendSysex("f042400001360200000001f7")
-        log("Native Mode SysEx Handshake dispatched.")
-      end
-    end)
-    return true
+      sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, velocity = vel, channel = ch })
+    end
+  elseif actionType == "pitch" then
+    local pitchVal = tonumber(data.value) or 8192
+    state.pitchBend = pitchVal
+    if outputDevice then
+      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = config.outputChannel })
+    end
+    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
+  elseif actionType == "mod" then
+    local modVal = tonumber(data.value) or 0
+    state.modWheel = modVal
+    if outputDevice then
+      outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = config.outputChannel })
+    end
+    sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal })
+  elseif actionType == "transport" then
+    local act = tostring(data.action or "play")
+    if act == "play" or act == "play_pause" then
+      state.playing = not state.playing
+      sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+    elseif act == "stop" then
+      state.playing = false
+      sendToHud("transport", 0, false, { action = "stop" })
+    elseif act == "rec" then
+      state.recording = not state.recording
+      sendToHud("record", state.recording and 1 or 0, state.recording, { recording = state.recording })
+    elseif act == "tap" then
+      sendToHud("tap", 1, true, {})
+    end
+  elseif actionType == "hold" then
+    state.hold = not state.hold
+    if outputDevice then
+      outputDevice:sendCommand("controlChange", { controllerNumber = 64, controllerValue = state.hold and 127 or 0, channel = config.outputChannel })
+    end
+    sendToHud("hold", state.hold and 127 or 0, state.hold, { hold = state.hold })
+  elseif actionType == "shift" then
+    state.shift = not state.shift
+    sendToHud("shift", state.shift and 1 or 0, state.shift, { shift = state.shift })
+  elseif actionType == "octave" then
+    local dir = tonumber(data.dir) or 0
+    state.octave = math.max(-2, math.min(2, (state.octave or 0) + dir))
+    sendToHud("octave", state.octave, true, { octave = state.octave })
+  elseif actionType == "mode" then
+    local m = tonumber(data.mode)
+    if m and m >= 1 and m <= 8 then
+      setMode(m)
+    end
+  elseif actionType == "division" then
+    local d = tonumber(data.division)
+    if d and d >= 1 and d <= 8 then
+      setDivision(DIVISIONS[d])
+    end
+  elseif actionType == "seq_arp" or actionType == "seqarp" then
+    state.seqArpMode = (data.mode == "seq" or data.mode == "arp") and data.mode or (state.seqArpMode == "arp" and "seq" or "arp")
+    sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
+  elseif actionType == "rate" then
+    local bpm = tonumber(data.bpm)
+    if bpm and bpm >= 30 and bpm <= 240 then
+      setBpm(bpm)
+    end
   end
-  return false
 end
 
-function nanoKey.disableNativeMode()
-  if midiDevice and midiDevice.sendSysex then
-    midiDevice:sendSysex("f042400001360200000000f7")
-    log("Restored factory normal mode.")
-    return true
+function KeyStep.start(options)
+  options = options or {}
+  if options.outputChannel ~= nil then config.outputChannel = options.outputChannel end
+  if options.rateCcValue then config.rateCcValue = options.rateCcValue end
+
+  running = true
+  if options.showMonitor ~= false then
+    KeyStep.showMonitor()
+    ensureMonitorRefreshTimer()
   end
-  return false
+  outputDevice = options.outputDevice or getQwertyOutput()
+  state.outputDeviceName = outputDevice and outputDevice:name() or nil
+  if not outputDevice then print("[KeyStep] QWERTY MIDI output was not found; notes and CCs cannot be forwarded.") end
+  KeyStep.connect(options.deviceName)
+  updateMonitor()
+  return KeyStep
 end
 
--- Auto-reconnect watcher
+function KeyStep.stop()
+  running = false
+  KeyStep.disconnect()
+  outputDevice = nil
+  state.outputDeviceName = nil
+  if monitor then monitor:hide() end
+  if monitorRefreshTimer then monitorRefreshTimer:stop() end
+  monitorRefreshTimer = nil
+end
+
+function KeyStep.checkConnection()
+  local available = findDevice()
+  if available and not inputDevice then
+    return KeyStep.connect(available)
+  elseif not available and inputDevice then
+    KeyStep.disconnect()
+  end
+  return inputDevice ~= nil
+end
+
+function KeyStep.getState()
+  return monitorState()
+end
+
+function KeyStep.resetTiming()
+  clearClockTiming()
+  clearNoteTiming()
+end
+
+
+function KeyStep.showMonitor()
+  monitor = monitor or Monitor.new()
+  monitor:show(monitorState())
+  ensureMonitorRefreshTimer()
+end
+
+function KeyStep.hideMonitor()
+  if monitor then monitor:hide() end
+end
+
+function KeyStep.toggleMonitor()
+  monitor = monitor or Monitor.new()
+  monitor:toggle(monitorState())
+end
+
+-- Device callbacks are global in hs.midi, so retain one watcher for the
+-- process lifetime and gate its work through the running flag.
 _G.activeWatchers = _G.activeWatchers or {}
-_G.activeWatchers.nanokeyDeviceWatcher = hs.midi.deviceCallback(function(devices, virtualDevices)
-  local found = nil
-  if type(devices) == "table" then
-    for _, name in ipairs(devices) do
-      if type(name) == "string" and string.find(string.lower(name), "nanokey") then
-        found = name
-        break
-      end
-    end
-  elseif type(devices) == "string" and string.find(string.lower(devices), "nanokey") then
-    found = devices
-  end
-
-  if found then
-    if not nanoKey.isConnected() then
-      log("Hardware connected: " .. found)
-      nanoKey.connect(found)
-    end
-  else
-    if nanoKey.isConnected() then
-      log("Hardware disconnected.")
-      nanoKey.disconnect()
-    end
-  end
-end)
-
-return nanoKey
-
-end
-
-__modules["probe"] = function()
--- packages/nanokey-studio/probe.lua
--- Diagnostic probe for inspecting real-time MIDI, CC, and SysEx messages from Korg nanoKEY Studio.
--- Run in Hammerspoon console via: require("nanokey_studio.probe").start()
-
-local probe = {}
-local midiDevice = nil
-
-local function log(msg)
-  local line = os.date("%H:%M:%S") .. " [nanoKEY-PROBE]: " .. msg
-  print(line)
-  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/nanokey_probe.log", "a")
-  if f then
-    f:write(line .. "\n")
-    f:close()
-  end
-end
-
-function probe.listDevices()
-  local devices = hs.midi.devices()
-  print("=== Available MIDI Devices ===")
-  for idx, name in ipairs(devices) do
-    print(string.format("  [%d] %s", idx, name))
-  end
-  return devices
-end
-
-function probe.start(targetName)
-  probe.stop()
-  targetName = targetName or "nanoKEY Studio"
-
-  local devices = hs.midi.devices()
-  local foundName = nil
-  for _, name in ipairs(devices) do
-    if string.find(string.lower(name), string.lower(targetName)) then
-      foundName = name
-      break
-    end
-  end
-
-  if not foundName then
-    log("Device matching '" .. targetName .. "' not found. Available devices:")
-    probe.listDevices()
-    return false
-  end
-
-  log("Attaching probe to device: " .. foundName)
-  midiDevice = hs.midi.new(foundName)
-  if not midiDevice then
-    log("Failed to create hs.midi instance for: " .. foundName)
-    return false
-  end
-
-  midiDevice:callback(function(object, deviceName, commandType, description, metadata)
-    local metaStr = ""
-    if metadata then
-      local parts = {}
-      for k, v in pairs(metadata) do
-        table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
-      end
-      metaStr = " {" .. table.concat(parts, ", ") .. "}"
-    end
-    log(string.format("CMD: %-16s | DESC: %-20s | META:%s",
-      tostring(commandType), tostring(description), metaStr))
+_G.activeWatchers.keyStepController = KeyStep
+if not _G.activeWatchers.keyStepDeviceWatcherRegistered then
+  _G.activeWatchers.keyStepDeviceWatcherRegistered = true
+  hsMidi.deviceCallback(function()
+    local controller = _G.activeWatchers.keyStepController
+    if controller then controller.checkConnection() end
   end)
-
-  log("Probe is ACTIVE! Press buttons, turn knobs, or hold Shift/Sustain on the nanoKEY Studio.")
-  return true
 end
 
-function probe.stop()
-  if midiDevice then
-    log("Stopping probe.")
-    midiDevice = nil
+return KeyStep
+
+end
+
+__modules["keystep_ui"] = function()
+local hsWebview = require("hs.webview")
+local HTML = __require("keystep_ui_html")
+
+local Monitor = {}
+Monitor.__index = Monitor
+
+local function nowSeconds()
+  return hs.timer.absoluteTime() / 1000000000
+end
+
+function Monitor.new()
+  return setmetatable({
+    webview = nil,
+    lastRenderAt = 0,
+    pendingState = nil,
+    renderTimer = nil,
+  }, Monitor)
+end
+
+function Monitor:ensureWebview()
+  if self.webview then return self.webview end
+
+  local screen = hs.screen.mainScreen():frame()
+  local width, height = 530, 420
+  self.webview = hsWebview.new({
+    x = screen.x + screen.w - width - 26,
+    y = screen.y + 56,
+    w = width,
+    h = height,
+  }, { developerExtrasEnabled = true })
+    :windowStyle({ "titled", "closable", "utility" })
+    :windowTitle("KeyStep Monitor")
+    :allowTextEntry(false)
+    :html(HTML)
+    :deleteOnClose(false)
+
+  return self.webview
+end
+
+function Monitor:render()
+  self.renderTimer = nil
+  self.lastRenderAt = nowSeconds()
+  local state = self.pendingState
+  self.pendingState = nil
+  if not state or not self.webview then return end
+
+  local encoded = hs.json.encode(state)
+  if encoded then
+    pcall(function()
+      self.webview:evaluateJavaScript("window.updateKeyStepMonitor(" .. encoded .. ")")
+    end)
   end
 end
 
-return probe
+function Monitor:update(state)
+  self:ensureWebview()
+  self.pendingState = state
+  local delay = math.max(0, 0.1 - (nowSeconds() - self.lastRenderAt))
+  if self.renderTimer then return end
+  if delay == 0 then
+    self:render()
+  else
+    self.renderTimer = hs.timer.doAfter(delay, function() self:render() end)
+  end
+end
+
+function Monitor:show(state)
+  self:ensureWebview():show()
+  self:update(state)
+end
+
+function Monitor:hide()
+  if self.webview then self.webview:hide() end
+end
+
+function Monitor:toggle(state)
+  self:ensureWebview()
+  if self.webview:isVisible() then
+    self:hide()
+  else
+    self:show(state)
+  end
+end
+
+function Monitor:destroy()
+  if self.renderTimer then self.renderTimer:stop() end
+  self.renderTimer = nil
+  if self.webview then self.webview:delete() end
+  self.webview = nil
+end
+
+return Monitor
 
 end
 
@@ -3662,38 +3525,37 @@ local function updateSingleKeyState(code, pressed, latched)
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
 end
 
-local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
+local function updateKeyStepControl(controlId, value, pressed, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
   local extraJson = "null"
   if type(extra) == "table" then
     local ok, res = pcall(hs.json.encode, extra)
     if ok and res then extraJson = res end
   end
-  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%q, %s, %s, %q, %s);",
+  local js = string.format("if (window.updateKeyStepState) window.updateKeyStepState(%q, %s, %s, %s);",
     tostring(controlId or ""),
     value and tostring(value) or "null",
     pressed and "true" or "false",
-    tostring(layer or "base"),
     extraJson)
   safeEvaluateJS(js)
 end
 
-local function isNanokeyConnected()
-  if state.nanokeyConnected ~= nil then
-    return state.nanokeyConnected == true
+local function isKeyStepConnected()
+  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
+    return _G.activeWatchers.keystep.isConnected() == true
   end
-  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.isConnected then
-    return _G.activeWatchers.nanokey.isConnected() == true
+  if state.keystepConnected ~= nil then
+    return state.keystepConnected == true
   end
   return false
 end
 
 local function getDesiredBaseHeight()
-  return isNanokeyConnected() and 600 or 280
+  return isKeyStepConnected() and 600 or 280
 end
 
 local function updateConnectionStatus(connected)
-  state.nanokeyConnected = (connected == true)
+  state.keystepConnected = (connected == true)
   if _G.activeWatchers.midiWebview then
     local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
     local NOTIF_BAND = math.floor(50 * effectiveScale)
@@ -3708,7 +3570,7 @@ local function updateConnectionStatus(connected)
       _G.activeWatchers.hudY = newY
       hs.settings.set("qwertyMidi_hudY", newY)
     end
-    safeEvaluateJS(string.format("if (window.setNanokeyConnected) window.setNanokeyConnected(%s);", connected and "true" or "false"))
+    safeEvaluateJS(string.format("if (window.setKeyStepConnected) window.setKeyStepConnected(%s);", connected and "true" or "false"))
   end
   updateWebviewHud()
 end
@@ -4432,20 +4294,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
   end
 
-  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-    if state.currentRoot ~= lastSyncedRoot or state.currentScaleIdx ~= lastSyncedScaleIdx or state.scaleGuideEnabled ~= lastSyncedScaleGuideEnabled then
-      lastSyncedRoot = state.currentRoot
-      lastSyncedScaleIdx = state.currentScaleIdx
-      lastSyncedScaleGuideEnabled = state.scaleGuideEnabled
-      pcall(function() _G.activeWatchers.nanokey.syncScaleGuideLeds(state) end)
-    end
-  end
-
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
   local payload = {
-    nanokeyConnected = isNanokeyConnected(),
+    keystepConnected = isKeyStepConnected(),
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
@@ -4539,7 +4392,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modWheel = modVal,
     zoomLevel = effectiveScale,
     spotlight = spotlightInfo,
-    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 72) or nil,
+    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 79) or nil,
     scaleGuideEnabled = state.scaleGuideEnabled ~= false,
     keys = keyUpdates
   }
@@ -4675,9 +4528,6 @@ local function createMidiWebview()
     elseif body.type == "setRoot" and body.root ~= nil then
       state.currentRoot = math.max(0, math.min(11, body.root))
       arpeggiator.updateLatchedArpNotes()
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
-      end
       local rootName = NOTE_NAMES[state.currentRoot + 1]
       local spot = {
         title = "ROOT NOTE",
@@ -4690,9 +4540,6 @@ local function createMidiWebview()
     elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
       state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
       arpeggiator.updateLatchedArpNotes()
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
-      end
       local scaleInfo = SCALES[state.currentScaleIdx]
       local spot = {
         title = "SCALE / MODE",
@@ -4934,30 +4781,21 @@ local function createMidiWebview()
       end
     elseif body.type == "switchSurface" then
       setSurfaceView(body.surface)
-    elseif body.type == "nanokeyKey" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("key", body)
+    elseif body.type == "keystepKey" or
+           body.type == "keystepPitch" or
+           body.type == "keystepMod" or
+           body.type == "keystepTransport" or
+           body.type == "keystepHold" or
+           body.type == "keystepShift" or
+           body.type == "keystepOctave" or
+           body.type == "keystepMode" or
+           body.type == "keystepDivision" or
+           body.type == "keystepSeqArp" or
+           body.type == "keystepRate" then
+      local actionName = body.type:gsub("^keystep", ""):lower()
+      if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
+        _G.activeWatchers.keystep.handleGuiAction(actionName, body)
       end
-    elseif body.type == "nanokeyPad" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("pad", body)
-      end
-    elseif body.type == "nanokeySustain" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("sustain", body)
-      end
-    elseif body.type == "nanokeyScene" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("scene", body)
-      end
-    elseif body.type == "nanokeyGuide" or body.type == "toggleScaleGuide" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("guide", body)
-      else
-        state.scaleGuideEnabled = not state.scaleGuideEnabled
-        if config.saveSettings then config.saveSettings() end
-      end
-      updateWebviewHud()
     end
     config.saveSettings()
   end)
@@ -5194,8 +5032,10 @@ return {
   getLastLatencyMs = function() return lastLatencyMs end,
   dumpMidiLogs = dumpMidiLogs,
   setSurfaceView = setSurfaceView,
-  updateNanoKeyControl = updateNanoKeyControl,
-  isNanokeyConnected = isNanokeyConnected,
+  updateKeyStepControl = updateKeyStepControl,
+  isKeyStepConnected = isKeyStepConnected,
+  updateNanoKeyControl = updateKeyStepControl,
+  isNanokeyConnected = isKeyStepConnected,
   getDesiredBaseHeight = getDesiredBaseHeight,
   updateConnectionStatus = updateConnectionStatus,
   getProposedActionSpotlight = getProposedActionSpotlight,
@@ -7000,586 +6840,555 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
-  /* ── nanoKEY Studio Hardware Silhouette ── */
+  /* ── Arturia KeyStep 32 Hardware Silhouette & Styles ── */
+  #hud-container.keystep-connected,
   #hud-container.nanokey-connected {
     height: 600px !important;
   }
-  .nanokey-view {
+  .keystep-view {
     width: 100%;
     height: 310px;
     min-height: 310px;
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    background: linear-gradient(180deg, #181614 0%, #121110 100%);
+    gap: 12px;
+    background: linear-gradient(180deg, #f3f5f8 0%, #e2e6eb 100%);
     border-radius: 10px;
-    padding: 8px 12px;
-    border: 1px solid rgba(90, 82, 74, 0.4);
-    box-shadow: inset 0 1px 3px rgba(255,255,255,0.05), inset 0 -2px 6px rgba(0,0,0,0.8);
+    padding: 10px 14px;
+    border: 1px solid #c8ced6;
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -2px 4px rgba(0, 0, 0, 0.15);
     position: relative;
     user-select: none;
     box-sizing: border-box;
     flex-shrink: 0;
     margin-top: 8px;
+    color: #1a1c20;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 
-  /* Top Section: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) */
-  .nk-top-row {
-    display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: 12px;
-    height: 165px;
-  }
-
-  .nk-column {
+  /* Left Panel: Master Control Bay */
+  .ks-control-bay {
+    width: 275px;
+    min-width: 275px;
+    background: #15171b;
+    border-radius: 8px;
+    padding: 8px 10px;
+    border: 1px solid #282b33;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.8), 0 1px 1px rgba(255,255,255,0.4);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     gap: 6px;
-  }
-  .nk-left-column {
-    flex: 1.15;
-  }
-  .nk-center-column {
-    width: 145px;
-    display: flex;
-    flex-direction: column;
-  }
-  .nk-right-column {
-    flex: 1.25;
+    box-sizing: border-box;
   }
 
-  /* Knobs Area */
-  .nk-knobs-area {
-    flex: 1;
-    background: rgba(26, 24, 22, 0.7);
-    border: 1px solid rgba(80, 72, 64, 0.45);
-    border-radius: 8px;
-    padding: 5px 8px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-  .nk-area-header {
+  /* Arturia Header */
+  .ks-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 9px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding-bottom: 5px;
+  }
+  .ks-brand {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ks-logo-badge {
+    background: #ffffff;
+    color: #15171b;
+    font-weight: 900;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+    line-height: 1;
+  }
+  .ks-title {
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 1px;
-    color: #8c8275;
-    margin-bottom: 2px;
+    letter-spacing: 1.2px;
+    color: #e2e8f0;
     text-transform: uppercase;
   }
-  .nk-brand {
-    font-weight: 900;
-    color: #d4a359;
-    letter-spacing: 1.5px;
-  }
-  .nk-model-title {
-    font-size: 9px;
-    font-weight: 900;
-    letter-spacing: 0.8px;
-    color: #d6ccbc;
-  }
-  .nk-model-sub {
-    font-size: 6.5px;
+  .ks-subtitle {
+    font-size: 7.5px;
     font-weight: 700;
-    color: #8c8275;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
+    color: #64748b;
+    text-transform: uppercase;
   }
-  .nk-knobs-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-rows: repeat(2, 1fr);
-    gap: 3px 5px;
-    flex: 1;
+  .ks-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+  }
+
+  /* Top Row: Knobs & Switch */
+  .ks-knobs-row {
+    display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    background: rgba(0,0,0,0.3);
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.05);
   }
-  .nk-knob-item {
+  .ks-knob-unit {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1px;
+    gap: 3px;
+    flex: 1;
+    cursor: pointer;
   }
-  .nk-knob-dial {
-    width: 26px;
-    height: 26px;
+  .ks-knob-hdr {
+    font-size: 7.5px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .ks-knob-dial {
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    background: radial-gradient(circle at 35% 35%, #38342e 0%, #1a1816 75%);
-    border: 1.5px solid rgba(140, 125, 105, 0.4);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.7), inset 0 1px 2px rgba(255,255,255,0.15);
+    background: linear-gradient(135deg, #2e323b 0%, #1a1c22 100%);
+    border: 1.5px solid #475569;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.25);
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.05s linear;
+    transition: transform 0.12s ease-out;
   }
-  .nk-knob-notch {
+  .ks-knob-notch {
     position: absolute;
     top: 2px;
-    width: 2px;
-    height: 6px;
-    background: #d4a359;
-    border-radius: 1px;
-    box-shadow: 0 0 3px rgba(212, 163, 89, 0.8);
-  }
-  .nk-knob-label {
-    font-size: 7px;
-    font-weight: 700;
-    color: #a89e90;
-    text-align: center;
-    line-height: 1;
-  }
-  .nk-knob-val {
-    font-size: 6.5px;
-    font-weight: 600;
-    color: #d4a359;
-    line-height: 1;
-  }
-  .nk-knob-cc {
-    font-size: 6px;
-    font-weight: 600;
-    color: #7a7062;
-    line-height: 1;
-  }
-
-  /* Kaoss Touchpad Area */
-  .nk-touchpad-area {
-    width: 100%;
-    height: 100%;
-    background: rgba(22, 20, 18, 0.85);
-    border: 1px solid rgba(80, 72, 64, 0.45);
-    border-radius: 8px;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: space-between;
-    box-sizing: border-box;
-  }
-  .nk-touchpad-screen {
-    width: 100%;
-    flex: 1;
-    background: radial-gradient(circle at center, #0f1c24 0%, #070e12 100%);
-    border: 1.5px solid rgba(0, 180, 216, 0.35);
-    border-radius: 6px;
-    position: relative;
-    overflow: hidden;
-    box-shadow: inset 0 0 12px rgba(0, 180, 216, 0.2);
-  }
-  .nk-touchpad-grid {
-    position: absolute;
-    inset: 0;
-    background-image: 
-      linear-gradient(rgba(0, 180, 216, 0.1) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 180, 216, 0.1) 1px, transparent 1px);
-    background-size: 16px 16px;
-    background-position: center center;
-    pointer-events: none;
-  }
-  .nk-touch-cursor {
-    position: absolute;
     left: 50%;
-    top: 50%;
-    width: 14px;
-    height: 14px;
-    border: 1.5px solid #00e5ff;
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    box-shadow: 0 0 8px #00e5ff, inset 0 0 4px #00e5ff;
-    pointer-events: none;
-    transition: left 0.05s ease-out, top 0.05s ease-out;
+    transform: translateX(-50%);
+    width: 2.5px;
+    height: 9px;
+    background: #38bdf8;
+    border-radius: 2px;
+    box-shadow: 0 0 5px rgba(56, 189, 248, 0.8);
   }
-  .nk-touch-cursor::after {
-    content: '';
-    position: absolute;
-    inset: 4px;
-    background: #00e5ff;
-    border-radius: 50%;
-  }
-
-  /* Trigger Pads Area */
-  .nk-pads-area {
-    flex: 1;
-    background: rgba(26, 24, 22, 0.7);
-    border: 1px solid rgba(80, 72, 64, 0.45);
-    border-radius: 8px;
-    padding: 5px 8px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-  }
-  .nk-status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #555;
-    display: inline-block;
-    box-shadow: 0 0 2px #555;
-    transition: all 0.2s ease;
-  }
-  .nk-status-dot.connected {
-    background: #00e676;
-    box-shadow: 0 0 6px #00e676;
-  }
-  .nk-pads-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    grid-template-rows: repeat(2, 1fr);
-    gap: 3px 5px;
-    flex: 1;
-  }
-  .nk-pad-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  .nk-pad-hdr {
-    font-size: 6px;
+  .ks-knob-val {
+    font-size: 8px;
     font-weight: 700;
-    color: #7a7062;
-    text-transform: uppercase;
-    text-align: center;
+    color: #38bdf8;
     white-space: nowrap;
-    line-height: 1;
-    letter-spacing: 0.2px;
-  }
-  .nk-pad {
-    background: linear-gradient(180deg, #2a2622 0%, #1e1b18 100%);
-    border: 1.5px solid rgba(140, 125, 105, 0.35);
-    border-radius: 5px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 2px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.08);
-    position: relative;
+    text-align: center;
+    max-width: 58px;
     overflow: hidden;
-    transition: all 0.08s ease;
-    cursor: pointer;
-    flex: 1;
-  }
-  .nk-pad:hover {
-    border-color: rgba(212, 163, 89, 0.6);
-  }
-  .nk-pad.active, .nk-pad.fired {
-    background: radial-gradient(circle at center, #ffd166 0%, #d4a359 100%) !important;
-    border-color: #ffe082 !important;
-    box-shadow: 0 0 14px rgba(255, 209, 102, 0.9), inset 0 0 6px rgba(255,255,255,0.8) !important;
-    transform: scale(0.97);
-  }
-  .nk-pad-name {
-    font-size: 7.5px;
-    font-weight: 800;
-    color: #e5dec9;
-    letter-spacing: 0.5px;
-  }
-  .nk-pad-chord {
-    font-size: 6.5px;
-    font-weight: 700;
-    color: #d4a359;
-  }
-  .nk-pad-macro {
-    font-size: 7.5px;
-    font-weight: 800;
-    display: none;
-    text-align: center;
-    line-height: 1.1;
+    text-overflow: ellipsis;
   }
 
-  /* Macro layer dynamic display on pads */
-  .sustain-active .nk-pad .nk-pad-name,
-  .sustain-active .nk-pad .nk-pad-chord,
-  .scene-active .nk-pad .nk-pad-name,
-  .scene-active .nk-pad .nk-pad-chord {
-    display: none;
+  /* Rate LED */
+  .ks-rate-led {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #475569;
+    margin-bottom: 1px;
+    transition: background-color 0.05s ease, box-shadow 0.05s ease;
   }
-  .sustain-active .nk-pad .nk-pad-macro {
-    display: block;
-    color: #5ea2eb;
-    text-shadow: 0 0 4px rgba(94, 162, 235, 0.5);
-  }
-  .scene-active .nk-pad .nk-pad-macro {
-    display: block;
-    color: #c084fc;
-    text-shadow: 0 0 4px rgba(192, 132, 252, 0.5);
+  .ks-rate-led.flash {
+    background: #38bdf8 !important;
+    box-shadow: 0 0 8px #38bdf8, 0 0 14px rgba(56, 189, 248, 0.8) !important;
   }
 
-  /* Authentic Function Buttons Rows (Under Knobs on Left, Under Pads on Right) */
-  .nk-btn-row {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    padding: 1px 2px;
-    height: 32px;
-  }
-  .nk-btn-cluster {
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-  }
-  .nk-btn-gap {
-    width: 10px;
-    flex-shrink: 0;
-  }
-  .nk-btn-unit {
+  /* Slide Switch */
+  .ks-switch-unit {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
+    cursor: pointer;
   }
-  .nk-btn-label {
-    font-size: 6px;
-    font-weight: 800;
-    letter-spacing: 0.3px;
-    color: #8c8275;
-    text-transform: uppercase;
-    text-align: center;
-    white-space: nowrap;
-    line-height: 1;
-  }
-  .nk-btn-subgroup {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-  .nk-btn-cap {
-    height: 15px;
-    min-width: 22px;
-    padding: 0 4px;
-    border-radius: 4px;
-    font-size: 7.5px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .ks-switch-track {
+    width: 38px;
+    height: 18px;
+    background: #0f1115;
+    border-radius: 10px;
+    border: 1px solid #334155;
+    position: relative;
+    padding: 2px;
     box-sizing: border-box;
-    transition: all 0.1s ease;
-    border: none;
+    display: flex;
+    align-items: center;
   }
-  .nk-btn-sm {
-    min-width: 14px;
-    padding: 0 3px;
+  .ks-switch-thumb {
+    width: 14px;
+    height: 12px;
+    background: linear-gradient(180deg, #94a3b8 0%, #64748b 100%);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.4);
+    transition: transform 0.15s ease;
+  }
+  .ks-switch-track.seq .ks-switch-thumb {
+    transform: translateX(18px);
+    background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+  }
+
+  /* Middle Row: Transport & Function Buttons */
+  .ks-buttons-row {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ks-btn-subrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 5px;
+  }
+  .ks-btn {
+    flex: 1;
+    height: 24px;
+    background: linear-gradient(180deg, #24272f 0%, #17191e 100%);
+    border: 1px solid #334155;
+    border-radius: 4px;
+    color: #cbd5e1;
     font-size: 8px;
     font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+    transition: all 0.1s ease;
+    user-select: none;
+    box-sizing: border-box;
+    padding: 0 3px;
+  }
+  .ks-btn:hover {
+    border-color: #64748b;
+    background: #2a2e38;
+  }
+  .ks-btn:active {
+    transform: translateY(1px);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+  }
+  .ks-btn-led {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #475569;
+    flex-shrink: 0;
+  }
+  .ks-btn.active .ks-btn-led {
+    background: #38bdf8;
+    box-shadow: 0 0 6px #38bdf8;
+  }
+  .ks-btn-stop.active {
+    border-color: #f97316;
+    color: #ffedd5;
+  }
+  .ks-btn-stop.active .ks-btn-led {
+    background: #f97316;
+    box-shadow: 0 0 6px #f97316;
+  }
+  .ks-btn-play.active {
+    border-color: #22c55e;
+    color: #f0fdf4;
+    background: linear-gradient(180deg, #15803d 0%, #14532d 100%);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+  }
+  .ks-btn-play.active .ks-btn-led {
+    background: #4ade80;
+    box-shadow: 0 0 8px #4ade80;
+  }
+  .ks-btn-rec.active {
+    border-color: #ef4444;
+    color: #fef2f2;
+    background: linear-gradient(180deg, #b91c1c 0%, #7f1d1d 100%);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+  }
+  .ks-btn-rec.active .ks-btn-led {
+    background: #f87171;
+    box-shadow: 0 0 8px #f87171;
+  }
+  .ks-btn-hold.active {
+    border-color: #f59e0b;
+    color: #fef3c7;
+    background: linear-gradient(180deg, #b45309 0%, #78350f 100%);
+  }
+  .ks-btn-hold.active .ks-btn-led {
+    background: #fbbf24;
+    box-shadow: 0 0 6px #fbbf24;
+  }
+  .ks-btn-shift.active {
+    border-color: #38bdf8;
+    color: #f0f9ff;
+    background: linear-gradient(180deg, #0369a1 0%, #0c4a6e 100%);
+  }
+  .ks-btn-shift.active .ks-btn-led {
+    background: #38bdf8;
+    box-shadow: 0 0 6px #38bdf8;
+  }
+  .ks-oct-badge {
+    background: #0f1115;
+    border: 1px solid #334155;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    color: #e2e8f0;
+    padding: 2px 5px;
+    white-space: nowrap;
+    text-align: center;
   }
 
-  /* Inert Buttons (Internal Hardware Functions): distinct, non-clickable, matte recessed */
-  .nk-btn-inert {
-    background: linear-gradient(180deg, #171513 0%, #0f0e0d 100%);
-    border: 1px solid rgba(75, 68, 60, 0.4);
-    color: #655c50;
-    box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+  /* Bottom Row: Capacitive Touch Strips */
+  .ks-strips-row {
+    display: flex;
+    gap: 8px;
+    height: 95px;
+    background: rgba(0,0,0,0.3);
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.05);
+  }
+  .ks-strip-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .ks-strip-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 7.5px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+    text-transform: uppercase;
+  }
+  .ks-strip-val {
+    font-size: 7.5px;
+    font-weight: 700;
+    color: #38bdf8;
+  }
+  .ks-touch-well {
+    flex: 1;
+    background: #090a0c;
+    border-radius: 4px;
+    border: 1px solid #1e222a;
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.9);
+  }
+  .ks-pitch-center-line {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255,255,255,0.15);
+  }
+  .ks-pitch-thumb {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 6px;
+    background: #38bdf8;
+    border-radius: 3px;
+    box-shadow: 0 0 8px rgba(56, 189, 248, 0.9);
     pointer-events: none;
-    cursor: default;
+    transition: top 0.05s ease-out;
+  }
+  .ks-mod-fill {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 0%;
+    background: linear-gradient(180deg, #38bdf8 0%, rgba(2, 132, 199, 0.4) 100%);
+    border-top: 2px solid #38bdf8;
+    box-shadow: 0 -2px 8px rgba(56, 189, 248, 0.6);
+    pointer-events: none;
+    transition: height 0.05s ease-out;
+  }
+
+  /* Right Panel: 32-Key Slimkey Keybed */
+  .ks-keybed-bay {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 6px 8px 8px 8px;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,1);
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  /* Silkscreen Annotations */
+  .ks-silkscreen-strip {
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px;
+    border-bottom: 1px solid #e2e8f0;
+    margin-bottom: 4px;
+  }
+  .ks-silk-section {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 7px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: #64748b;
+    text-transform: uppercase;
+  }
+  .ks-silk-section strong {
+    color: #1e293b;
+  }
+
+  /* Piano Keys Container */
+  .ks-keys-container {
+    flex: 1;
+    position: relative;
+    display: flex;
+    height: 100%;
     user-select: none;
   }
 
-  /* Interactive Buttons (Sustain & Scene): clickable, hover glow, active backlit state */
-  .nk-btn-interactive {
-    background: linear-gradient(180deg, #2c2824 0%, #1f1c19 100%);
-    border: 1px solid rgba(140, 125, 105, 0.55);
-    color: #e5dec9;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.1);
-    cursor: pointer;
-    pointer-events: auto;
-  }
-  .nk-btn-interactive:hover {
-    border-color: #d4a359;
-    background: #36312c;
-    box-shadow: 0 0 6px rgba(212, 163, 89, 0.4);
-  }
-  .nk-btn-interactive:active {
-    transform: translateY(1px);
-  }
-  .nk-btn-sustain.active {
-    background: linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%) !important;
-    border-color: #93c5fd !important;
-    color: #ffffff !important;
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.9), inset 0 1px 2px rgba(255,255,255,0.7) !important;
-  }
-  .nk-btn-scene.active {
-    background: linear-gradient(180deg, #a855f7 0%, #7e22ce 100%) !important;
-    border-color: #d8b4fe !important;
-    color: #ffffff !important;
-    box-shadow: 0 0 10px rgba(168, 85, 247, 0.9), inset 0 1px 2px rgba(255,255,255,0.7) !important;
-  }
-
-  /* Keyboard Section: 25 Chiclet Keys */
-  .nk-keyboard-section {
-    flex: 1;
-    position: relative;
-    background: #0d0c0b;
-    border-radius: 6px;
-    padding: 3px 4px 6px 4px;
-    border: 1px solid rgba(70, 64, 58, 0.5);
-    display: flex;
-    overflow: hidden;
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.9);
-  }
-  .nk-white-keys {
+  /* White Keys Row (19 Keys) */
+  .ks-white-keys {
     display: flex;
     width: 100%;
     height: 100%;
-    gap: 4px;
+    gap: 1.5px;
   }
-  .nk-key-white {
+  .ks-key-w {
     flex: 1;
     height: 100%;
-    background: linear-gradient(180deg, #2b2824 0%, #1f1d1a 80%, #181614 100%);
-    border: 1px solid rgba(130, 118, 102, 0.45);
-    border-radius: 4px 4px 8px 8px;
-    box-shadow: 0 3px 5px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.12);
+    background: linear-gradient(180deg, #ffffff 0%, #f1f4f8 85%, #e1e6ed 100%);
+    border: 1px solid #b0b8c4;
+    border-bottom: 3px solid #8e98a6;
+    border-radius: 0 0 5px 5px;
+    box-shadow: inset 0 1px 0 #ffffff, 0 3px 5px rgba(0,0,0,0.12);
     display: flex;
     flex-direction: column;
-    align-items: center;
     justify-content: flex-end;
+    align-items: center;
     padding-bottom: 6px;
-    position: relative;
     cursor: pointer;
-    transition: all 0.06s ease;
+    box-sizing: border-box;
+    position: relative;
+    transition: transform 0.05s ease, background 0.08s ease, border-color 0.08s ease;
   }
-  .nk-key-white:hover {
-    border-color: rgba(212, 163, 89, 0.6);
+  .ks-key-w:hover {
+    background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
   }
-  .nk-key-white.active {
-    background: linear-gradient(180deg, #ffe082 0%, #d4a359 100%) !important;
-    border-color: #ffffff !important;
-    box-shadow: 0 0 14px rgba(255, 209, 102, 0.95), inset 0 0 8px rgba(255,255,255,0.8) !important;
-    transform: translateY(2px);
+  .ks-key-w.active {
+    transform: translateY(3px);
+    background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 60%, #38bdf8 100%) !important;
+    border-color: #0284c7 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.7), inset 0 1px 2px rgba(255,255,255,0.8) !important;
   }
-  .nk-key-white.active .nk-key-name,
-  .nk-key-white.active .nk-key-scale,
-  .nk-key-white.active .nk-key-degree {
-    color: #141210 !important;
-    font-weight: 900;
-  }
-
-  .nk-black-keys {
-    position: absolute;
-    top: 3px;
-    left: 4px;
-    right: 4px;
-    height: 58%;
+  .ks-key-w .ks-key-name {
+    font-size: 8px;
+    font-weight: 800;
+    color: #64748b;
     pointer-events: none;
   }
-  .nk-key-black {
-    position: absolute;
-    width: 3.8%;
-    height: 100%;
-    transform: translateX(-50%);
-    background: linear-gradient(180deg, #181614 0%, #0c0b0a 100%);
-    border: 1px solid rgba(90, 80, 70, 0.55);
-    border-radius: 3px 3px 6px 6px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.85), inset 0 1px 1px rgba(255,255,255,0.1);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-    padding-bottom: 5px;
-    pointer-events: auto;
-    cursor: pointer;
-    z-index: 10;
-    transition: all 0.06s ease;
+  .ks-key-w.active .ks-key-name {
+    color: #0369a1 !important;
+    font-weight: 900 !important;
   }
-  .nk-key-black:hover {
-    border-color: rgba(212, 163, 89, 0.8);
-  }
-  .nk-key-black.active {
-    background: linear-gradient(180deg, #ffb74d 0%, #c88c28 100%) !important;
-    border-color: #ffffff !important;
-    box-shadow: 0 0 14px rgba(255, 183, 77, 0.95), inset 0 0 6px rgba(255,255,255,0.8) !important;
-    transform: translateX(-50%) translateY(2px) !important;
-  }
-  .nk-key-black.active .nk-key-name {
-    color: #141210 !important;
-    font-weight: 900;
-  }
-  .nk-key-name {
-    font-size: 8.5px;
-    font-weight: 800;
-    color: #d6ccbc;
-    line-height: 1;
-  }
-  .nk-key-scale {
-    font-size: 6px;
-    font-weight: 700;
-    color: #9c9284;
-    text-transform: uppercase;
-    white-space: nowrap;
-    line-height: 1;
-    margin-top: 2px;
-  }
-  .nk-key-degree {
-    font-size: 6.5px;
-    font-weight: 600;
-    color: #d4a359;
-    margin-top: 1px;
-  }
-  .nk-key-macro {
+  .ks-key-w .ks-key-sub {
     font-size: 6.5px;
     font-weight: 700;
-    color: #c084fc;
-    display: none;
+    color: #94a3b8;
+    pointer-events: none;
+    line-height: 1;
     margin-top: 1px;
-    white-space: nowrap;
-  }
-  .scene-active .nk-key-macro {
-    display: block;
-  }
-  .scene-active .nk-key-scale,
-  .scene-active .nk-key-degree {
-    display: none;
   }
 
-  /* Scale Guide dynamic styles */
-  #nk-btn-scale-guide {
-    cursor: pointer !important;
-    pointer-events: auto !important;
-    transition: all 0.12s ease;
-    min-width: 46px !important;
-    font-size: 6px !important;
-    padding: 0 3px !important;
-    white-space: nowrap !important;
-    letter-spacing: 0.2px !important;
+  /* Black Keys (13 Keys) */
+  .ks-black-keys {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 62%;
+    pointer-events: none;
   }
-  #nk-btn-scale-guide.active {
-    background: linear-gradient(180deg, #3d3527 0%, #282115 100%) !important;
-    border-color: #ffd700 !important;
-    color: #ffd700 !important;
-    box-shadow: 0 0 10px rgba(255, 215, 0, 0.45) !important;
+  .ks-key-b {
+    position: absolute;
+    width: 3.4%;
+    height: 100%;
+    background: linear-gradient(180deg, #2a2d34 0%, #151619 80%, #0b0c0e 100%);
+    border: 1px solid #111215;
+    border-bottom: 2.5px solid #000000;
+    border-radius: 0 0 3px 3px;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.25);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    padding-bottom: 4px;
+    cursor: pointer;
+    pointer-events: auto;
+    box-sizing: border-box;
+    z-index: 3;
+    transition: transform 0.05s ease, background 0.08s ease;
   }
-  .scale-guide-active .nk-key-root {
-    border-color: #ffd700 !important;
-    box-shadow: 0 0 12px rgba(255, 215, 0, 0.5), inset 0 1px 2px rgba(255, 215, 0, 0.35) !important;
+  .ks-key-b:hover {
+    background: linear-gradient(180deg, #373b45 0%, #1c1d22 100%);
   }
-  .scale-guide-active .nk-key-root .nk-key-degree {
-    color: #ffd700 !important;
-    font-weight: 900;
+  .ks-key-b.active {
+    transform: translateY(2.5px);
+    background: linear-gradient(180deg, #0369a1 0%, #0284c7 60%, #38bdf8 100%) !important;
+    border-color: #38bdf8 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.9), inset 0 1px 2px rgba(255,255,255,0.8) !important;
   }
-  .scale-guide-active .nk-key-root .nk-key-scale {
-    color: #ffe082 !important;
+  .ks-key-b .ks-key-name {
+    font-size: 6.5px;
     font-weight: 800;
+    color: #94a3b8;
+    pointer-events: none;
   }
-  .scale-guide-active .nk-key-in-scale {
-    border-color: rgba(212, 163, 89, 0.7) !important;
-    box-shadow: 0 0 6px rgba(212, 163, 89, 0.25), inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
-  }
-  .scale-guide-active .nk-key-in-scale .nk-key-name {
+  .ks-key-b.active .ks-key-name {
     color: #ffffff !important;
+    font-weight: 900 !important;
   }
-  .scale-guide-active .nk-key-out-of-scale {
-    opacity: 0.32;
-    border-color: rgba(60, 55, 48, 0.35) !important;
+
+  /* Scale Guide Key Highlights */
+  .keystep-view.scale-guide-active .ks-key-root .ks-key-name {
+    color: #eab308 !important;
+    font-weight: 900 !important;
+    text-shadow: 0 0 6px rgba(234, 179, 8, 0.6);
   }
-  .scale-guide-active .nk-key-out-of-scale .nk-key-degree {
-    opacity: 0;
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-root::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #eab308;
+    box-shadow: 0 0 4px #eab308;
+    pointer-events: none;
   }
-  .scale-guide-active .nk-key-out-of-scale .nk-key-scale {
-    opacity: 0;
+  .keystep-view.scale-guide-active .ks-key-out-of-scale {
+    opacity: 0.65;
   }
 </style>
 </head>
@@ -7664,9 +7473,9 @@ local HTML_UI_CONTENT = [[
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
-      <div id="nanokey-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #4ade80; border-color: rgba(74, 222, 128, 0.4);" title="Korg nanoKEY Studio Connected">
-        <span style="width: 6px; height: 6px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.8); display: inline-block;"></span>
-        <span>🎹 nanoKEY</span>
+      <div id="keystep-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Arturia KeyStep 32 Connected">
+        <span style="width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.8); display: inline-block;"></span>
+        <span>🎹 KeyStep 32</span>
       </div>
       <div id="mod-wheel-widget">
         <div id="mod-wheel-track"><div id="mod-wheel-fill"></div></div>
@@ -7705,274 +7514,154 @@ local HTML_UI_CONTENT = [[
       </div>
     </div>
 
-    <!-- nanoKEY Studio Authentic Hardware View -->
-    <div class="nanokey-view" id="nanokey-view" style="display: none;">
-      <!-- TOP ROW: Left Column (Knobs + Buttons), Center Column (Kaoss), Right Column (Pads + Buttons) -->
-      <div class="nk-top-row">
-        
-        <!-- LEFT COLUMN: 8 Knobs + Left Function Buttons -->
-        <div class="nk-column nk-left-column">
-          <!-- Knobs Area (8 assignable rotary dials) -->
-          <div class="nk-knobs-area">
-            <div class="nk-area-header">
-              <span class="nk-brand">KORG</span>
-              <span>8 KNOBS</span>
+    <!-- Arturia KeyStep 32 Authentic Hardware View -->
+    <div class="keystep-view" id="keystep-view" style="display: none;">
+      <!-- LEFT PANEL: Master Control Bay -->
+      <div class="ks-control-bay">
+        <div class="ks-header">
+          <div class="ks-brand">
+            <span class="ks-logo-badge">A</span>
+            <span class="ks-title">ARTURIA</span>
+            <span class="ks-subtitle">KeyStep 32</span>
+          </div>
+          <div class="ks-status-dot" id="ks-status-dot" title="KeyStep 32 Hardware Connected"></div>
+        </div>
+
+        <!-- Top Knob Row: Switch + Mode + Div + Rate -->
+        <div class="ks-knobs-row">
+          <!-- Seq / Arp Toggle Switch -->
+          <div class="ks-switch-unit" id="ks-switch-seq-arp" title="Click to toggle Seq / Arp Mode">
+            <span class="ks-knob-hdr">MODE</span>
+            <div class="ks-switch-track" id="ks-switch-track">
+              <div class="ks-switch-thumb"></div>
             </div>
-            <div class="nk-knobs-grid">
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-1"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-1">CUTOFF</div>
-                <div class="nk-knob-val" id="nk-knob-val-1">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-1">CC 20</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-2"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-2">PEAK</div>
-                <div class="nk-knob-val" id="nk-knob-val-2">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-2">CC 21</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-3"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-3">DRIVE</div>
-                <div class="nk-knob-val" id="nk-knob-val-3">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-3">CC 22</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-4"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-4">VOLUME</div>
-                <div class="nk-knob-val" id="nk-knob-val-4">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-4">CC 23</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-5"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-5">ATTACK</div>
-                <div class="nk-knob-val" id="nk-knob-val-5">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-5">CC 24</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-6"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-6">DECAY</div>
-                <div class="nk-knob-val" id="nk-knob-val-6">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-6">CC 25</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-7"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-7">SUSTAIN</div>
-                <div class="nk-knob-val" id="nk-knob-val-7">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-7">CC 26</div>
-              </div>
-              <div class="nk-knob-item">
-                <div class="nk-knob-dial" id="nk-knob-8"><div class="nk-knob-notch"></div></div>
-                <div class="nk-knob-label" id="nk-knob-label-8">RELEASE</div>
-                <div class="nk-knob-val" id="nk-knob-val-8">0</div>
-                <div class="nk-knob-cc" id="nk-knob-cc-8">CC 27</div>
-              </div>
-            </div>
+            <span class="ks-knob-val" id="ks-switch-val">ARP</span>
           </div>
 
-          <!-- Left Function Buttons Row (Under Knobs) -->
-          <div class="nk-btn-row nk-left-btn-row">
-            <!-- Group 1: Octave (-/+), Sustain -->
-            <div class="nk-btn-cluster">
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Octave</div>
-                <div class="nk-btn-subgroup">
-                  <button class="nk-btn-cap nk-btn-sm nk-btn-inert" id="nk-btn-oct-down" title="Internal Hardware Transpose">-</button>
-                  <button class="nk-btn-cap nk-btn-sm nk-btn-inert" id="nk-btn-oct-up" title="Internal Hardware Transpose">+</button>
-                </div>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Sustain</div>
-                <button class="nk-btn-cap nk-btn-interactive nk-btn-sustain" id="nk-btn-sustain" title="Sustain / Hold for Transport & Window Macros">SUS</button>
-              </div>
-            </div>
+          <!-- Seq / Arp Mode Knob (8 positions) -->
+          <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Click to cycle Seq / Arp Mode">
+            <span class="ks-knob-hdr">PATTERN</span>
+            <div class="ks-knob-dial" id="ks-knob-mode"><div class="ks-knob-notch"></div></div>
+            <span class="ks-knob-val" id="ks-knob-val-mode">Up</span>
+          </div>
 
-            <!-- Spacer gap -->
-            <div class="nk-btn-gap"></div>
+          <!-- Time Div Knob (8 positions) -->
+          <div class="ks-knob-unit" id="ks-knob-div-unit" title="Click to cycle Time Division">
+            <span class="ks-knob-hdr">TIME DIV</span>
+            <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
+            <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
+          </div>
 
-            <!-- Group 2: Touch Scale, X-Y, Pitch / Mod -->
-            <div class="nk-btn-cluster">
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Touch Scale</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-touch-scale" title="Internal Hardware Function">SCALE</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">X-Y</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-xy" title="Internal Hardware Function">X-Y</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Pitch / Mod</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-pitch-mod" title="Internal Hardware Function">P/M</button>
-              </div>
-            </div>
+          <!-- Rate Knob + Blinking Tempo LED -->
+          <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / BPM">
+            <div class="ks-rate-led" id="ks-rate-led"></div>
+            <span class="ks-knob-hdr">RATE</span>
+            <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
+            <span class="ks-knob-val" id="ks-knob-val-rate">120 BPM</span>
           </div>
         </div>
 
-        <!-- CENTER COLUMN: KAOSS Touchpad -->
-        <div class="nk-center-column">
-          <div class="nk-touchpad-area">
-            <div class="nk-area-header" style="width: 100%;">
-              <span>KAOSS TOUCH</span>
-              <span>X:<span id="nk-touch-x">0</span> Y:<span id="nk-touch-y">0</span></span>
-            </div>
-            <div class="nk-touchpad-screen" id="nk-touchpad-screen">
-              <div class="nk-touchpad-grid"></div>
-              <div class="nk-touch-cursor" id="nk-touch-cursor" style="left: 50%; top: 50%;"></div>
-            </div>
+        <!-- Middle Buttons Row: Transport & Functions -->
+        <div class="ks-buttons-row">
+          <div class="ks-btn-subrow">
+            <button class="ks-btn ks-btn-stop active" id="ks-btn-stop" title="Stop Sequencer / Arpeggiator">
+              <span class="ks-btn-led"></span>■ STOP
+            </button>
+            <button class="ks-btn ks-btn-play" id="ks-btn-play" title="Play / Pause Sequencer / Arpeggiator">
+              <span class="ks-btn-led"></span>▶ PLAY
+            </button>
+            <button class="ks-btn ks-btn-rec" id="ks-btn-rec" title="Record Sequence">
+              <span class="ks-btn-led"></span>● REC
+            </button>
+            <button class="ks-btn ks-btn-tap" id="ks-btn-tap" title="Tap Tempo">
+              <span class="ks-btn-led"></span>TAP
+            </button>
+          </div>
+          <div class="ks-btn-subrow">
+            <button class="ks-btn ks-btn-shift" id="ks-btn-shift" title="Shift Function Modifier">
+              <span class="ks-btn-led"></span>SHIFT
+            </button>
+            <button class="ks-btn ks-btn-hold" id="ks-btn-hold" title="Hold / Sustain">
+              <span class="ks-btn-led"></span>HOLD
+            </button>
+            <button class="ks-btn" id="ks-btn-oct-down" title="Octave Down">OCT -</button>
+            <button class="ks-btn" id="ks-btn-oct-up" title="Octave Up">OCT +</button>
+            <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
           </div>
         </div>
 
-        <!-- RIGHT COLUMN: Trigger Pads + Right Function Buttons -->
-        <div class="nk-column nk-right-column">
-          <!-- Trigger Pads (8 velocity trigger pads) -->
-          <div class="nk-pads-area">
-            <div class="nk-area-header">
-              <div>
-                <span class="nk-model-title">nanoKEY Studio</span>
-                <span class="nk-model-sub">MOBILE MIDI KEYBOARD</span>
-              </div>
-              <span class="nk-status-dot connected" id="nk-status-dot" title="nanoKEY Studio Connected"></span>
+        <!-- Bottom Strips Row: Pitch & Mod Touch Strips -->
+        <div class="ks-strips-row">
+          <div class="ks-strip-col">
+            <div class="ks-strip-label">
+              <span>PITCH</span>
+              <span class="ks-strip-val" id="ks-pitch-val">±0</span>
             </div>
-            <div class="nk-pads-grid">
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Arp Type</div>
-                <div class="nk-pad" id="nk-pad-1" data-pad="1" data-cc="43" title="PAD 1 — Arp Type (CC #43)">
-                  <span class="nk-pad-name">PAD 1</span>
-                  <span class="nk-pad-chord">CHORD 1</span>
-                  <span class="nk-pad-macro" data-sustain="PLAY/PAUSE" data-scene="PRESET 1">PLAY/PAUSE</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Arp Range</div>
-                <div class="nk-pad" id="nk-pad-2" data-pad="2" data-cc="48" title="PAD 2 — Arp Range (CC #48)">
-                  <span class="nk-pad-name">PAD 2</span>
-                  <span class="nk-pad-chord">CHORD 2</span>
-                  <span class="nk-pad-macro" data-sustain="RECORD" data-scene="PRESET 2">RECORD</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Key Sync</div>
-                <div class="nk-pad" id="nk-pad-3" data-pad="3" data-cc="50" title="PAD 3 — Key Sync (CC #50)">
-                  <span class="nk-pad-name">PAD 3</span>
-                  <span class="nk-pad-chord">CHORD 3</span>
-                  <span class="nk-pad-macro" data-sustain="REWIND" data-scene="PRESET 3">REWIND</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Wireless</div>
-                <div class="nk-pad" id="nk-pad-4" data-pad="4" data-cc="49" title="PAD 4 — Wireless (CC #49)">
-                  <span class="nk-pad-name">PAD 4</span>
-                  <span class="nk-pad-chord">CHORD 4</span>
-                  <span class="nk-pad-macro" data-sustain="FORWARD" data-scene="PRESET 4">FORWARD</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Gate Type -</div>
-                <div class="nk-pad" id="nk-pad-5" data-pad="5" data-cc="36" title="PAD 5 — Gate Type - (CC #36)">
-                  <span class="nk-pad-name">PAD 5</span>
-                  <span class="nk-pad-chord">CHORD 5</span>
-                  <span class="nk-pad-macro" data-sustain="LEFT WIN" data-scene="SCALE CYC">LEFT WIN</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Gate Type +</div>
-                <div class="nk-pad" id="nk-pad-6" data-pad="6" data-cc="38" title="PAD 6 — Gate Type + (CC #38)">
-                  <span class="nk-pad-name">PAD 6</span>
-                  <span class="nk-pad-chord">CHORD 6</span>
-                  <span class="nk-pad-macro" data-sustain="RIGHT WIN" data-scene="BROWSER">RIGHT WIN</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Scale -</div>
-                <div class="nk-pad" id="nk-pad-7" data-pad="7" data-cc="42" title="PAD 7 — Scale - (CC #42)">
-                  <span class="nk-pad-name">PAD 7</span>
-                  <span class="nk-pad-chord">CHORD 7</span>
-                  <span class="nk-pad-macro" data-sustain="MAX WIN" data-scene="LOGIC PRO">MAX WIN</span>
-                </div>
-              </div>
-              <div class="nk-pad-cell">
-                <div class="nk-pad-hdr">Scale +</div>
-                <div class="nk-pad" id="nk-pad-8" data-pad="8" data-cc="46" title="PAD 8 — Scale + (CC #46)">
-                  <span class="nk-pad-name">PAD 8</span>
-                  <span class="nk-pad-chord">CHORD 8</span>
-                  <span class="nk-pad-macro" data-sustain="RESTORE WIN" data-scene="PANIC ALL">RESTORE WIN</span>
-                </div>
-              </div>
+            <div class="ks-touch-well" id="ks-pitch-strip" title="Pitch Bend Touch Strip">
+              <div class="ks-pitch-center-line"></div>
+              <div class="ks-pitch-thumb" id="ks-pitch-thumb"></div>
             </div>
           </div>
-
-          <!-- Right Function Buttons Row (Under Pads) -->
-          <div class="nk-btn-row nk-right-btn-row">
-            <!-- Group 3: Scene, Shift / Tap, Arp -->
-            <div class="nk-btn-cluster">
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Scene</div>
-                <button class="nk-btn-cap nk-btn-interactive nk-btn-scene" id="nk-btn-scene" title="Scene / Hold for Presets & Navigation Macros">SCENE</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Shift / Tap</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-shift-tap" title="Internal Hardware Function">SHIFT</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Arp</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-arp" title="Internal Hardware Function">ARP</button>
-              </div>
+          <div class="ks-strip-col">
+            <div class="ks-strip-label">
+              <span>MOD</span>
+              <span class="ks-strip-val" id="ks-mod-val">0</span>
             </div>
-
-            <!-- Spacer gap -->
-            <div class="nk-btn-gap"></div>
-
-            <!-- Group 4: Chord Pad, Easy Scale, Scale Guide -->
-            <div class="nk-btn-cluster">
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Chord Pad</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-chord-pad" title="Internal Hardware Function">CHORD</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Easy Scale</div>
-                <button class="nk-btn-cap nk-btn-inert" id="nk-btn-easy-scale" title="Internal Hardware Function">EASY</button>
-              </div>
-              <div class="nk-btn-unit">
-                <div class="nk-btn-label">Scale Guide</div>
-                <button class="nk-btn-cap" id="nk-btn-scale-guide" title="Scale Guide Mode (Sustain+Scene or Sustain+Pad 8 to toggle)">SCALE GUIDE</button>
-              </div>
+            <div class="ks-touch-well" id="ks-mod-strip" title="Modulation Touch Strip (CC #1)">
+              <div class="ks-mod-fill" id="ks-mod-fill"></div>
             </div>
           </div>
         </div>
-
       </div>
 
-      <!-- KEYBOARD SECTION: 25 Chiclet Keys (15 White, 10 Black) -->
-      <div class="nk-keyboard-section">
-        <div class="nk-white-keys">
-          <div class="nk-key-white" id="nk-key-48" data-note="48"><span class="nk-key-name">C3</span><span class="nk-key-scale">Major</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PRESET 1</span></div>
-          <div class="nk-key-white" id="nk-key-50" data-note="50"><span class="nk-key-name">D3</span><span class="nk-key-scale">Lydian</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">PRESET 3</span></div>
-          <div class="nk-key-white" id="nk-key-52" data-note="52"><span class="nk-key-name">E3</span><span class="nk-key-scale">Minor</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">PRESET 5</span></div>
-          <div class="nk-key-white" id="nk-key-53" data-note="53"><span class="nk-key-name">F3</span><span class="nk-key-scale">Dorian</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PRESET 6</span></div>
-          <div class="nk-key-white" id="nk-key-55" data-note="55"><span class="nk-key-name">G3</span><span class="nk-key-scale">Phryg</span><span class="nk-key-degree">V</span><span class="nk-key-macro">PRESET 8</span></div>
-          <div class="nk-key-white" id="nk-key-57" data-note="57"><span class="nk-key-name">A3</span><span class="nk-key-scale">Maj Blues</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">TERMINAL</span></div>
-          <div class="nk-key-white" id="nk-key-59" data-note="59"><span class="nk-key-name">B3</span><span class="nk-key-scale">min Blues</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">LOGIC PRO</span></div>
-          <div class="nk-key-white" id="nk-key-60" data-note="60"><span class="nk-key-name">C4</span><span class="nk-key-scale">Maj Penta</span><span class="nk-key-degree">I</span><span class="nk-key-macro">MUTE MIC</span></div>
-          <div class="nk-key-white" id="nk-key-62" data-note="62"><span class="nk-key-name">D4</span><span class="nk-key-scale">min Penta</span><span class="nk-key-degree">ii</span><span class="nk-key-macro">VOL -</span></div>
-          <div class="nk-key-white" id="nk-key-64" data-note="64"><span class="nk-key-name">E4</span><span class="nk-key-scale">Raga</span><span class="nk-key-degree">iii</span><span class="nk-key-macro">CENTER WIN</span></div>
-          <div class="nk-key-white" id="nk-key-65" data-note="65"><span class="nk-key-name">F4</span><span class="nk-key-scale">Ryukyu</span><span class="nk-key-degree">IV</span><span class="nk-key-macro">PREV TRK</span></div>
-          <div class="nk-key-white" id="nk-key-67" data-note="67"><span class="nk-key-name">G4</span><span class="nk-key-scale">Chinese</span><span class="nk-key-degree">V</span><span class="nk-key-macro">UNDO</span></div>
-          <div class="nk-key-white" id="nk-key-69" data-note="69"><span class="nk-key-name">A4</span><span class="nk-key-scale">Bass Line</span><span class="nk-key-degree">vi</span><span class="nk-key-macro">SAVE</span></div>
-          <div class="nk-key-white" id="nk-key-71" data-note="71"><span class="nk-key-name">B4</span><span class="nk-key-scale">Wholetone</span><span class="nk-key-degree">vii°</span><span class="nk-key-macro">METRONOME</span></div>
-          <div class="nk-key-white" id="nk-key-72" data-note="72"><span class="nk-key-name">C5</span><span class="nk-key-scale">5th Interval</span><span class="nk-key-degree">I</span><span class="nk-key-macro">PANIC</span></div>
+      <!-- RIGHT PANEL: 32-Key Slimkey Keybed -->
+      <div class="ks-keybed-bay">
+        <div class="ks-silkscreen-strip">
+          <div class="ks-silk-section"><strong>MIDI CH:</strong> 1..16</div>
+          <div class="ks-silk-section"><strong>GATE:</strong> 10% · 25% · 50% · 75% · 90%</div>
+          <div class="ks-silk-section"><strong>SWING:</strong> OFF · 53%..75%</div>
+          <div class="ks-silk-section"><strong>SEQ PLAY</strong></div>
         </div>
+        <div class="ks-keys-container">
+          <!-- 19 White Keys -->
+          <div class="ks-white-keys">
+            <div class="ks-key-w" id="ks-key-48" data-note="48"><span class="ks-key-name">C3</span><span class="ks-key-sub">CH 1</span></div>
+            <div class="ks-key-w" id="ks-key-50" data-note="50"><span class="ks-key-name">D3</span><span class="ks-key-sub">CH 3</span></div>
+            <div class="ks-key-w" id="ks-key-52" data-note="52"><span class="ks-key-name">E3</span><span class="ks-key-sub">CH 5</span></div>
+            <div class="ks-key-w" id="ks-key-53" data-note="53"><span class="ks-key-name">F3</span><span class="ks-key-sub">CH 6</span></div>
+            <div class="ks-key-w" id="ks-key-55" data-note="55"><span class="ks-key-name">G3</span><span class="ks-key-sub">CH 8</span></div>
+            <div class="ks-key-w" id="ks-key-57" data-note="57"><span class="ks-key-name">A3</span><span class="ks-key-sub">CH 10</span></div>
+            <div class="ks-key-w" id="ks-key-59" data-note="59"><span class="ks-key-name">B3</span><span class="ks-key-sub">CH 12</span></div>
+            <div class="ks-key-w" id="ks-key-60" data-note="60"><span class="ks-key-name">C4</span><span class="ks-key-sub">CH 13</span></div>
+            <div class="ks-key-w" id="ks-key-62" data-note="62"><span class="ks-key-name">D4</span><span class="ks-key-sub">CH 15</span></div>
+            <div class="ks-key-w" id="ks-key-64" data-note="64"><span class="ks-key-name">E4</span><span class="ks-key-sub">10%</span></div>
+            <div class="ks-key-w" id="ks-key-65" data-note="65"><span class="ks-key-name">F4</span><span class="ks-key-sub">25%</span></div>
+            <div class="ks-key-w" id="ks-key-67" data-note="67"><span class="ks-key-name">G4</span><span class="ks-key-sub">75%</span></div>
+            <div class="ks-key-w" id="ks-key-69" data-note="69"><span class="ks-key-name">A4</span><span class="ks-key-sub">SWING</span></div>
+            <div class="ks-key-w" id="ks-key-71" data-note="71"><span class="ks-key-name">B4</span><span class="ks-key-sub">55%</span></div>
+            <div class="ks-key-w" id="ks-key-72" data-note="72"><span class="ks-key-name">C5</span><span class="ks-key-sub">57%</span></div>
+            <div class="ks-key-w" id="ks-key-74" data-note="74"><span class="ks-key-name">D5</span><span class="ks-key-sub">61%</span></div>
+            <div class="ks-key-w" id="ks-key-76" data-note="76"><span class="ks-key-name">E5</span><span class="ks-key-sub">67%</span></div>
+            <div class="ks-key-w" id="ks-key-77" data-note="77"><span class="ks-key-name">F5</span><span class="ks-key-sub">70%</span></div>
+            <div class="ks-key-w" id="ks-key-79" data-note="79"><span class="ks-key-name">G5</span><span class="ks-key-sub">PLAY</span></div>
+          </div>
 
-        <div class="nk-black-keys">
-          <div class="nk-key-black" id="nk-key-49" data-note="49" style="left: 6.67%;"><span class="nk-key-name">C#3</span><span class="nk-key-macro">PRESET 2</span></div>
-          <div class="nk-key-black" id="nk-key-51" data-note="51" style="left: 13.33%;"><span class="nk-key-name">D#3</span><span class="nk-key-macro">PRESET 4</span></div>
-          <div class="nk-key-black" id="nk-key-54" data-note="54" style="left: 26.67%;"><span class="nk-key-name">F#3</span><span class="nk-key-macro">PRESET 7</span></div>
-          <div class="nk-key-black" id="nk-key-56" data-note="56" style="left: 33.33%;"><span class="nk-key-name">G#3</span><span class="nk-key-macro">BROWSER</span></div>
-          <div class="nk-key-black" id="nk-key-58" data-note="58" style="left: 40.00%;"><span class="nk-key-name">A#3</span><span class="nk-key-macro">EDITOR</span></div>
-          <div class="nk-key-black" id="nk-key-61" data-note="61" style="left: 53.33%;"><span class="nk-key-name">C#4</span><span class="nk-key-macro">SCREENSHOT</span></div>
-          <div class="nk-key-black" id="nk-key-63" data-note="63" style="left: 60.00%;"><span class="nk-key-name">D#4</span><span class="nk-key-macro">VOL +</span></div>
-          <div class="nk-key-black" id="nk-key-66" data-note="66" style="left: 73.33%;"><span class="nk-key-name">F#4</span><span class="nk-key-macro">NEXT TRK</span></div>
-          <div class="nk-key-black" id="nk-key-68" data-note="68" style="left: 80.00%;"><span class="nk-key-name">G#4</span><span class="nk-key-macro">REDO</span></div>
-          <div class="nk-key-black" id="nk-key-70" data-note="70" style="left: 86.67%;"><span class="nk-key-name">A#4</span><span class="nk-key-macro">EXPORT</span></div>
+          <!-- 13 Black Keys -->
+          <div class="ks-black-keys">
+            <div class="ks-key-b" id="ks-key-49" data-note="49" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#3</span></div>
+            <div class="ks-key-b" id="ks-key-51" data-note="51" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#3</span></div>
+            <div class="ks-key-b" id="ks-key-54" data-note="54" style="left: calc((4 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#3</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#3</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#3</span></div>
+            <div class="ks-key-b" id="ks-key-61" data-note="61" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#4</span></div>
+            <div class="ks-key-b" id="ks-key-63" data-note="63" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#4</span></div>
+            <div class="ks-key-b" id="ks-key-66" data-note="66" style="left: calc((11 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#4</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#4</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#4</span></div>
+            <div class="ks-key-b" id="ks-key-73" data-note="73" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#5</span></div>
+            <div class="ks-key-b" id="ks-key-75" data-note="75" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#5</span></div>
+            <div class="ks-key-b" id="ks-key-78" data-note="78" style="left: calc((18 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#5</span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -9957,8 +9646,10 @@ local HTML_UI_CONTENT = [[
     try {
       if (!data) return;
 
-      if (data.nanokeyConnected !== undefined) {
-        if (typeof setNanokeyConnected === 'function') setNanokeyConnected(data.nanokeyConnected);
+      if (data.keystepConnected !== undefined) {
+        if (typeof setKeyStepConnected === 'function') setKeyStepConnected(data.keystepConnected);
+      } else if (data.nanokeyConnected !== undefined) {
+        if (typeof setKeyStepConnected === 'function') setKeyStepConnected(data.nanokeyConnected);
       }
 
       renderCount++;
@@ -10065,26 +9756,12 @@ local HTML_UI_CONTENT = [[
         if (inQuantSelect) inQuantSelect.value = data.inputQuantizeMode;
       }
 
-      if (data.padChords && Array.isArray(data.padChords)) {
-        for (let i = 1; i <= 8; i++) {
-          const padChordEl = document.querySelector('#nk-pad-' + i + ' .nk-pad-chord');
-          if (padChordEl && data.padChords[i - 1]) {
-            padChordEl.textContent = data.padChords[i - 1];
-          }
-        }
-      }
-
       if (data.scaleGuide) {
         const guide = data.scaleGuide;
         const isEnabled = (data.scaleGuideEnabled !== false);
-        const btnGuide = document.getElementById('nk-btn-scale-guide');
-        if (btnGuide) {
-          btnGuide.classList.toggle('active', isEnabled);
-        }
-
-        const nkView = document.getElementById('nanokey-view');
-        if (nkView) {
-          nkView.classList.toggle('scale-guide-active', isEnabled);
+        const ksView = document.getElementById('keystep-view');
+        if (ksView) {
+          ksView.classList.toggle('scale-guide-active', isEnabled);
         }
 
         const pitches = guide.pitches || (guide.scaleInfo && guide.scaleInfo.pitches);
@@ -10092,24 +9769,11 @@ local HTML_UI_CONTENT = [[
           for (const pStr in pitches) {
             const p = parseInt(pStr, 10);
             const info = pitches[pStr];
-            const keyEl = document.getElementById('nk-key-' + p);
+            const keyEl = document.getElementById('ks-key-' + p);
             if (keyEl) {
-              keyEl.classList.toggle('nk-key-root', isEnabled && !!info.isRoot);
-              keyEl.classList.toggle('nk-key-in-scale', isEnabled && !!info.inScale);
-              keyEl.classList.toggle('nk-key-out-of-scale', isEnabled && !info.inScale);
-
-              const degEl = keyEl.querySelector('.nk-key-degree');
-              if (degEl) {
-                degEl.textContent = isEnabled && info.inScale ? (info.isRoot ? 'ROOT' : info.roman) : (info.roman || '');
-              }
-              const scaleEl = keyEl.querySelector('.nk-key-scale');
-              if (scaleEl) {
-                if (isEnabled && info.isRoot) {
-                  scaleEl.textContent = (guide.scaleName || (guide.scaleInfo && guide.scaleInfo.scaleName) || '');
-                } else if (isEnabled && info.inScale) {
-                  scaleEl.textContent = (guide.rootName || (guide.scaleInfo && guide.scaleInfo.rootName) || '');
-                }
-              }
+              keyEl.classList.toggle('ks-key-root', isEnabled && !!info.isRoot);
+              keyEl.classList.toggle('ks-key-in-scale', isEnabled && !!info.inScale);
+              keyEl.classList.toggle('ks-key-out-of-scale', isEnabled && !info.inScale);
             }
           }
         }
@@ -10471,11 +10135,29 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
     if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
   });
   document.querySelectorAll('.key-pad.arp-held').forEach(el => el.classList.remove('arp-held'));
+
+  // Clear temporary arp stepping highlights on KeyStep
+  document.querySelectorAll('.ks-key-w.arp-step, .ks-key-b.arp-step').forEach(k => {
+    k.classList.remove('arp-step', 'active');
+  });
+
   if (Array.isArray(activeCodes)) {
     activeCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
       if (el && !el.classList.contains('control-pad')) {
         el.classList.add('arp-playing', 'pressed');
+
+        // Illuminate on KeyStep
+        const noteEl = el.querySelector(':scope > .key-note') || el.querySelector('.key-note');
+        if (noteEl && noteEl.textContent) {
+          const noteTxt = noteEl.textContent.trim();
+          document.querySelectorAll('.ks-key-w, .ks-key-b').forEach(k => {
+            const nameEl = k.querySelector('.ks-key-name');
+            if (nameEl && nameEl.textContent.trim() === noteTxt) {
+              k.classList.add('active', 'arp-step');
+            }
+          });
+        }
       }
     });
   }
@@ -10499,308 +10181,437 @@ window.updateKeyState = function(code, pressed, latched) {
     el.classList.toggle('pressed', !!pressed || (el.classList.contains('arp-playing')));
     el.classList.toggle('latched-key', !!latched);
 
-    // Also illuminate chiclet key if in nanoKEY view
+    // Also illuminate key on KeyStep 32 view
     const noteEl = el.querySelector(':scope > .key-note') || el.querySelector('.key-note');
     if (noteEl && noteEl.textContent) {
       const noteTxt = noteEl.textContent.trim();
-      const nkKeys = document.querySelectorAll('.nk-key-white, .nk-key-black');
-      for (let i = 0; i < nkKeys.length; i++) {
-        const nameEl = nkKeys[i].querySelector('.nk-key-name');
+      const ksKeys = document.querySelectorAll('.ks-key-w, .ks-key-b');
+      let foundExact = false;
+      for (let i = 0; i < ksKeys.length; i++) {
+        const nameEl = ksKeys[i].querySelector('.ks-key-name');
         if (nameEl && nameEl.textContent.trim() === noteTxt) {
-          nkKeys[i].classList.toggle('active', !!pressed);
+          ksKeys[i].classList.toggle('active', !!pressed);
+          foundExact = true;
           break;
+        }
+      }
+      // If not exact match, fold octave into 3..5 range
+      if (!foundExact) {
+        const match = noteTxt.match(/^([A-G][#b]?)(-?\d+)$/);
+        if (match) {
+          const pitchClass = match[1];
+          let oct = parseInt(match[2], 10);
+          while (oct < 3) oct += 1;
+          while (oct > 5) oct -= 1;
+          const foldedName = pitchClass + oct;
+          for (let i = 0; i < ksKeys.length; i++) {
+            const nameEl = ksKeys[i].querySelector('.ks-key-name');
+            if (nameEl && nameEl.textContent.trim() === foldedName) {
+              ksKeys[i].classList.toggle('active', !!pressed);
+              break;
+            }
+          }
         }
       }
     }
   }
 };
 
-/* ── Hardware Connection & Dynamic Surface Stacking ── */
-window.nanokeyConnected = false;
+/* ── Arturia KeyStep 32 Hardware Connection & Dynamic Surface Stacking ── */
+window.keystepConnected = false;
+window._activeKeyStepNotes = {};
+window._ksInternalState = {
+  mode: 1,
+  seqArp: 'arp',
+  division: '1/16',
+  bpm: 120,
+  playing: false,
+  recording: false,
+  hold: false,
+  shift: false,
+  octave: 0,
+  pitchBend: 8192,
+  modWheel: 0,
+};
 
-window.setNanokeyConnected = function(connected) {
-  window.nanokeyConnected = !!connected;
-
-  const perfView = document.getElementById('performance-view');
-  const nanoView = document.getElementById('nanokey-view');
+window.setKeyStepConnected = function(connected) {
+  window.keystepConnected = !!connected;
+  const ksView = document.getElementById('keystep-view');
   const hudContainer = document.getElementById('hud-container');
-  const badge = document.getElementById('nanokey-badge');
+  const badge = document.getElementById('keystep-badge') || document.getElementById('nanokey-badge');
 
-  if (perfView) {
-    perfView.style.display = 'flex';
+  if (ksView) {
+    ksView.style.display = connected ? 'flex' : 'none';
   }
-
-  if (nanoView) {
-    nanoView.style.display = connected ? 'flex' : 'none';
-  }
-
   if (hudContainer) {
     if (connected) {
-      hudContainer.classList.add('nanokey-connected');
+      hudContainer.classList.add('keystep-connected');
     } else {
-      hudContainer.classList.remove('nanokey-connected');
+      hudContainer.classList.remove('keystep-connected');
     }
   }
-
   if (badge) {
     badge.style.display = connected ? 'inline-flex' : 'none';
   }
-
-  const dot = document.getElementById('nk-status-dot');
-  if (dot) dot.classList.toggle('connected', !!connected);
 };
+window.setNanokeyConnected = window.setKeyStepConnected;
 
-window.setSurface = function(surface, notifyHost) {
-  // Compatibility shim: QWERTY and nanoKEY are now stacked simultaneously when connected
-};
+const ARP_MODE_NAMES = ["Up", "Down", "Inclusive", "Exclusive", "Random", "Order", "Up x2", "Down x2"];
+const DIVISION_NAMES = ["1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T"];
 
-window.onSurfaceChanged = function(surface) {
-  // Compatibility shim
-};
+// Bpm tempo LED blinking interval
+let _ksBpmTimer = null;
+function startKsBpmLed(bpm) {
+  if (_ksBpmTimer) clearInterval(_ksBpmTimer);
+  bpm = bpm || 120;
+  const interval = (60 / bpm) * 1000;
+  const led = document.getElementById('ks-rate-led');
+  if (!led) return;
+  _ksBpmTimer = setInterval(() => {
+    led.classList.add('flash');
+    setTimeout(() => led.classList.remove('flash'), Math.min(100, interval * 0.3));
+  }, interval);
+}
 
-window.updateNanoKeyState = function(controlId, value, pressed, layer, extra) {
+window.updateKeyStepState = function(controlId, value, pressed, extra) {
   extra = extra || {};
-  const nkView = document.getElementById('nanokey-view');
-  if (!nkView) return;
+  const ksView = document.getElementById('keystep-view');
+  if (!ksView) return;
 
   if (controlId === 'connection') {
-    window.setNanokeyConnected(!!pressed);
+    window.setKeyStepConnected(!!pressed);
     return;
   }
 
-  // Layer switches (base, macro_sustain, macro_scene, macro_both)
-  if (controlId === 'layer') {
-    const isSustain = (layer === 'macro_sustain' || layer === 'macro_both');
-    const isScene = (layer === 'macro_scene' || layer === 'macro_both');
-    nkView.classList.toggle('sustain-active', isSustain);
-    nkView.classList.toggle('scene-active', isScene);
-    const btnSus = document.getElementById('nk-btn-sustain');
-    if (btnSus) btnSus.classList.toggle('active', isSustain);
-    const btnScn = document.getElementById('nk-btn-scene');
-    if (btnScn) btnScn.classList.toggle('active', isScene);
-
-    document.querySelectorAll('.nk-pad-macro').forEach(el => {
-      if (isScene && el.dataset.scene) {
-        el.textContent = el.dataset.scene;
-      } else if (isSustain && el.dataset.sustain) {
-        el.textContent = el.dataset.sustain;
-      }
-    });
-    return;
-  }
-
-  // Sustain button (CC #25)
-  if (controlId === 'btn_sustain') {
-    const btnSus = document.getElementById('nk-btn-sustain');
-    if (btnSus) btnSus.classList.toggle('active', !!pressed);
-    nkView.classList.toggle('sustain-active', !!pressed);
-    document.querySelectorAll('.nk-pad-macro').forEach(el => {
-      if (pressed && el.dataset.sustain) el.textContent = el.dataset.sustain;
-    });
-    return;
-  }
-
-  // Scene button (SysEx)
-  if (controlId === 'btn_scene') {
-    const btnScn = document.getElementById('nk-btn-scene');
-    if (btnScn) btnScn.classList.toggle('active', !!pressed);
-    nkView.classList.toggle('scene-active', !!pressed);
-    document.querySelectorAll('.nk-pad-macro').forEach(el => {
-      if (pressed && el.dataset.scene) el.textContent = el.dataset.scene;
-    });
-    return;
-  }
-
-  // Scale Guide button
-  if (controlId === 'btn_guide') {
-    const btnG = document.getElementById('nk-btn-scale-guide');
-    if (btnG) btnG.classList.toggle('active', !!pressed);
-    nkView.classList.toggle('scale-guide-active', !!pressed);
-    return;
-  }
-
-  // Rotary Knobs (knob_1 .. knob_8)
-  if (typeof controlId === 'string' && controlId.indexOf('knob_') === 0) {
-    const knobIdx = controlId.replace('knob_', '');
-    const dial = document.getElementById('nk-knob-' + knobIdx);
-    const valEl = document.getElementById('nk-knob-val-' + knobIdx);
-    const ccEl = document.getElementById('nk-knob-cc-' + knobIdx);
-    if (dial && value !== null && value !== undefined) {
-      const angle = -135 + (value / 127) * 270;
-      dial.style.transform = 'rotate(' + angle.toFixed(1) + 'deg)';
-    }
-    if (valEl && value !== null && value !== undefined) {
-      valEl.textContent = value;
-    }
-    if (ccEl && extra && extra.cc) {
-      ccEl.textContent = 'CC ' + extra.cc;
-    }
-    return;
-  }
-
-  // Kaoss Touchpad (Touch X = CC 1 / CC 28; Touch Y = CC 2 / CC 29)
-  if (controlId === 'cc_1' || controlId === 'cc_28') {
-    const cur = document.getElementById('nk-touch-cursor');
-    const xEl = document.getElementById('nk-touch-x');
-    if (cur && value !== null && value !== undefined) cur.style.left = (value / 127 * 100).toFixed(1) + '%';
-    if (xEl && value !== null && value !== undefined) xEl.textContent = value;
-    return;
-  }
-  if (controlId === 'cc_2' || controlId === 'cc_29' || controlId === 'cc_19') {
-    const cur = document.getElementById('nk-touch-cursor');
-    const yEl = document.getElementById('nk-touch-y');
-    if (cur && value !== null && value !== undefined) cur.style.top = ((127 - value) / 127 * 100).toFixed(1) + '%';
-    if (yEl && value !== null && value !== undefined) yEl.textContent = value;
-    return;
-  }
-
-  // Trigger Pads (pad_1 .. pad_8)
-  if (typeof controlId === 'string' && controlId.indexOf('pad_') === 0) {
-    const padIdx = controlId.replace('pad_', '');
-    const pad = document.getElementById('nk-pad-' + padIdx);
-    if (pad) {
-      pad.classList.toggle('active', !!pressed);
-      if (pressed) {
-        pad.classList.add('fired');
-        setTimeout(() => pad.classList.remove('fired'), 120);
-      }
-      if (extra && extra.chord) {
-        const chordEl = pad.querySelector('.nk-pad-chord');
-        if (chordEl) chordEl.textContent = extra.chord;
-      }
-    }
-    return;
-  }
-
-  // Keyboard Keys (key_<note> with automatic octave folding into 48..72)
+  // Keys: key_<note>
   if (typeof controlId === 'string' && controlId.indexOf('key_') === 0) {
     const rawNote = parseInt(controlId.replace('key_', ''), 10);
     if (!isNaN(rawNote)) {
-      if (!window._activeNanoKeyNotes) window._activeNanoKeyNotes = {};
       if (pressed) {
-        window._activeNanoKeyNotes[rawNote] = true;
+        window._activeKeyStepNotes[rawNote] = true;
       } else {
-        delete window._activeNanoKeyNotes[rawNote];
+        delete window._activeKeyStepNotes[rawNote];
       }
 
+      // Map rawNote into 48..79 window
       let mapped = rawNote;
       while (mapped < 48) mapped += 12;
-      while (mapped > 72) mapped -= 12;
+      while (mapped > 79) mapped -= 12;
 
       let isStillActive = false;
-      for (const nStr in window._activeNanoKeyNotes) {
+      for (const nStr in window._activeKeyStepNotes) {
         let n = parseInt(nStr, 10);
         while (n < 48) n += 12;
-        while (n > 72) n -= 12;
+        while (n > 79) n -= 12;
         if (n === mapped) {
           isStillActive = true;
           break;
         }
       }
 
-      const key = document.getElementById('nk-key-' + mapped);
-      if (key) {
-        key.classList.toggle('active', isStillActive);
+      const keyEl = document.getElementById('ks-key-' + mapped);
+      if (keyEl) {
+        keyEl.classList.toggle('active', isStillActive);
       }
     }
     return;
   }
+
+  // Pitch bend
+  if (controlId === 'pitch_bend') {
+    const pitchVal = value !== null && value !== undefined ? value : 8192;
+    window._ksInternalState.pitchBend = pitchVal;
+    const thumb = document.getElementById('ks-pitch-thumb');
+    const valEl = document.getElementById('ks-pitch-val');
+    // pitchVal 0..16383, 8192 is center
+    const norm = (16383 - pitchVal) / 16383; // 0 to 1
+    if (thumb) thumb.style.top = (norm * 100).toFixed(1) + '%';
+    const stDiff = ((pitchVal - 8192) / 8192 * 2).toFixed(1);
+    if (valEl) valEl.textContent = (pitchVal === 8192 ? '±0' : (stDiff > 0 ? '+' + stDiff : stDiff));
+    return;
+  }
+
+  // Modulation Wheel (CC 1)
+  if (controlId === 'mod_wheel') {
+    const modVal = value !== null && value !== undefined ? value : 0;
+    window._ksInternalState.modWheel = modVal;
+    const fill = document.getElementById('ks-mod-fill');
+    const valEl = document.getElementById('ks-mod-val');
+    const pct = (modVal / 127 * 100).toFixed(1);
+    if (fill) fill.style.height = pct + '%';
+    if (valEl) valEl.textContent = modVal;
+    return;
+  }
+
+  // BPM / Rate
+  if (controlId === 'bpm') {
+    const bpm = value !== null && value !== undefined ? value : 120;
+    window._ksInternalState.bpm = bpm;
+    const valEl = document.getElementById('ks-knob-val-rate');
+    const knob = document.getElementById('ks-knob-rate');
+    if (valEl) valEl.textContent = bpm + ' BPM';
+    if (knob) {
+      const angle = -135 + ((bpm - 30) / (240 - 30)) * 270;
+      knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;
+    }
+    startKsBpmLed(bpm);
+    return;
+  }
+
+  // Mode (1..8)
+  if (controlId === 'mode') {
+    const modeIdx = value !== null && value !== undefined ? value : 1;
+    window._ksInternalState.mode = modeIdx;
+    const valEl = document.getElementById('ks-knob-val-mode');
+    const knob = document.getElementById('ks-knob-mode');
+    const isSeq = window._ksInternalState.seqArp === 'seq';
+    const name = isSeq ? `Seq ${modeIdx}` : (ARP_MODE_NAMES[modeIdx - 1] || `Mode ${modeIdx}`);
+    if (valEl) valEl.textContent = name;
+    if (knob) {
+      const angle = -135 + ((modeIdx - 1) / 7) * 270;
+      knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;
+    }
+    return;
+  }
+
+  // Division (1..8)
+  if (controlId === 'division') {
+    const divIdx = value !== null && value !== undefined ? value : 5;
+    const valEl = document.getElementById('ks-knob-val-div');
+    const knob = document.getElementById('ks-knob-div');
+    const name = extra.division || DIVISION_NAMES[divIdx - 1] || '1/16';
+    if (valEl) valEl.textContent = name;
+    if (knob) {
+      const angle = -135 + ((divIdx - 1) / 7) * 270;
+      knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;
+    }
+    return;
+  }
+
+  // Seq / Arp Toggle
+  if (controlId === 'seq_arp') {
+    const isSeq = (extra.mode === 'seq' || value === 1);
+    window._ksInternalState.seqArp = isSeq ? 'seq' : 'arp';
+    const track = document.getElementById('ks-switch-track');
+    const valEl = document.getElementById('ks-switch-val');
+    if (track) track.classList.toggle('seq', isSeq);
+    if (valEl) valEl.textContent = isSeq ? 'SEQ' : 'ARP';
+    const modeValEl = document.getElementById('ks-knob-val-mode');
+    if (modeValEl) {
+      modeValEl.textContent = isSeq ? `Seq ${window._ksInternalState.mode}` : (ARP_MODE_NAMES[window._ksInternalState.mode - 1] || 'Up');
+    }
+    return;
+  }
+
+  // Transport
+  if (controlId === 'transport') {
+    const isPlaying = (value === 1 || extra.action === 'play');
+    window._ksInternalState.playing = isPlaying;
+    const btnPlay = document.getElementById('ks-btn-play');
+    const btnStop = document.getElementById('ks-btn-stop');
+    if (btnPlay) btnPlay.classList.toggle('active', isPlaying);
+    if (btnStop) btnStop.classList.toggle('active', !isPlaying);
+    return;
+  }
+
+  // Record
+  if (controlId === 'record') {
+    const isRec = !!pressed;
+    window._ksInternalState.recording = isRec;
+    const btnRec = document.getElementById('ks-btn-rec');
+    if (btnRec) btnRec.classList.toggle('active', isRec);
+    return;
+  }
+
+  // Hold
+  if (controlId === 'hold' || controlId === 'sustain') {
+    const isHold = !!pressed;
+    window._ksInternalState.hold = isHold;
+    const btnHold = document.getElementById('ks-btn-hold');
+    if (btnHold) btnHold.classList.toggle('active', isHold);
+    return;
+  }
+
+  // Shift
+  if (controlId === 'shift') {
+    const isShift = !!pressed;
+    window._ksInternalState.shift = isShift;
+    const btnShift = document.getElementById('ks-btn-shift');
+    if (btnShift) btnShift.classList.toggle('active', isShift);
+    return;
+  }
+
+  // Octave
+  if (controlId === 'octave') {
+    const oct = value !== null && value !== undefined ? value : 0;
+    window._ksInternalState.octave = oct;
+    const octEl = document.getElementById('ks-oct-val');
+    if (octEl) octEl.textContent = 'OCT ' + (oct > 0 ? '+' + oct : oct);
+    const btnDown = document.getElementById('ks-btn-oct-down');
+    const btnUp = document.getElementById('ks-btn-oct-up');
+    if (btnDown) btnDown.classList.toggle('active', oct < 0);
+    if (btnUp) btnUp.classList.toggle('active', oct > 0);
+    return;
+  }
 };
+window.updateNanoKeyState = window.updateKeyStepState;
 
-// Interactive event handlers for nanoKEY hardware GUI
+// Interactive event handlers for KeyStep 32 hardware GUI
 document.addEventListener('DOMContentLoaded', () => {
-  // 1. Sustain Button (Toggle Sustain CC #64 & Macro Layer)
-  const btnSustain = document.getElementById('nk-btn-sustain');
-  if (btnSustain) {
-    btnSustain.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeySustain', toggle: true });
-      }
-    });
-  }
+  const postMidi = (msg) => {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
+      window.webkit.messageHandlers.midiControllerUC.postMessage(msg);
+    }
+  };
 
-  // 2. Scene Button (Toggle Scene SysEx & Macro Layer)
-  const btnScene = document.getElementById('nk-btn-scene');
-  if (btnScene) {
-    btnScene.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyScene', toggle: true });
-      }
-    });
-  }
-
-  // 2b. Scale Guide Button (Toggle Scale Guide & Hardware Key LEDs)
-  const btnScaleGuide = document.getElementById('nk-btn-scale-guide');
-  if (btnScaleGuide) {
-    btnScaleGuide.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'nanokeyGuide', toggle: true });
-      }
-    });
-  }
-
-  // 3. Trigger Pads (Mouse interaction + MIDI/Macro trigger)
-  document.querySelectorAll('.nk-pad').forEach(pad => {
-    const padIdx = parseInt(pad.dataset.pad, 10);
-    const triggerPad = (pressed) => {
-      pad.classList.toggle('active', pressed);
-      if (pressed) {
-        pad.classList.add('fired');
-        setTimeout(() => pad.classList.remove('fired'), 120);
-      }
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({
-          type: 'nanokeyPad',
-          pad: padIdx,
-          pressed: pressed
-        });
-      }
-    };
-
-    pad.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      triggerPad(true);
-    });
-    pad.addEventListener('mouseup', (e) => {
-      e.preventDefault();
-      triggerPad(false);
-    });
-    pad.addEventListener('mouseleave', (e) => {
-      if (pad.classList.contains('active')) triggerPad(false);
-    });
-  });
-
-  // 4. Chiclet Keys (Mouse interaction + MIDI Note trigger)
-  document.querySelectorAll('.nk-key-white, .nk-key-black').forEach(key => {
+  // 1. Keys interaction (19 white, 13 black)
+  document.querySelectorAll('.ks-key-w, .ks-key-b').forEach(key => {
     const noteNum = parseInt(key.dataset.note, 10);
-    const triggerKey = (pressed) => {
-      key.classList.toggle('active', pressed);
-      if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
-        window.webkit.messageHandlers.midiControllerUC.postMessage({
-          type: 'nanokeyKey',
-          note: noteNum,
-          pressed: pressed
-        });
-      }
+    const trigger = (down) => {
+      key.classList.toggle('active', down);
+      postMidi({ type: 'keystepKey', note: noteNum, pressed: down, velocity: down ? 100 : 0 });
     };
-
-    key.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      triggerKey(true);
-    });
-    key.addEventListener('mouseup', (e) => {
-      e.preventDefault();
-      triggerKey(false);
-    });
-    key.addEventListener('mouseleave', (e) => {
-      if (key.classList.contains('active')) triggerKey(false);
-    });
+    key.addEventListener('mousedown', (e) => { e.preventDefault(); trigger(true); });
+    key.addEventListener('mouseup', (e) => { e.preventDefault(); trigger(false); });
+    key.addEventListener('mouseleave', () => { if (key.classList.contains('active')) trigger(false); });
   });
-});
 
+  // 2. Pitch Strip interaction
+  const pitchStrip = document.getElementById('ks-pitch-strip');
+  if (pitchStrip) {
+    let pitchDragging = false;
+    const handlePitch = (e) => {
+      const rect = pitchStrip.getBoundingClientRect();
+      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+      const norm = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)); // 0 top (high), 1 bot (low)
+      const pitchVal = Math.round(16383 * (1 - norm));
+      window.updateKeyStepState('pitch_bend', pitchVal, true);
+      postMidi({ type: 'keystepPitch', value: pitchVal });
+    };
+    pitchStrip.addEventListener('mousedown', (e) => {
+      pitchDragging = true;
+      handlePitch(e);
+      const onMove = (me) => { if (pitchDragging) handlePitch(me); };
+      const onUp = () => {
+        pitchDragging = false;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        // Spring back to center
+        window.updateKeyStepState('pitch_bend', 8192, true);
+        postMidi({ type: 'keystepPitch', value: 8192 });
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // 3. Mod Strip interaction
+  const modStrip = document.getElementById('ks-mod-strip');
+  if (modStrip) {
+    let modDragging = false;
+    const handleMod = (e) => {
+      const rect = modStrip.getBoundingClientRect();
+      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+      const norm = Math.max(0, Math.min(1, (rect.bottom - clientY) / rect.height)); // 0 bot, 1 top
+      const modVal = Math.round(norm * 127);
+      window.updateKeyStepState('mod_wheel', modVal, true);
+      postMidi({ type: 'keystepMod', value: modVal });
+    };
+    modStrip.addEventListener('mousedown', (e) => {
+      modDragging = true;
+      handleMod(e);
+      const onMove = (me) => { if (modDragging) handleMod(me); };
+      const onUp = () => {
+        modDragging = false;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // 4. Buttons: Play, Stop, Rec, Tap, Hold, Shift, Oct-, Oct+
+  const btnPlay = document.getElementById('ks-btn-play');
+  if (btnPlay) btnPlay.addEventListener('click', () => postMidi({ type: 'keystepTransport', action: 'play' }));
+
+  const btnStop = document.getElementById('ks-btn-stop');
+  if (btnStop) btnStop.addEventListener('click', () => postMidi({ type: 'keystepTransport', action: 'stop' }));
+
+  const btnRec = document.getElementById('ks-btn-rec');
+  if (btnRec) btnRec.addEventListener('click', () => postMidi({ type: 'keystepTransport', action: 'rec' }));
+
+  const btnTap = document.getElementById('ks-btn-tap');
+  if (btnTap) btnTap.addEventListener('click', () => postMidi({ type: 'keystepTransport', action: 'tap' }));
+
+  const btnHold = document.getElementById('ks-btn-hold');
+  if (btnHold) btnHold.addEventListener('click', () => postMidi({ type: 'keystepHold' }));
+
+  const btnShift = document.getElementById('ks-btn-shift');
+  if (btnShift) btnShift.addEventListener('click', () => postMidi({ type: 'keystepShift' }));
+
+  const btnOctDown = document.getElementById('ks-btn-oct-down');
+  if (btnOctDown) btnOctDown.addEventListener('click', () => postMidi({ type: 'keystepOctave', dir: -1 }));
+
+  const btnOctUp = document.getElementById('ks-btn-oct-up');
+  if (btnOctUp) btnOctUp.addEventListener('click', () => postMidi({ type: 'keystepOctave', dir: 1 }));
+
+  // 5. Knobs and Switch
+  const switchSeqArp = document.getElementById('ks-switch-seq-arp');
+  if (switchSeqArp) switchSeqArp.addEventListener('click', () => postMidi({ type: 'keystepSeqArp' }));
+
+  const knobMode = document.getElementById('ks-knob-mode-unit');
+  if (knobMode) {
+    knobMode.addEventListener('click', () => {
+      let nextMode = (window._ksInternalState.mode % 8) + 1;
+      postMidi({ type: 'keystepMode', mode: nextMode });
+    });
+    knobMode.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      let delta = e.deltaY < 0 ? 1 : -1;
+      let curMode = window._ksInternalState.mode || 1;
+      let nextMode = ((curMode - 1 + delta + 8) % 8) + 1;
+      postMidi({ type: 'keystepMode', mode: nextMode });
+    }, { passive: false });
+  }
+
+  const knobDiv = document.getElementById('ks-knob-div-unit');
+  if (knobDiv) {
+    knobDiv.addEventListener('click', () => {
+      let curIdx = DIVISION_NAMES.indexOf(document.getElementById('ks-knob-val-div')?.textContent) + 1;
+      if (curIdx < 1) curIdx = 1;
+      let nextDiv = (curIdx % 8) + 1;
+      postMidi({ type: 'keystepDivision', division: nextDiv });
+    });
+    knobDiv.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      let delta = e.deltaY < 0 ? 1 : -1;
+      let curIdx = DIVISION_NAMES.indexOf(document.getElementById('ks-knob-val-div')?.textContent) + 1;
+      if (curIdx < 1) curIdx = 5;
+      let nextDiv = ((curIdx - 1 + delta + 8) % 8) + 1;
+      postMidi({ type: 'keystepDivision', division: nextDiv });
+    }, { passive: false });
+  }
+
+  const knobRate = document.getElementById('ks-knob-rate-unit');
+  if (knobRate) {
+    knobRate.addEventListener('click', () => {
+      const TEMPOS = [80, 100, 120, 128, 140, 160];
+      let curBpm = window._ksInternalState.bpm || 120;
+      let nextBpm = TEMPOS[0];
+      for (let i = 0; i < TEMPOS.length; i++) {
+        if (TEMPOS[i] > curBpm) { nextBpm = TEMPOS[i]; break; }
+      }
+      postMidi({ type: 'keystepRate', bpm: nextBpm });
+    });
+    knobRate.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 2 : -2;
+      let curBpm = Math.max(30, Math.min(240, (window._ksInternalState.bpm || 120) + delta));
+      postMidi({ type: 'keystepRate', bpm: curBpm });
+    }, { passive: false });
+  }
+});
 </script>
 </body>
 </html>

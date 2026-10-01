@@ -6,9 +6,9 @@ local hud = require("hud")
 local controls = require("controls")
 local settings_ui = require("settings_ui")
 local sync = require("sync")
-local nanokey = nil
+local keystep = nil
 pcall(function()
-  nanokey = require("nanokey")
+  keystep = require("keystep")
 end)
 
 local function profileLog(msg)
@@ -34,10 +34,10 @@ _G.activeWatchers.controls = controls
 _G.activeWatchers.arpeggiator = arpeggiator
 
 
-if nanokey then
-  nanokey.setHud(hud)
-  _G.activeWatchers.nanokey = nanokey
-  pcall(function() nanokey.connect("nanoKEY Studio") end)
+if keystep then
+  if keystep.setHud then keystep.setHud(hud) end
+  _G.activeWatchers.keystep = keystep
+  pcall(function() keystep.connect("Arturia KeyStep 32") end)
 end
 
 function _G.toggleMidiMode(newState)
@@ -59,8 +59,8 @@ function _G.toggleMidiMode(newState)
     profileLog("After createMidiWebview, before show")
     h:show()
     profileLog("After show")
-    if nanokey and nanokey.connect and not nanokey.isConnected() then
-      pcall(function() nanokey.connect("nanoKEY Studio") end)
+    if keystep and keystep.connect and not keystep.isConnected() then
+      pcall(function() keystep.connect("Arturia KeyStep 32") end)
     end
   else
     -- Stop all key repeats before tearing down
@@ -74,8 +74,8 @@ function _G.toggleMidiMode(newState)
     -- NOTE: Arpeggiator continues running in background when window is closed,
     -- allowing autonomous multi-track background playback until explicit panic or stop.
 
-    -- Keep nanokey hardware driver connected so physical controller macros and playing remain active
-    -- Do not call nanokey.disconnect() here
+    -- Keep keystep hardware driver connected so physical controller playing remains active
+    -- Do not call keystep.disconnect() here
 
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
@@ -325,8 +325,8 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
       _G.activeWatchers.midiScrollTap:start()
     end
 
-    if nanokey and nanokey.checkConnection then
-      pcall(function() nanokey.checkConnection() end)
+    if keystep and keystep.checkConnection then
+      pcall(function() keystep.checkConnection() end)
     end
     
     hud.pingWebview()
@@ -354,7 +354,7 @@ _G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", fun
   _G.toggleMidiMode()
 end)
 
-_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt" }, "R", function()
+_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt", "ctrl", "shift" }, "R", function()
   _G.dumpMidiLogs()
   hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
   hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()

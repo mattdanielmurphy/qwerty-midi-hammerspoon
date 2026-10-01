@@ -26,7 +26,8 @@
   - **Zero-Latency IPC Sync**: DualSense and Hammerspoon sync bidirectionally without ports or sockets via macOS native `NSDistributedNotificationCenter` (`DistributedNotificationCenter.default()` in Swift and `hs.distributednotifications` in Lua), synchronizing musical key, scale, BPM, octave, and real-time played notes.
 
 ## Key Files
-- `packages/`: Monorepo packages directory.
+- `packages/keystep-interceptor/`: Arturia KeyStep 32 hardware driver & side-channel interceptor. Automatically embeds an authentic KeyStep 32 controller display (32 slim keys notes 48..79, pitch/mod touch strips, knobs, transports, octave badges) directly below the QWERTY HUD when a physical KeyStep is detected, dynamically expanding HUD height from 280px to 600px. It infers mode from marker notes C8–G8 (108–115) at velocity 1, tempo from a 24-PPQN clock average, and time division from note spacing. Swallows marker notes and forwards all played notes and CCs (102/103/104) to the QWERTY MIDI output. Bidirectional WebKit IPC syncs clicks/drags in the embedded GUI back to CoreMIDI.
+- `archive/nanokey-studio/`: Preserved archive of the Korg nanoKEY Studio hardware driver, layouts, macros, BLE/USB sniffer tools, and LED tester binaries. Bundling preset `nanokey-studio` remains supported in `bin/hs-bundler`.
 - `src/`: Legacy/active QWERTY Lua source (`config.lua`, `midi.lua`, `transposer.lua`, `arpeggiator.lua`, `hud.lua`, `controls.lua`, `ui_html.lua`).
 - `bin/hs-bundler`: Multi-target Lua bundler supporting presets (`qwerty-midi`, `studio-suite`, `surface-hud`, `nanokey-studio`).
 - `bin/bundle_and_reload.sh`: Trigger script executed by the Launch Agent watcher (`com.matt.agent.qwerty-midi-bundler`).

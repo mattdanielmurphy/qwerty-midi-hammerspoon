@@ -68,38 +68,37 @@ local function updateSingleKeyState(code, pressed, latched)
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
 end
 
-local function updateNanoKeyControl(controlId, value, pressed, layer, extra)
+local function updateKeyStepControl(controlId, value, pressed, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
   local extraJson = "null"
   if type(extra) == "table" then
     local ok, res = pcall(hs.json.encode, extra)
     if ok and res then extraJson = res end
   end
-  local js = string.format("if (window.updateNanoKeyState) window.updateNanoKeyState(%q, %s, %s, %q, %s);",
+  local js = string.format("if (window.updateKeyStepState) window.updateKeyStepState(%q, %s, %s, %s);",
     tostring(controlId or ""),
     value and tostring(value) or "null",
     pressed and "true" or "false",
-    tostring(layer or "base"),
     extraJson)
   safeEvaluateJS(js)
 end
 
-local function isNanokeyConnected()
-  if state.nanokeyConnected ~= nil then
-    return state.nanokeyConnected == true
+local function isKeyStepConnected()
+  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
+    return _G.activeWatchers.keystep.isConnected() == true
   end
-  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.isConnected then
-    return _G.activeWatchers.nanokey.isConnected() == true
+  if state.keystepConnected ~= nil then
+    return state.keystepConnected == true
   end
   return false
 end
 
 local function getDesiredBaseHeight()
-  return isNanokeyConnected() and 600 or 280
+  return isKeyStepConnected() and 600 or 280
 end
 
 local function updateConnectionStatus(connected)
-  state.nanokeyConnected = (connected == true)
+  state.keystepConnected = (connected == true)
   if _G.activeWatchers.midiWebview then
     local effectiveScale = state.zoomLevel * state.BASE_HUD_SCALE
     local NOTIF_BAND = math.floor(50 * effectiveScale)
@@ -114,7 +113,7 @@ local function updateConnectionStatus(connected)
       _G.activeWatchers.hudY = newY
       hs.settings.set("qwertyMidi_hudY", newY)
     end
-    safeEvaluateJS(string.format("if (window.setNanokeyConnected) window.setNanokeyConnected(%s);", connected and "true" or "false"))
+    safeEvaluateJS(string.format("if (window.setKeyStepConnected) window.setKeyStepConnected(%s);", connected and "true" or "false"))
   end
   updateWebviewHud()
 end
@@ -838,20 +837,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     bpmDisplayStr = arpeggiator.formatBpm(state.arpBpm) .. " BPM"
   end
 
-  if _G.activeWatchers and _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-    if state.currentRoot ~= lastSyncedRoot or state.currentScaleIdx ~= lastSyncedScaleIdx or state.scaleGuideEnabled ~= lastSyncedScaleGuideEnabled then
-      lastSyncedRoot = state.currentRoot
-      lastSyncedScaleIdx = state.currentScaleIdx
-      lastSyncedScaleGuideEnabled = state.scaleGuideEnabled
-      pcall(function() _G.activeWatchers.nanokey.syncScaleGuideLeds(state) end)
-    end
-  end
-
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
   local payload = {
-    nanokeyConnected = isNanokeyConnected(),
+    keystepConnected = isKeyStepConnected(),
     activeSurface = state.activeSurface or "qwerty",
     currentMode = state.currentMode or "Home",
     modeSelectHeld = state.modeSelectHeld == true,
@@ -945,7 +935,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modWheel = modVal,
     zoomLevel = effectiveScale,
     spotlight = spotlightInfo,
-    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 72) or nil,
+    scaleGuide = transposer.getScaleGuideInfo and transposer.getScaleGuideInfo(48, 79) or nil,
     scaleGuideEnabled = state.scaleGuideEnabled ~= false,
     keys = keyUpdates
   }
@@ -1081,9 +1071,6 @@ local function createMidiWebview()
     elseif body.type == "setRoot" and body.root ~= nil then
       state.currentRoot = math.max(0, math.min(11, body.root))
       arpeggiator.updateLatchedArpNotes()
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
-      end
       local rootName = NOTE_NAMES[state.currentRoot + 1]
       local spot = {
         title = "ROOT NOTE",
@@ -1096,9 +1083,6 @@ local function createMidiWebview()
     elseif body.type == "setModeIdx" and body.modeIdx ~= nil then
       state.currentScaleIdx = math.max(1, math.min(#SCALES, body.modeIdx))
       arpeggiator.updateLatchedArpNotes()
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.syncScaleGuideLeds then
-        _G.activeWatchers.nanokey.syncScaleGuideLeds(state)
-      end
       local scaleInfo = SCALES[state.currentScaleIdx]
       local spot = {
         title = "SCALE / MODE",
@@ -1340,30 +1324,21 @@ local function createMidiWebview()
       end
     elseif body.type == "switchSurface" then
       setSurfaceView(body.surface)
-    elseif body.type == "nanokeyKey" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("key", body)
+    elseif body.type == "keystepKey" or
+           body.type == "keystepPitch" or
+           body.type == "keystepMod" or
+           body.type == "keystepTransport" or
+           body.type == "keystepHold" or
+           body.type == "keystepShift" or
+           body.type == "keystepOctave" or
+           body.type == "keystepMode" or
+           body.type == "keystepDivision" or
+           body.type == "keystepSeqArp" or
+           body.type == "keystepRate" then
+      local actionName = body.type:gsub("^keystep", ""):lower()
+      if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
+        _G.activeWatchers.keystep.handleGuiAction(actionName, body)
       end
-    elseif body.type == "nanokeyPad" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("pad", body)
-      end
-    elseif body.type == "nanokeySustain" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("sustain", body)
-      end
-    elseif body.type == "nanokeyScene" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("scene", body)
-      end
-    elseif body.type == "nanokeyGuide" or body.type == "toggleScaleGuide" then
-      if _G.activeWatchers.nanokey and _G.activeWatchers.nanokey.handleGuiAction then
-        _G.activeWatchers.nanokey.handleGuiAction("guide", body)
-      else
-        state.scaleGuideEnabled = not state.scaleGuideEnabled
-        if config.saveSettings then config.saveSettings() end
-      end
-      updateWebviewHud()
     end
     config.saveSettings()
   end)
@@ -1600,8 +1575,10 @@ return {
   getLastLatencyMs = function() return lastLatencyMs end,
   dumpMidiLogs = dumpMidiLogs,
   setSurfaceView = setSurfaceView,
-  updateNanoKeyControl = updateNanoKeyControl,
-  isNanokeyConnected = isNanokeyConnected,
+  updateKeyStepControl = updateKeyStepControl,
+  isKeyStepConnected = isKeyStepConnected,
+  updateNanoKeyControl = updateKeyStepControl,
+  isNanokeyConnected = isKeyStepConnected,
   getDesiredBaseHeight = getDesiredBaseHeight,
   updateConnectionStatus = updateConnectionStatus,
   getProposedActionSpotlight = getProposedActionSpotlight,

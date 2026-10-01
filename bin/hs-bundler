@@ -11,7 +11,7 @@ import argparse
 
 TARGET_PRESETS = {
     "qwerty-midi": {
-        "src_dirs": ["packages/music-engine", "packages/nanokey-studio", "src"],
+        "src_dirs": ["packages/music-engine", "packages/keystep-interceptor", "src"],
         "entry": "init.lua",
         "output": "qwerty_midi.lua",
         "web_index": "src/web/index.html",
@@ -20,7 +20,7 @@ TARGET_PRESETS = {
     "studio-suite": {
         "src_dirs": [
             "packages/music-engine",
-            "packages/nanokey-studio",
+            "packages/keystep-interceptor",
             "src",
             "packages/studio-suite",
         ],
@@ -36,11 +36,16 @@ TARGET_PRESETS = {
         "web_index": "packages/surface-hud/src/web/index.html",
         "ui_lua": "packages/surface-hud/lua/ui_html.lua",
     },
+    "keystep-interceptor": {
+        "src_dirs": ["packages/keystep-interceptor"],
+        "entry": "init.lua",
+        "output": "dist/keystep_interceptor.lua",
+    },
     "nanokey-studio": {
         "src_dirs": [
             "packages/music-engine",
             "packages/surface-hud/lua",
-            "packages/nanokey-studio",
+            "archive/nanokey-studio/packages/nanokey-studio",
         ],
         "entry": "init.lua",
         "output": "dist/nanokey_studio.lua",
