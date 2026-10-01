@@ -10246,8 +10246,10 @@ window.setKeyStepConnected = function(connected) {
   if (hudContainer) {
     if (connected) {
       hudContainer.classList.add('keystep-connected');
+      hudContainer.style.height = '600px';
     } else {
       hudContainer.classList.remove('keystep-connected');
+      hudContainer.style.height = '280px';
     }
   }
   if (badge) {
