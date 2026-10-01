@@ -2605,25 +2605,25 @@
             </div>
 
             <!-- Knob 1: Seq / Arp Mode (Settings 1-8) -->
-            <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Seq / Arp Mode (Settings 1-8)">
+            <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Seq / Arp Mode (8 Positions, CC 102 & CC 105)">
               <div class="ks-knob-dial" id="ks-knob-mode"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Seq / Arp Mode</span>
               <span class="ks-knob-val" id="ks-knob-val-mode">1: Up</span>
             </div>
 
             <!-- Knob 2: Time Div (1/4 -> 1/32, then 1/4T -> 1/32T) -->
-            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (8 Positions, CC 17)">
+            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (8 Positions, CC 103 & CC 106)">
               <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Time Div</span>
               <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
             </div>
 
-            <!-- Knob 3: Rate / Master Volume (CC 7) -->
-            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #7 (0-127)">
+            <!-- Knob 3: Rate / Master Volume (CC 17 & CC 7) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #17 & CC #7 (0-100% Unity Gain)">
               <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
               <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Rate / Vol</span>
-              <span class="ks-knob-val" id="ks-knob-val-rate">Vol 64 (120 BPM)</span>
+              <span class="ks-knob-val" id="ks-knob-val-rate">Vol 50% (120 BPM)</span>
             </div>
           </div>
 
@@ -5453,7 +5453,8 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     window._ksInternalState.bpm = bpm;
     const valEl = document.getElementById('ks-knob-val-rate');
     const knob = document.getElementById('ks-knob-rate');
-    if (valEl) valEl.textContent = `${rate} (${bpm} BPM)`;
+    const volPercent = Math.round((rate / 127) * 100);
+    if (valEl) valEl.textContent = `Vol ${volPercent}% (${bpm} BPM)`;
     if (knob) {
       const angle = -135 + (rate / 127) * 270;
       knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;

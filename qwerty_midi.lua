@@ -2841,17 +2841,29 @@ local config = {
   -- Marker notes are channel-agnostic because direct and sequenced notes
   -- share the KeyStep User Channel.
   outputChannel = 0,
-  -- Rate knob defaults to standard MIDI Master Volume (CC 7)
-  rateCc = 7,
-  -- 8-position stepped knobs mapped to configurable CC controllers
-  modeCc = 16, -- General Purpose Controller 1 (or 102 fallback)
-  divCc = 17,  -- General Purpose Controller 2 (or 103 fallback)
+  -- Rate knob controls Master Volume:
+  -- Arturia plugins map CC 17 to Output Level / Gain / Macro 2 by default.
+  -- Standard MIDI maps CC 7 to Channel/Master Volume.
+  rateCc = 17,            -- Arturia Macro 2 / Volume CC
+  rateStandardCc = 7,     -- Standard MIDI Volume CC
+  maxVolumeCc = 100,      -- Cap at 100 (0dB unity gain in Arturia) to prevent fried clipping boost
+  minVolumeCc = 0,
+  -- 8-position stepped knobs mapped to safe unreserved continuous CCs (105, 106)
+  modeCc = 105,
+  divCc = 106,
   -- MIDI CC data is seven-bit (0..127) mapped across KeyStep's 30..240 BPM range
   -- with 120 BPM at center (64).
   rateCcValue = function(bpm)
     return bpmToRate(bpm)
   end,
 }
+
+local function rateToVolumeCc(rateVal)
+  local maxV = config.maxVolumeCc or 100
+  local minV = config.minVolumeCc or 0
+  local norm = math.max(0, math.min(127, rateVal)) / 127
+  return math.floor(minV + norm * (maxV - minV) + 0.5)
+end
 
 local MAX_SEQUENCE_HISTORY = 32
 
@@ -3043,21 +3055,23 @@ local function setBpm(bpm)
   local rateVal = config.rateCcValue(roundedBpm)
   state.rate = rateVal
   persistSetting("qwertyMidi_ks_rate", rateVal)
-  -- Rate knob is mapped to Master Volume (CC 7) by default
-  sendCC(config.rateCc or 7, rateVal)
+  local volCcVal = rateToVolumeCc(rateVal)
+  -- Rate knob controls Master Volume: emit Arturia Macro 2 (CC 17) and standard MIDI Volume (CC 7)
+  if config.rateCc then sendCC(config.rateCc, volCcVal) end
+  if config.rateStandardCc then sendCC(config.rateStandardCc, volCcVal) end
   sendCC(104, config.rateCcValue(roundedBpm))
   -- Synchronize Master Volume with QWERTY MIDI engine
   if _G.activeWatchers and _G.activeWatchers.state then
-    _G.activeWatchers.state.topRowVolume = rateVal
-    _G.activeWatchers.state.bottomRowVolume = rateVal
+    _G.activeWatchers.state.topRowVolume = volCcVal
+    _G.activeWatchers.state.bottomRowVolume = volCcVal
   end
   if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
     _G.activeWatchers.hud.updateWebviewHud()
   end
   publishChange(false)
   updateMonitor()
-  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, cc = config.rateCc or 7, ccValue = rateVal })
-  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, cc = config.rateCc or 7, ccValue = rateVal })
+  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
+  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
 end
 
 local function setRate(rateVal)
@@ -3069,21 +3083,23 @@ local function setRate(rateVal)
   state.bpm = bpm
   state.smoothBpm = bpm
   persistSetting("qwertyMidi_ks_bpm", bpm)
-  -- Rate knob is mapped to Master Volume (CC 7) by default
-  sendCC(config.rateCc or 7, roundedRate)
+  local volCcVal = rateToVolumeCc(roundedRate)
+  -- Rate knob controls Master Volume: emit Arturia Macro 2 (CC 17) and standard MIDI Volume (CC 7)
+  if config.rateCc then sendCC(config.rateCc, volCcVal) end
+  if config.rateStandardCc then sendCC(config.rateStandardCc, volCcVal) end
   sendCC(104, roundedRate)
   -- Synchronize Master Volume with QWERTY MIDI engine
   if _G.activeWatchers and _G.activeWatchers.state then
-    _G.activeWatchers.state.topRowVolume = roundedRate
-    _G.activeWatchers.state.bottomRowVolume = roundedRate
+    _G.activeWatchers.state.topRowVolume = volCcVal
+    _G.activeWatchers.state.bottomRowVolume = volCcVal
   end
   if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
     _G.activeWatchers.hud.updateWebviewHud()
   end
   publishChange()
   updateMonitor()
-  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, cc = config.rateCc or 7, ccValue = roundedRate })
-  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, cc = config.rateCc or 7, ccValue = roundedRate })
+  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
+  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
 end
 
 local function nearestDivision(ratio)
@@ -3679,6 +3695,7 @@ end
 
 KeyStep.bpmToRate = bpmToRate
 KeyStep.rateToBpm = rateToBpm
+KeyStep.rateToVolumeCc = rateToVolumeCc
 KeyStep.getFullState = KeyStep.getFullState
 KeyStep.syncToHud = KeyStep.syncToHud
 KeyStep.analyzeSequenceAndInferKnobs = KeyStep.analyzeSequenceAndInferKnobs
@@ -8050,25 +8067,25 @@ local HTML_UI_CONTENT = [[
             </div>
 
             <!-- Knob 1: Seq / Arp Mode (Settings 1-8) -->
-            <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Seq / Arp Mode (Settings 1-8)">
+            <div class="ks-knob-unit" id="ks-knob-mode-unit" title="Seq / Arp Mode (8 Positions, CC 102 & CC 105)">
               <div class="ks-knob-dial" id="ks-knob-mode"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Seq / Arp Mode</span>
               <span class="ks-knob-val" id="ks-knob-val-mode">1: Up</span>
             </div>
 
             <!-- Knob 2: Time Div (1/4 -> 1/32, then 1/4T -> 1/32T) -->
-            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (8 Positions, CC 17)">
+            <div class="ks-knob-unit" id="ks-knob-div-unit" title="Time Div (8 Positions, CC 103 & CC 106)">
               <div class="ks-knob-dial" id="ks-knob-div"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Time Div</span>
               <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
             </div>
 
-            <!-- Knob 3: Rate / Master Volume (CC 7) -->
-            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #7 (0-127)">
+            <!-- Knob 3: Rate / Master Volume (CC 17 & CC 7) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #17 & CC #7 (0-100% Unity Gain)">
               <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
               <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
               <span class="ks-knob-title">Rate / Vol</span>
-              <span class="ks-knob-val" id="ks-knob-val-rate">Vol 64 (120 BPM)</span>
+              <span class="ks-knob-val" id="ks-knob-val-rate">Vol 50% (120 BPM)</span>
             </div>
           </div>
 
@@ -10898,7 +10915,8 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     window._ksInternalState.bpm = bpm;
     const valEl = document.getElementById('ks-knob-val-rate');
     const knob = document.getElementById('ks-knob-rate');
-    if (valEl) valEl.textContent = `${rate} (${bpm} BPM)`;
+    const volPercent = Math.round((rate / 127) * 100);
+    if (valEl) valEl.textContent = `Vol ${volPercent}% (${bpm} BPM)`;
     if (knob) {
       const angle = -135 + (rate / 127) * 270;
       knob.style.transform = `rotate(${angle.toFixed(1)}deg)`;

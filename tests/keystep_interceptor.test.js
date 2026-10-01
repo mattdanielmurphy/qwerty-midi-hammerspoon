@@ -99,17 +99,30 @@ test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate
   expect(source).toContain("state.smoothBpm");
 });
 
-test("maps Rate knob to Master Volume CC #7 by default and synchronizes volume levels", () => {
-  expect(source).toContain("rateCc = 7");
-  expect(source).toContain("sendCC(config.rateCc or 7, rateVal)");
-  expect(source).toContain("sendCC(config.rateCc or 7, roundedRate)");
-  expect(source).toContain("state.topRowVolume = rateVal");
-  expect(source).toContain("state.bottomRowVolume = rateVal");
+test("maps Rate knob to Master Volume (Arturia CC #17 and standard CC #7) with 0dB unity gain cap", () => {
+  expect(source).toContain("rateCc = 17");
+  expect(source).toContain("rateStandardCc = 7");
+  expect(source).toContain("maxVolumeCc = 100");
+  expect(source).toContain("sendCC(config.rateCc, volCcVal)");
+  expect(source).toContain("sendCC(config.rateStandardCc, volCcVal)");
+  expect(source).toContain("state.topRowVolume = volCcVal");
+  expect(source).toContain("state.bottomRowVolume = volCcVal");
+
+  // Verify volume scaling prevents fried clipping at top end: Rate 127 caps at CC 100 (0dB unity gain)
+  const rateToVolumeCc = (rateVal, maxV = 100, minV = 0) => {
+    const norm = Math.max(0, Math.min(127, rateVal)) / 127;
+    return Math.floor(minV + norm * (maxV - minV) + 0.5);
+  };
+  expect(rateToVolumeCc(0)).toBe(0);
+  expect(rateToVolumeCc(64)).toBe(50);
+  expect(rateToVolumeCc(127)).toBe(100);
 });
 
-test("maps 8-position stepped knobs (Mode and Time Div) across full 0..127 CC range", () => {
-  expect(source).toContain("modeCc = 16");
-  expect(source).toContain("divCc = 17");
+test("maps 8-position stepped knobs (Mode and Time Div) across safe unreserved CCs", () => {
+  expect(source).toContain("modeCc = 105");
+  expect(source).toContain("divCc = 106");
+  expect(source).toContain("sendCC(102, mode)");
+  expect(source).toContain("sendCC(103, division.ccValue)");
   expect(source).toContain("math.floor(((mode - 1) / 7) * 127 + 0.5)");
   expect(source).toContain("math.floor(((division.ccValue - 1) / 7) * 127 + 0.5)");
 
