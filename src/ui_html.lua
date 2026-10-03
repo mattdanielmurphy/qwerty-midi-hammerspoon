@@ -244,7 +244,11 @@ local HTML_UI_CONTENT = [[
     align-items: center;
     justify-content: center;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
     flex-shrink: 0;
+    box-sizing: border-box;
     appearance: none;
     -webkit-appearance: none;
     outline: none;
@@ -260,15 +264,82 @@ local HTML_UI_CONTENT = [[
     color: #e5e5e5;
   }
 
+  #root-select {
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    flex-shrink: 0;
+    text-align: center;
+    text-align-last: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #arp-dir-select {
+    width: 66px;
+    min-width: 66px;
+    max-width: 66px;
+    flex-shrink: 0;
+    text-align: center;
+    text-align-last: center;
+  }
+
+  #arp-rate-select {
+    width: 52px;
+    min-width: 52px;
+    max-width: 52px;
+    flex-shrink: 0;
+    text-align: center;
+    text-align-last: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #arp-quantize-select {
+    width: 114px;
+    min-width: 114px;
+    max-width: 114px;
+    flex-shrink: 0;
+    text-align: center;
+    text-align-last: center;
+  }
+
+  #input-quantize-select {
+    width: 98px;
+    min-width: 98px;
+    max-width: 98px;
+    flex-shrink: 0;
+    text-align: center;
+    text-align-last: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #logic-sync-btn {
+    width: 74px;
+    min-width: 74px;
+    max-width: 74px;
+    flex-shrink: 0;
+    text-align: center;
+  }
+
   #layout-select {
-    max-width: 140px;
+    width: 90px;
+    min-width: 90px;
+    max-width: 90px;
+    flex-shrink: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-align: left;
-    text-align-last: left;
-    padding-left: 6px;
-    padding-right: 6px;
+    text-align: center;
+    text-align-last: center;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  #keystep-badge {
+    width: 106px;
+    min-width: 106px;
+    max-width: 106px;
+    flex-shrink: 0;
+    justify-content: center;
   }
 
   .badge option {
@@ -359,7 +430,12 @@ local HTML_UI_CONTENT = [[
   .bpm-editor {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 2px;
+    width: 102px;
+    min-width: 102px;
+    max-width: 102px;
+    box-sizing: border-box;
     -webkit-app-region: no-drag;
     flex-shrink: 0;
   }
@@ -369,7 +445,7 @@ local HTML_UI_CONTENT = [[
     border: 1px solid rgba(255, 255, 255, 0.2);
     color: #d0d0d0;
     font-size: 10px;
-    padding: 2px 5px;
+    padding: 2px 4px;
     border-radius: 4px;
     cursor: pointer;
     outline: none;
@@ -377,6 +453,7 @@ local HTML_UI_CONTENT = [[
     line-height: 1;
     transition: background 0.15s ease;
     -webkit-app-region: no-drag;
+    flex-shrink: 0;
   }
 
   .bpm-arrow-btn:hover {
@@ -387,13 +464,19 @@ local HTML_UI_CONTENT = [[
     font-size: 11px;
     font-weight: 700;
     color: #e5e5e5;
-    padding: 3px 6px;
+    padding: 3px 4px;
     border-radius: 4px;
     cursor: text;
-    min-width: 60px;
+    width: 66px;
+    min-width: 66px;
+    max-width: 66px;
     text-align: center;
+    font-variant-numeric: tabular-nums;
+    box-sizing: border-box;
     transition: background 0.15s ease, box-shadow 0.15s ease;
     white-space: nowrap;
+    overflow: hidden;
+    flex-shrink: 0;
   }
 
   .bpm-display:hover {
@@ -411,6 +494,10 @@ local HTML_UI_CONTENT = [[
     flex-direction: row;
     align-items: center;
     gap: 6px;
+    width: 116px;
+    min-width: 116px;
+    max-width: 116px;
+    box-sizing: border-box;
     flex-shrink: 0;
     margin-left: 8px;
     height: 44px;
@@ -476,18 +563,33 @@ local HTML_UI_CONTENT = [[
     background: rgba(212, 163, 89, 0.12);
     border: 1px solid rgba(212, 163, 89, 0.35);
     border-radius: 4px;
-    padding: 2px 5px;
+    padding: 2px 4px;
     letter-spacing: 0.5px;
     white-space: nowrap;
+    width: 58px;
+    min-width: 58px;
+    max-width: 58px;
     height: 22px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    box-sizing: border-box;
+    flex-shrink: 0;
     cursor: ns-resize;
+  }
+  .compact-oct-badge span {
+    display: inline-block;
+    width: 100%;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   .vol-bar-container {
     width: 6px;
+    min-width: 6px;
+    max-width: 6px;
     height: 22px;
     background: rgba(30, 26, 22, 0.9);
     border: 1px solid rgba(212, 163, 89, 0.3);
@@ -495,6 +597,7 @@ local HTML_UI_CONTENT = [[
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
+    box-sizing: border-box;
   }
   .vol-bar-fill {
     position: absolute;
@@ -511,16 +614,23 @@ local HTML_UI_CONTENT = [[
     color: #706558;
     background: transparent;
     border: none;
-    padding: 3px 6px;
+    padding: 3px 4px;
     cursor: pointer;
     outline: none;
     font-family: inherit;
     letter-spacing: 0.5px;
     transition: none;
     -webkit-app-region: no-drag;
+    width: 38px;
+    min-width: 38px;
+    max-width: 38px;
     height: 24px;
     display: flex;
     align-items: center;
+    justify-content: center;
+    text-align: center;
+    box-sizing: border-box;
+    flex-shrink: 0;
   }
 
   .arp-row-toggle.active {
@@ -2577,36 +2687,58 @@ local HTML_UI_CONTENT = [[
     color: var(--active-track-color, #00e5ff) !important;
   }
 
-  /* Live Chord Display (Logic Pro LCD Style) */
+  /* Live Chord Display (Logic Pro LCD Style) - IMMUTABLE BOUNDING BOX (ZERO LAYOUT SHIFT) */
   .chord-display-badge {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    justify-content: space-between;
+    gap: 4px;
     background: rgba(18, 18, 22, 0.95);
-    border: 1px solid rgba(var(--active-track-rgb, 0, 229, 255), 0.45);
-    padding: 3px 8px;
+    border: 1px solid rgba(var(--active-track-rgb, 0, 229, 255), 0.35);
+    padding: 2px 6px;
     border-radius: 6px;
-    min-width: 64px;
-    justify-content: center;
+    width: 154px;
+    min-width: 154px;
+    max-width: 154px;
+    height: 26px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
     cursor: default;
     user-select: none;
     transition: none;
   }
   .chord-display-badge .chord-icon {
     font-size: 10px;
+    width: 12px;
+    flex-shrink: 0;
+    text-align: center;
     opacity: 0.7;
   }
   .chord-display-badge .chord-name-text {
-    font-size: 11px;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 80px;
+    font-size: 10.5px;
     font-weight: 800;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.3px;
     color: #ffffff;
     text-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
   .chord-display-badge.active-chord {
     border-color: var(--active-track-color, #00e5ff) !important;
-    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
-    box-shadow: 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.15) !important;
+    box-shadow: 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+  }
+  .chord-display-badge.chord-mode-active {
+    border-color: var(--active-track-color, #00e5ff) !important;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.25) !important;
+    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 4px rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
   }
 
   /* Selected Chord Mini Piano (Header) */
@@ -5050,10 +5182,13 @@ local HTML_UI_CONTENT = [[
     const t0 = performance.now();
     try {
       if (!data) return;
-      if (data.selectedChord !== undefined) {
-        window.updateChordDisplay(data.selectedChord ? data.selectedChord.name : '', data.selectedChord);
-      } else if (data.detectedChord !== undefined) {
-        window.updateChordDisplay(data.detectedChord);
+      if (data.chordModeActive) {
+        window.updateChordDisplay('CHORD: ' + (data.selectedChord ? data.selectedChord.name : 'ON'), data.selectedChord, true);
+      } else if (data.detectedChord && (typeof data.detectedChord === 'string' ? (data.detectedChord !== '' && data.detectedChord !== '—') : data.detectedChord.name)) {
+        const dName = typeof data.detectedChord === 'string' ? data.detectedChord : data.detectedChord.name;
+        window.updateChordDisplay(dName, typeof data.detectedChord === 'object' ? data.detectedChord : null, false);
+      } else {
+        window.updateChordDisplay('—', null, false);
       }
 
       if (data.activePianoNotes !== undefined && typeof window.syncActivePianoNotes === 'function') {
@@ -5601,7 +5736,9 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
 };
 
 window.updateKeyState = function(code, pressed, latched, chordName) {
-  window.updateChordDisplay(chordName || '');
+  if (!window._isChordModeActive) {
+    window.updateChordDisplay(chordName || '—', null, false);
+  }
   const isTrackButton = code >= 18 && code <= 21;
   if (isTrackButton) return;
   const el = document.getElementById('key-' + code);
@@ -5708,17 +5845,43 @@ function updateChordMiniPiano(chordData) {
   }
 }
 
-window.updateChordDisplay = function(chordName, chordData) {
+window.updateChordDisplay = function(chordName, chordData, isChordModeActive) {
   const badge = document.getElementById('chord-display-badge');
   if (!badge) return;
-  const name = String(chordName || (chordData && (chordData.label || chordData.name)) || '').trim();
-  const text = badge.querySelector('.chord-name-text');
-  if (text) text.textContent = name || '—';
-  badge.classList.toggle('active-chord', !!name);
-  if (chordData && chordData.label) {
-    badge.title = chordData.label;
+  if (isChordModeActive !== undefined) {
+    window._isChordModeActive = !!isChordModeActive;
   }
-  updateChordMiniPiano(chordData);
+  const isModeActive = !!window._isChordModeActive;
+
+  let displayName = '';
+  if (isModeActive) {
+    displayName = String(chordName || (chordData && chordData.name ? 'CHORD: ' + chordData.name : 'CHORD: ON')).trim();
+  } else {
+    const raw = String(chordName || (chordData && (chordData.name || chordData.label)) || '').trim();
+    if (raw && raw !== '—' && !raw.startsWith('CHORD:')) {
+      displayName = raw;
+    } else {
+      displayName = '—';
+    }
+  }
+
+  const text = badge.querySelector('.chord-name-text');
+  if (text) text.textContent = displayName;
+
+  const hasLiveChord = !isModeActive && displayName !== '—';
+  badge.classList.toggle('active-chord', hasLiveChord || isModeActive);
+  badge.classList.toggle('chord-mode-active', isModeActive);
+
+  if (isModeActive) {
+    badge.title = chordData && chordData.label ? chordData.label : 'Chord Mode: Active';
+    updateChordMiniPiano(chordData);
+  } else if (hasLiveChord) {
+    badge.title = 'Detected Live Chord: ' + displayName;
+    updateChordMiniPiano(chordData);
+  } else {
+    badge.title = 'Live Chord Detection (Chord Mode OFF)';
+    updateChordMiniPiano(null);
+  }
 };
 
 /* ── 88-Key Performance Piano Real-Time Visualizer (A0–C8) ── */

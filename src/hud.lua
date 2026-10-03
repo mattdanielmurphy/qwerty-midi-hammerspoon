@@ -92,9 +92,12 @@ end
 
 local function updateChordDisplay()
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  local activeTrkId = state.activeTrack or 1
+  local activeTrk = state.tracks and state.tracks[activeTrkId]
+  local isChordModeActive = (activeTrk and activeTrk.chordModeActive == true) or state.quoteHeld == true
   local chordName = getActiveChord()
   local chordParam = chordName and string.format("%q", chordName) or '""'
-  safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s);", chordParam))
+  safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s, null, %s);", chordParam, isChordModeActive and "true" or "false"))
 end
 
 local function updatePianoNote(noteNum, isActive, trackId, trackColor)
@@ -982,6 +985,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
+  local isChordModeActive = (activeTrk and activeTrk.chordModeActive == true) or state.quoteHeld == true
   local detectedChord = getActiveChord()
 
   local cIdx = (activeTrk and activeTrk.chordIdx) or state.chordIdx or 1
@@ -1005,11 +1009,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     pitches = chordPitches,
     pitchClasses = chordPitchClasses,
     noteNames = chordPitchNames,
-    label = rootNameStr .. " " .. chordDef.name .. " (" .. table.concat(chordPitchNames, " · ") .. ")"
+    label = rootNameStr .. " " .. chordDef.name .. " (" .. table.concat(chordPitchNames, " · ") .. ")",
+    active = isChordModeActive
   }
 
   local payload = {
     selectedChord = selectedChordInfo,
+    chordModeActive = isChordModeActive,
     activePianoNotes = midi.getActiveNoteLedger(),
     detectedChord = detectedChord,
     keystepConnected = isKeyStepConnected(),
