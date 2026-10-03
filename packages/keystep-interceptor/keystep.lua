@@ -102,7 +102,7 @@ local config = {
   -- Emit one dedicated CC for Logic Controller Assignments Learn.
   -- Avoid CC 7 and Arturia's CC 17 so the knob does not change instrument volume directly.
   rateCc = 107,
-  maxVolumeCc = 100,      -- Keep the separate QWERTY row-volume sync below unity gain
+  maxVolumeCc = 127,      -- Full 0..127 MIDI volume range
   minVolumeCc = 0,
   -- 8-position stepped knobs mapped to safe unreserved continuous CCs (105, 106)
   modeCc = 105,
@@ -115,7 +115,7 @@ local config = {
 }
 
 local function rateToVolumeCc(rateVal)
-  local maxV = config.maxVolumeCc or 100
+  local maxV = config.maxVolumeCc or 127
   local minV = config.minVolumeCc or 0
   local norm = math.max(0, math.min(127, rateVal)) / 127
   return math.floor(minV + norm * (maxV - minV) + 0.5)

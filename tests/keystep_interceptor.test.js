@@ -99,21 +99,21 @@ test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate
   expect(source).toContain("state.smoothBpm");
 });
 
-test("maps Rate knob to CC 107 for Logic learn while synchronizing internal engine volume", () => {
+test("maps Rate knob to CC 107 for Logic learn while synchronizing internal engine volume across full 0..127 range", () => {
   expect(source).toContain("rateCc = 107");
-  expect(source).toContain("maxVolumeCc = 100");
+  expect(source).toContain("maxVolumeCc = 127");
   expect(source).toContain("sendRateCc(rateVal)");
   expect(source).toContain("state.topRowVolume = volCcVal");
   expect(source).toContain("state.bottomRowVolume = volCcVal");
 
-  // Verify volume scaling prevents fried clipping at top end: Rate 127 caps at CC 100 (0dB unity gain)
-  const rateToVolumeCc = (rateVal, maxV = 100, minV = 0) => {
+  // Verify volume scaling spans full 0..127 MIDI range without 100 CC cap
+  const rateToVolumeCc = (rateVal, maxV = 127, minV = 0) => {
     const norm = Math.max(0, Math.min(127, rateVal)) / 127;
     return Math.floor(minV + norm * (maxV - minV) + 0.5);
   };
   expect(rateToVolumeCc(0)).toBe(0);
-  expect(rateToVolumeCc(64)).toBe(50);
-  expect(rateToVolumeCc(127)).toBe(100);
+  expect(rateToVolumeCc(64)).toBe(64);
+  expect(rateToVolumeCc(127)).toBe(127);
 });
 
 test("provides black-key modal shift mapping across Cutoff, Reverb, Delay, Release, and Volume", () => {
