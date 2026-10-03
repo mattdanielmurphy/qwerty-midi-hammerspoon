@@ -62,10 +62,26 @@ local function safeEvaluateJS(js)
   return ok
 end
 
-local function updateSingleKeyState(code, pressed, latched)
+local function getActiveChord()
+  local activePitches = {}
+  for code, info in pairs(state.pressedKeys or {}) do
+    if type(info) == "table" and not info.isControl and info.pitches then
+      for _, p in ipairs(info.pitches) do
+        table.insert(activePitches, p)
+      end
+    end
+  end
+  return transposer.detectChord(activePitches)
+end
+
+local function updateSingleKeyState(code, pressed, latched, chordName)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
-  safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s);",
-    tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
+  if chordName == nil then
+    chordName = getActiveChord()
+  end
+  local chordParam = chordName and string.format("%q", chordName) or '""'
+  safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s, %s);",
+    tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false", chordParam))
 end
 
 local function updateKeyStepControl(controlId, value, pressed, extra)
@@ -174,85 +190,139 @@ local PROPOSED_LAYOUT_MAP = {
     ctrl_opt        = { name = "Rand Rhy",    class = "ctrl-rand",    action = "randomRhythm" },
     ctrl_opt_shift  = { name = "Rand All",    class = "ctrl-rand",    action = "randomAll" },
   },
-  [2] = { -- D (Consolidated Octave)
-    base            = { name = "Oct +",       class = "ctrl-oct",     action = "octaveUp" },
-    shift           = { name = "Oct -",       class = "ctrl-oct",     action = "octaveDown" },
-    opt             = { name = "TopOct +",    class = "ctrl-topoct",  action = "topOctUp" },
-    shift_opt       = { name = "TopOct -",    class = "ctrl-topoct",  action = "topOctDown" },
-    ctrl            = { name = "BotOct +",    class = "ctrl-oct",     action = "botOctUp" },
-    shift_ctrl      = { name = "BotOct -",    class = "ctrl-oct",     action = "botOctDown" },
+  [2] = { -- D (Dedicated Octave Down)
+    base            = { name = "Oct -",       class = "ctrl-oct",     action = "octaveDown" },
+    shift           = { name = "TopOct -",    class = "ctrl-topoct",  action = "topOctDown" },
+    opt             = { name = "BotOct -",    class = "ctrl-oct",     action = "botOctDown" },
+    ctrl            = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    shift_ctrl      = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
     ctrl_opt        = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
     ctrl_opt_shift  = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
   },
-  [3] = { -- F (NEW FREED KEY: Master Arp & Track Loop Lock)
-    base            = { name = "Arp Latch",   class = "ctrl-lock",    action = "arpLatchToggle" },
-    shift           = { name = "Lock Loop",   class = "ctrl-lock",    action = "lockLoop" },
-    opt             = { name = "Lock & Swap", class = "ctrl-lock",    action = "lockAndSwap" },
-    shift_opt       = { name = "Lock 4 Trk",  class = "ctrl-lock",    action = "lockAllTracks" },
-    ctrl            = { name = "Stop Loops",  class = "ctrl-mute",    action = "stopLoops" },
-    shift_ctrl      = { name = "Stop All",    class = "ctrl-mute",    action = "panic" },
-    ctrl_opt        = { name = "Freeze All",  class = "ctrl-lock",    action = "freezeAll" },
-    ctrl_opt_shift  = { name = "Clear All",   class = "ctrl-mute",    action = "resetAll" },
+  [3] = { -- F (Dedicated Octave Up)
+    base            = { name = "Oct +",       class = "ctrl-oct",     action = "octaveUp" },
+    shift           = { name = "TopOct +",    class = "ctrl-topoct",  action = "topOctUp" },
+    opt             = { name = "BotOct +",    class = "ctrl-oct",     action = "botOctUp" },
+    ctrl            = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    shift_ctrl      = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    ctrl_opt        = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    ctrl_opt_shift  = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
   },
-  [5] = { -- G (Consolidated Mode)
-    base            = { name = "Mode +",      class = "ctrl-mode",    action = "modeUp" },
-    shift           = { name = "Mode -",      class = "ctrl-mode",    action = "modeDown" },
-    opt             = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
-    shift_opt       = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
-    ctrl            = { name = "Major",       class = "ctrl-mode",    action = "modeSetMajor" },
-    shift_ctrl      = { name = "Aeolian",     class = "ctrl-mode",    action = "modeSetAeolian" },
-    ctrl_opt        = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+  [5] = { -- G (Dedicated Mode Down)
+    base            = { name = "Mode -",      class = "ctrl-mode",    action = "modeDown" },
+    shift           = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
+    opt             = { name = "Aeolian",     class = "ctrl-mode",    action = "modeSetAeolian" },
+    shift_opt       = { name = "Locrian 🌑",  class = "ctrl-mode",    action = "modeSetLocrian" },
+    ctrl            = { name = "Phrygian",    class = "ctrl-mode",    action = "modeSetPhrygian" },
+    shift_ctrl      = { name = "Dorian",      class = "ctrl-mode",    action = "modeSetDorian" },
+    ctrl_opt        = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
     ctrl_opt_shift  = { name = "Locrian 🌑",  class = "ctrl-mode",    action = "modeSetLocrian" },
   },
-  [4] = { -- H (Consolidated Root)
-    base            = { name = "Root +",      class = "ctrl-root",    action = "rootUp" },
-    shift           = { name = "Root -",      class = "ctrl-root",    action = "rootDown" },
-    opt             = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
-    shift_opt       = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
-    ctrl            = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
-    shift_ctrl      = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
-    ctrl_opt        = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+  [4] = { -- H (Dedicated Root Down - Vim Left)
+    base            = { name = "Root -",      class = "ctrl-root",    action = "rootDown" },
+    shift           = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
+    opt             = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
+    shift_opt       = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
+    ctrl            = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
+    shift_ctrl      = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
+    ctrl_opt        = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
     ctrl_opt_shift  = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
   },
-  [38] = { -- J (Consolidated Transpose)
-    base            = { name = "Trnsp +1",    class = "ctrl-trnsp",   action = "trnspStep1Up" },
-    shift           = { name = "Trnsp -1",    class = "ctrl-trnsp",   action = "trnspStep1Down" },
-    opt             = { name = "Trnsp +2",    class = "ctrl-trnsp",   action = "trnspStep2Up" },
-    shift_opt       = { name = "Trnsp -2",    class = "ctrl-trnsp",   action = "trnspStep2Down" },
-    ctrl_opt        = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
-    ctrl_opt_shift  = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
-    ctrl            = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+  [38] = { -- J (Dedicated Transpose Down - Vim Down)
+    base            = { name = "Trnsp -",     class = "ctrl-trnsp",   action = "trnspStep1Down" },
+    shift           = { name = "Trnsp -2",    class = "ctrl-trnsp",   action = "trnspStep2Down" },
+    opt             = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
+    shift_opt       = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
+    ctrl            = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
     shift_ctrl      = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
+    ctrl_opt        = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
+    ctrl_opt_shift  = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
   },
-  [40] = { -- K (NEW FREED KEY: Bottom Row Track Focus & Mute - Tracks 1 & 2)
-    base            = { name = "Bot 1⇄2",     class = "ctrl-track",   action = "botTrackToggle" },
-    shift           = { name = "Bot Lock",    class = "ctrl-lock",    action = "botTrackLock" },
-    opt             = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
-    shift_opt       = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
-    ctrl            = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
-    shift_ctrl      = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
-    ctrl_opt        = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
-    ctrl_opt_shift  = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
+  [40] = { -- K (Dedicated Transpose Up - Vim Up)
+    base            = { name = "Trnsp +",     class = "ctrl-trnsp",   action = "trnspStep1Up" },
+    shift           = { name = "Trnsp +2",    class = "ctrl-trnsp",   action = "trnspStep2Up" },
+    opt             = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
+    shift_opt       = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    ctrl            = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    shift_ctrl      = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    ctrl_opt        = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
+    ctrl_opt_shift  = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
   },
-  [37] = { -- L (NEW FREED KEY: Top Row Track Focus & Mute - Tracks 3 & 4)
-    base            = { name = "Top 3⇄4",     class = "ctrl-track",   action = "topTrackToggle" },
-    shift           = { name = "Top Lock",    class = "ctrl-lock",    action = "topTrackLock" },
-    opt             = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
-    shift_opt       = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
-    ctrl            = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
-    shift_ctrl      = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
-    ctrl_opt        = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
-    ctrl_opt_shift  = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
+  [37] = { -- L (Dedicated Root Up - Vim Right)
+    base            = { name = "Root +",      class = "ctrl-root",    action = "rootUp" },
+    shift           = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
+    opt             = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
+    shift_opt       = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+    ctrl            = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+    shift_ctrl      = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
+    ctrl_opt        = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
+    ctrl_opt_shift  = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
   },
-  [41] = { -- ; (NEW FREED KEY: Master Track Selector & Performance Mix)
-    base            = { name = "Trk Focus",   class = "ctrl-track",   action = "trackFocusCycle" },
-    shift           = { name = "All Mute",    class = "ctrl-mute",    action = "allMuteToggle" },
-    opt             = { name = "Top Vol +",   class = "ctrl-vol",     action = "topVolUp" },
-    shift_opt       = { name = "Top Vol -",   class = "ctrl-vol",     action = "topVolDown" },
-    ctrl            = { name = "Bot Vol +",   class = "ctrl-vol",     action = "botVolUp" },
-    shift_ctrl      = { name = "Bot Vol -",   class = "ctrl-vol",     action = "botVolDown" },
-    ctrl_opt        = { name = "Mix Reset",   class = "ctrl-vol",     action = "mixReset" },
-    ctrl_opt_shift  = { name = "Master Mute", class = "ctrl-mute",    action = "allMuteToggle" },
+  [41] = { -- ; (Dedicated Mode Up)
+    base            = { name = "Mode +",      class = "ctrl-mode",    action = "modeUp" },
+    shift           = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
+    opt             = { name = "Major",       class = "ctrl-mode",    action = "modeSetMajor" },
+    shift_opt       = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+    ctrl            = { name = "Mixolydian",  class = "ctrl-mode",    action = "modeSetMixolydian" },
+    shift_ctrl      = { name = "Harmonic",    class = "ctrl-mode",    action = "modeSetHarmonic" },
+    ctrl_opt        = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
+    ctrl_opt_shift  = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+  },
+
+  -- LOWER ROW CONTROLS (Active when KeyStep is connected):
+  [6] = { -- Z
+    base            = { name = "Trk 1: Bass", class = "ctrl-track", action = "trkSelect1" },
+    shift           = { name = "Trk 1 Mute",  class = "ctrl-mute",  action = "trkMute1" },
+    opt             = { name = "Trk 1 Solo",  class = "ctrl-solo",  action = "trkSolo1" },
+    ctrl            = { name = "Trk 1 Arm",   class = "ctrl-track", action = "trkRec1" },
+  },
+  [7] = { -- X
+    base            = { name = "Trk 2: Chd",  class = "ctrl-track", action = "trkSelect2" },
+    shift           = { name = "Trk 2 Mute",  class = "ctrl-mute",  action = "trkMute2" },
+    opt             = { name = "Trk 2 Solo",  class = "ctrl-solo",  action = "trkSolo2" },
+    ctrl            = { name = "Trk 2 Arm",   class = "ctrl-track", action = "trkRec2" },
+  },
+  [8] = { -- C
+    base            = { name = "Trk 3: Lead", class = "ctrl-track", action = "trkSelect3" },
+    shift           = { name = "Trk 3 Mute",  class = "ctrl-mute",  action = "trkMute3" },
+    opt             = { name = "Trk 3 Solo",  class = "ctrl-solo",  action = "trkSolo3" },
+    ctrl            = { name = "Trk 3 Arm",   class = "ctrl-track", action = "trkRec3" },
+  },
+  [9] = { -- V
+    base            = { name = "Trk 4: Arp",  class = "ctrl-track", action = "trkSelect4" },
+    shift           = { name = "Trk 4 Mute",  class = "ctrl-mute",  action = "trkMute4" },
+    opt             = { name = "Trk 4 Solo",  class = "ctrl-solo",  action = "trkSolo4" },
+    ctrl            = { name = "Trk 4 Arm",   class = "ctrl-track", action = "trkRec4" },
+  },
+  [11] = { -- B
+    base            = { name = "Lock Loop",   class = "ctrl-lock",  action = "lockLoop" },
+    shift           = { name = "Lock & Swap", class = "ctrl-lock",  action = "lockAndSwap" },
+    opt             = { name = "Lock 4 Trk",  class = "ctrl-lock",  action = "lockAllTracks" },
+    ctrl            = { name = "Freeze All",  class = "ctrl-lock",  action = "freezeAll" },
+  },
+  [45] = { -- N
+    base            = { name = "Stop Loops",  class = "ctrl-mute",  action = "stopLoops" },
+    shift           = { name = "Stop All",    class = "ctrl-panic", action = "panic" },
+    opt             = { name = "All Mute",    class = "ctrl-mute",  action = "allMuteToggle" },
+    ctrl            = { name = "Reset All",   class = "ctrl-reset", action = "resetAll" },
+  },
+  [46] = { -- M
+    base            = { name = "Vol -",       class = "ctrl-vol",   action = "volDown" },
+    shift           = { name = "BotVol -",    class = "ctrl-vol",   action = "botVolDown" },
+    opt             = { name = "TopVol -",    class = "ctrl-vol",   action = "topVolDown" },
+  },
+  [43] = { -- ,
+    base            = { name = "Vol +",       class = "ctrl-vol",   action = "volUp" },
+    shift           = { name = "BotVol +",    class = "ctrl-vol",   action = "botVolUp" },
+    opt             = { name = "TopVol +",    class = "ctrl-vol",   action = "topVolUp" },
+  },
+  [47] = { -- .
+    base            = { name = "Mod -",       class = "ctrl-modw",  action = "modWheelDown" },
+    shift           = { name = "Rel -",       class = "ctrl-rel",   action = "relDown" },
+  },
+  [44] = { -- /
+    base            = { name = "Mod +",       class = "ctrl-modw",  action = "modWheelUp" },
+    shift           = { name = "Rel +",       class = "ctrl-rel",   action = "relUp" },
   },
   [39] = { -- ' (Chord)
     base            = { name = "Chord",       class = "ctrl-mode",    action = "chordToggle" },
@@ -700,10 +770,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   -- Overlay Proposed Layout actions and names based on active modifier layer
+  local ksConnected = isKeyStepConnected()
+  local lowerRowCodes = { [6]=true, [7]=true, [8]=true, [9]=true, [11]=true, [45]=true, [46]=true, [43]=true, [47]=true, [44]=true }
   for propCode, layerTable in pairs(PROPOSED_LAYOUT_MAP) do
-    local strCode = tostring(propCode)
-    local layerDef = layerTable[activeLayer] or layerTable.base
-    if layerDef then
+    if not (lowerRowCodes[propCode] and not ksConnected) then
+      local strCode = tostring(propCode)
+      local layerDef = layerTable[activeLayer] or layerTable.base
+      if layerDef then
       keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
       keyUpdates[strCode].displayNote = layerDef.name
       keyUpdates[strCode].note = layerDef.name
@@ -798,6 +871,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
   end
 
+  local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
+  for codeStr, kUpd in pairs(keyUpdates) do
+    local cNum = tonumber(codeStr)
+    if perTrackCodes[cNum] then
+      kUpd.isPerTrack = true
+    end
+  end
+
   -- Track buttons (keys 18, 19, 20, 21): apply accurate dual-selection, mute, solo, color, audio states, human keypress, and arp step
   local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
   for kCode, trkId in pairs(trkKeyMap) do
@@ -840,7 +921,18 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
+  local activePitches = {}
+  for code, info in pairs(state.pressedKeys or {}) do
+    if type(info) == "table" and not info.isControl and info.pitches then
+      for _, p in ipairs(info.pitches) do
+        table.insert(activePitches, p)
+      end
+    end
+  end
+  local detectedChord = transposer.detectChord(activePitches)
+
   local payload = {
+    detectedChord = detectedChord,
     keystepConnected = isKeyStepConnected(),
     keystepState = _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.getFullState and _G.activeWatchers.keystep.getFullState() or nil,
     activeSurface = state.activeSurface or "qwerty",

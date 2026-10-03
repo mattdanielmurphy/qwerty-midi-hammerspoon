@@ -46,6 +46,10 @@ local function getScaleGuideInfo(minPitch, maxPitch)
   return harmony.getScaleGuideInfo(state.currentRoot, state.currentScaleIdx, minPitch, maxPitch)
 end
 
+local function detectChord(pitches)
+  return harmony.detectChord(pitches, state.currentRoot, state.currentScaleIdx)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
@@ -54,6 +58,7 @@ return {
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
   getDiatonicPadChord = getDiatonicPadChord,
-  getScaleGuideInfo = getScaleGuideInfo
+  getScaleGuideInfo = getScaleGuideInfo,
+  detectChord = detectChord
 }
 

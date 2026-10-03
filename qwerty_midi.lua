@@ -2300,9 +2300,177 @@ local function getScaleGuideInfo(root, scaleIdx, minPitch, maxPitch)
   }
 end
 
+local FLAT_NOTE_NAMES = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" }
+local SHARP_NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+
+local function prefersFlats(root, scaleIdx)
+  local r = (root or 0) % 12
+  local s = scaleIdx or 1
+  -- Keys using flats in major: F (5), Bb (10), Eb (3), Ab (8), Db (1), Gb (6)
+  if s == 1 or s == 2 or s == 3 then -- Lydian, Major, Mixolydian
+    if r == 5 or r == 10 or r == 3 or r == 8 or r == 1 or r == 6 then return true end
+  else -- Minor / Dorian / Phrygian / etc.
+    if r == 0 or r == 2 or r == 5 or r == 7 or r == 10 or r == 3 or r == 8 or r == 1 then return true end
+  end
+  return false
+end
+
+local function getContextualNoteName(pitchClass, root, scaleIdx)
+  local useFlats = prefersFlats(root, scaleIdx)
+  local names = useFlats and FLAT_NOTE_NAMES or SHARP_NOTE_NAMES
+  return names[(pitchClass % 12) + 1]
+end
+
+local CHORD_FORMULAS = {
+  -- Triads
+  ["0,4,7"] = { quality = "", name = "Major", score = 100 },
+  ["0,3,7"] = { quality = "m", name = "Minor", score = 100 },
+  ["0,3,6"] = { quality = "dim", name = "Diminished", score = 95 },
+  ["0,4,8"] = { quality = "aug", name = "Augmented", score = 95 },
+  ["0,5,7"] = { quality = "sus4", name = "Sus4", score = 90 },
+  ["0,2,7"] = { quality = "sus2", name = "Sus2", score = 90 },
+
+  -- 7ths
+  ["0,4,7,11"] = { quality = "maj7", name = "Major 7th", score = 110 },
+  ["0,4,7,10"] = { quality = "7", name = "Dominant 7th", score = 110 },
+  ["0,3,7,10"] = { quality = "m7", name = "Minor 7th", score = 110 },
+  ["0,3,6,10"] = { quality = "m7b5", name = "Half Diminished", score = 105 },
+  ["0,3,6,9"]  = { quality = "dim7", name = "Diminished 7th", score = 105 },
+  ["0,3,7,11"] = { quality = "m(maj7)", name = "Minor Major 7th", score = 100 },
+  ["0,4,8,10"] = { quality = "7#5", name = "Augmented 7th", score = 100 },
+  ["0,4,8,11"] = { quality = "maj7#5", name = "Major 7th #5", score = 100 },
+  ["0,4,7,9"]  = { quality = "6", name = "Major 6th", score = 100 },
+  ["0,3,7,9"]  = { quality = "m6", name = "Minor 6th", score = 100 },
+  ["0,2,4,7"]  = { quality = "add9", name = "Add 9", score = 100 },
+  ["0,2,3,7"]  = { quality = "m(add9)", name = "Minor Add 9", score = 100 },
+  ["0,5,7,10"] = { quality = "7sus4", name = "7 Sus4", score = 100 },
+  ["0,2,7,10"] = { quality = "7sus2", name = "7 Sus2", score = 100 },
+
+  -- 9ths
+  ["0,2,4,7,11"] = { quality = "maj9", name = "Major 9th", score = 120 },
+  ["0,2,4,7,10"] = { quality = "9", name = "Dominant 9th", score = 120 },
+  ["0,2,3,7,10"] = { quality = "m9", name = "Minor 9th", score = 120 },
+  ["0,2,4,7,9"]  = { quality = "6/9", name = "6/9", score = 115 },
+  ["0,2,3,7,9"]  = { quality = "m6/9", name = "Minor 6/9", score = 115 },
+  ["0,1,4,7,10"] = { quality = "7b9", name = "7b9", score = 115 },
+  ["0,3,4,7,10"] = { quality = "7#9", name = "7#9", score = 115 },
+
+  -- Incomplete 7ths (no 5th)
+  ["0,4,10"] = { quality = "7(no5)", name = "7 (no 5)", score = 80 },
+  ["0,4,11"] = { quality = "maj7(no5)", name = "maj7 (no 5)", score = 80 },
+  ["0,3,10"] = { quality = "m7(no5)", name = "m7 (no 5)", score = 80 },
+
+  -- Dyads / 2-note
+  ["0,7"] = { quality = "5", name = "Power 5th", score = 70 },
+  ["0,4"] = { quality = "(no5)", name = "Major 3rd", score = 60 },
+  ["0,3"] = { quality = "m(no5)", name = "Minor 3rd", score = 60 },
+  ["0,5"] = { quality = "sus4(no5)", name = "4th", score = 55 },
+  ["0,2"] = { quality = "sus2(no5)", name = "2nd", score = 55 },
+  ["0,10"] = { quality = "7(no5)", name = "b7", score = 60 },
+  ["0,11"] = { quality = "maj7(no5)", name = "7", score = 60 }
+}
+
+local function detectChord(pitches, root, scaleIdx)
+  if not pitches or #pitches == 0 then return "" end
+
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local inScaleMap = {}
+  for _, intv in ipairs(scale.intervals) do
+    inScaleMap[(root + intv) % 12] = true
+  end
+
+  local sortedPitches = {}
+  for _, p in ipairs(pitches) do
+    if type(p) == "number" then table.insert(sortedPitches, p) end
+  end
+  if #sortedPitches == 0 then return "" end
+  table.sort(sortedPitches)
+
+  local bassPitch = sortedPitches[1]
+  local bassPC = bassPitch % 12
+  local bassName = getContextualNoteName(bassPC, root, scaleIdx)
+
+  local uniquePCs = {}
+  local pcPresent = {}
+  for _, p in ipairs(sortedPitches) do
+    local pc = p % 12
+    if not pcPresent[pc] then
+      pcPresent[pc] = true
+      table.insert(uniquePCs, pc)
+    end
+  end
+
+  if #uniquePCs == 1 then
+    return bassName
+  end
+
+  local bestScore = -9999
+  local bestChord = nil
+
+  for _, candidateRoot in ipairs(uniquePCs) do
+    local intervals = {}
+    for _, pc in ipairs(uniquePCs) do
+      table.insert(intervals, (pc - candidateRoot + 12) % 12)
+    end
+    table.sort(intervals)
+    local key = table.concat(intervals, ",")
+
+    local formula = CHORD_FORMULAS[key]
+    if formula then
+      local score = formula.score or 50
+
+      -- Bonus: Root is in the bass
+      if candidateRoot == bassPC then
+        score = score + 30
+      end
+
+      -- Bonus: Root is in the active musical scale
+      if inScaleMap[candidateRoot] then
+        score = score + 20
+      end
+
+      -- Bonus: Root matches active key root
+      if candidateRoot == root then
+        score = score + 15
+      end
+
+      if score > bestScore then
+        bestScore = score
+        bestChord = {
+          root = candidateRoot,
+          quality = formula.quality,
+          name = formula.name,
+          bass = bassPC
+        }
+      end
+    end
+  end
+
+  if not bestChord then
+    -- Fallback: return bass note or interval
+    if #uniquePCs == 2 then
+      local intv = (uniquePCs[2] - uniquePCs[1] + 12) % 12
+      return bassName .. " (+" .. intv .. ")"
+    end
+    return bassName
+  end
+
+  local chordRootName = getContextualNoteName(bestChord.root, root, scaleIdx)
+  local chordStr = chordRootName .. bestChord.quality
+  if bestChord.bass ~= bestChord.root then
+    chordStr = chordStr .. "/" .. bassName
+  end
+
+  return chordStr
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
+  FLAT_NOTE_NAMES = FLAT_NOTE_NAMES,
+  SHARP_NOTE_NAMES = SHARP_NOTE_NAMES,
   WHITE_KEY_INDEX = WHITE_KEY_INDEX,
   CHORDS = CHORDS,
   noteNumToName = noteNumToName,
@@ -2311,7 +2479,10 @@ return {
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
   getDiatonicPadChord = getDiatonicPadChord,
-  getScaleGuideInfo = getScaleGuideInfo
+  getScaleGuideInfo = getScaleGuideInfo,
+  detectChord = detectChord,
+  getContextualNoteName = getContextualNoteName,
+  prefersFlats = prefersFlats
 }
 
 
@@ -4169,10 +4340,26 @@ local function safeEvaluateJS(js)
   return ok
 end
 
-local function updateSingleKeyState(code, pressed, latched)
+local function getActiveChord()
+  local activePitches = {}
+  for code, info in pairs(state.pressedKeys or {}) do
+    if type(info) == "table" and not info.isControl and info.pitches then
+      for _, p in ipairs(info.pitches) do
+        table.insert(activePitches, p)
+      end
+    end
+  end
+  return transposer.detectChord(activePitches)
+end
+
+local function updateSingleKeyState(code, pressed, latched, chordName)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
-  safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s);",
-    tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false"))
+  if chordName == nil then
+    chordName = getActiveChord()
+  end
+  local chordParam = chordName and string.format("%q", chordName) or '""'
+  safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s, %s);",
+    tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false", chordParam))
 end
 
 local function updateKeyStepControl(controlId, value, pressed, extra)
@@ -4281,85 +4468,139 @@ local PROPOSED_LAYOUT_MAP = {
     ctrl_opt        = { name = "Rand Rhy",    class = "ctrl-rand",    action = "randomRhythm" },
     ctrl_opt_shift  = { name = "Rand All",    class = "ctrl-rand",    action = "randomAll" },
   },
-  [2] = { -- D (Consolidated Octave)
-    base            = { name = "Oct +",       class = "ctrl-oct",     action = "octaveUp" },
-    shift           = { name = "Oct -",       class = "ctrl-oct",     action = "octaveDown" },
-    opt             = { name = "TopOct +",    class = "ctrl-topoct",  action = "topOctUp" },
-    shift_opt       = { name = "TopOct -",    class = "ctrl-topoct",  action = "topOctDown" },
-    ctrl            = { name = "BotOct +",    class = "ctrl-oct",     action = "botOctUp" },
-    shift_ctrl      = { name = "BotOct -",    class = "ctrl-oct",     action = "botOctDown" },
+  [2] = { -- D (Dedicated Octave Down)
+    base            = { name = "Oct -",       class = "ctrl-oct",     action = "octaveDown" },
+    shift           = { name = "TopOct -",    class = "ctrl-topoct",  action = "topOctDown" },
+    opt             = { name = "BotOct -",    class = "ctrl-oct",     action = "botOctDown" },
+    ctrl            = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    shift_ctrl      = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
     ctrl_opt        = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
     ctrl_opt_shift  = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
   },
-  [3] = { -- F (NEW FREED KEY: Master Arp & Track Loop Lock)
-    base            = { name = "Arp Latch",   class = "ctrl-lock",    action = "arpLatchToggle" },
-    shift           = { name = "Lock Loop",   class = "ctrl-lock",    action = "lockLoop" },
-    opt             = { name = "Lock & Swap", class = "ctrl-lock",    action = "lockAndSwap" },
-    shift_opt       = { name = "Lock 4 Trk",  class = "ctrl-lock",    action = "lockAllTracks" },
-    ctrl            = { name = "Stop Loops",  class = "ctrl-mute",    action = "stopLoops" },
-    shift_ctrl      = { name = "Stop All",    class = "ctrl-mute",    action = "panic" },
-    ctrl_opt        = { name = "Freeze All",  class = "ctrl-lock",    action = "freezeAll" },
-    ctrl_opt_shift  = { name = "Clear All",   class = "ctrl-mute",    action = "resetAll" },
+  [3] = { -- F (Dedicated Octave Up)
+    base            = { name = "Oct +",       class = "ctrl-oct",     action = "octaveUp" },
+    shift           = { name = "TopOct +",    class = "ctrl-topoct",  action = "topOctUp" },
+    opt             = { name = "BotOct +",    class = "ctrl-oct",     action = "botOctUp" },
+    ctrl            = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    shift_ctrl      = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    ctrl_opt        = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
+    ctrl_opt_shift  = { name = "Oct Reset",   class = "ctrl-oct",     action = "octReset" },
   },
-  [5] = { -- G (Consolidated Mode)
-    base            = { name = "Mode +",      class = "ctrl-mode",    action = "modeUp" },
-    shift           = { name = "Mode -",      class = "ctrl-mode",    action = "modeDown" },
-    opt             = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
-    shift_opt       = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
-    ctrl            = { name = "Major",       class = "ctrl-mode",    action = "modeSetMajor" },
-    shift_ctrl      = { name = "Aeolian",     class = "ctrl-mode",    action = "modeSetAeolian" },
-    ctrl_opt        = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+  [5] = { -- G (Dedicated Mode Down)
+    base            = { name = "Mode -",      class = "ctrl-mode",    action = "modeDown" },
+    shift           = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
+    opt             = { name = "Aeolian",     class = "ctrl-mode",    action = "modeSetAeolian" },
+    shift_opt       = { name = "Locrian 🌑",  class = "ctrl-mode",    action = "modeSetLocrian" },
+    ctrl            = { name = "Phrygian",    class = "ctrl-mode",    action = "modeSetPhrygian" },
+    shift_ctrl      = { name = "Dorian",      class = "ctrl-mode",    action = "modeSetDorian" },
+    ctrl_opt        = { name = "Mode -2",     class = "ctrl-mode",    action = "modeStep2Down" },
     ctrl_opt_shift  = { name = "Locrian 🌑",  class = "ctrl-mode",    action = "modeSetLocrian" },
   },
-  [4] = { -- H (Consolidated Root)
-    base            = { name = "Root +",      class = "ctrl-root",    action = "rootUp" },
-    shift           = { name = "Root -",      class = "ctrl-root",    action = "rootDown" },
-    opt             = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
-    shift_opt       = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
-    ctrl            = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
-    shift_ctrl      = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
-    ctrl_opt        = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+  [4] = { -- H (Dedicated Root Down - Vim Left)
+    base            = { name = "Root -",      class = "ctrl-root",    action = "rootDown" },
+    shift           = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
+    opt             = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
+    shift_opt       = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
+    ctrl            = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
+    shift_ctrl      = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
+    ctrl_opt        = { name = "Root -5th",   class = "ctrl-root",    action = "rootFifthDown" },
     ctrl_opt_shift  = { name = "Root -Oct",   class = "ctrl-root",    action = "rootOctaveDown" },
   },
-  [38] = { -- J (Consolidated Transpose)
-    base            = { name = "Trnsp +1",    class = "ctrl-trnsp",   action = "trnspStep1Up" },
-    shift           = { name = "Trnsp -1",    class = "ctrl-trnsp",   action = "trnspStep1Down" },
-    opt             = { name = "Trnsp +2",    class = "ctrl-trnsp",   action = "trnspStep2Up" },
-    shift_opt       = { name = "Trnsp -2",    class = "ctrl-trnsp",   action = "trnspStep2Down" },
-    ctrl_opt        = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
-    ctrl_opt_shift  = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
-    ctrl            = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+  [38] = { -- J (Dedicated Transpose Down - Vim Down)
+    base            = { name = "Trnsp -",     class = "ctrl-trnsp",   action = "trnspStep1Down" },
+    shift           = { name = "Trnsp -2",    class = "ctrl-trnsp",   action = "trnspStep2Down" },
+    opt             = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
+    shift_opt       = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
+    ctrl            = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
     shift_ctrl      = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
+    ctrl_opt        = { name = "Trnsp -3",    class = "ctrl-trnsp",   action = "trnspStep3Down" },
+    ctrl_opt_shift  = { name = "Near Sub ↓",  class = "ctrl-trnsp",   action = "trnspNearSubDown" },
   },
-  [40] = { -- K (NEW FREED KEY: Bottom Row Track Focus & Mute - Tracks 1 & 2)
-    base            = { name = "Bot 1⇄2",     class = "ctrl-track",   action = "botTrackToggle" },
-    shift           = { name = "Bot Lock",    class = "ctrl-lock",    action = "botTrackLock" },
-    opt             = { name = "Trk 1 Mute",  class = "ctrl-mute",    action = "trkMute1" },
-    shift_opt       = { name = "Trk 2 Mute",  class = "ctrl-mute",    action = "trkMute2" },
-    ctrl            = { name = "Trk 1 Solo",  class = "ctrl-solo",    action = "trkSolo1" },
-    shift_ctrl      = { name = "Trk 2 Solo",  class = "ctrl-solo",    action = "trkSolo2" },
-    ctrl_opt        = { name = "Trk 1 Rec",   class = "ctrl-track",   action = "trkRec1" },
-    ctrl_opt_shift  = { name = "Trk 2 Rec",   class = "ctrl-track",   action = "trkRec2" },
+  [40] = { -- K (Dedicated Transpose Up - Vim Up)
+    base            = { name = "Trnsp +",     class = "ctrl-trnsp",   action = "trnspStep1Up" },
+    shift           = { name = "Trnsp +2",    class = "ctrl-trnsp",   action = "trnspStep2Up" },
+    opt             = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
+    shift_opt       = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    ctrl            = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    shift_ctrl      = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
+    ctrl_opt        = { name = "Trnsp +3",    class = "ctrl-trnsp",   action = "trnspStep3Up" },
+    ctrl_opt_shift  = { name = "Near Root ↑", class = "ctrl-trnsp",   action = "trnspNearRootUp" },
   },
-  [37] = { -- L (NEW FREED KEY: Top Row Track Focus & Mute - Tracks 3 & 4)
-    base            = { name = "Top 3⇄4",     class = "ctrl-track",   action = "topTrackToggle" },
-    shift           = { name = "Top Lock",    class = "ctrl-lock",    action = "topTrackLock" },
-    opt             = { name = "Trk 3 Mute",  class = "ctrl-mute",    action = "trkMute3" },
-    shift_opt       = { name = "Trk 4 Mute",  class = "ctrl-mute",    action = "trkMute4" },
-    ctrl            = { name = "Trk 3 Solo",  class = "ctrl-solo",    action = "trkSolo3" },
-    shift_ctrl      = { name = "Trk 4 Solo",  class = "ctrl-solo",    action = "trkSolo4" },
-    ctrl_opt        = { name = "Trk 3 Rec",   class = "ctrl-track",   action = "trkRec3" },
-    ctrl_opt_shift  = { name = "Trk 4 Rec",   class = "ctrl-track",   action = "trkRec4" },
+  [37] = { -- L (Dedicated Root Up - Vim Right)
+    base            = { name = "Root +",      class = "ctrl-root",    action = "rootUp" },
+    shift           = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
+    opt             = { name = "Root = C",    class = "ctrl-root",    action = "rootSetC" },
+    shift_opt       = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+    ctrl            = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
+    shift_ctrl      = { name = "Root = A",    class = "ctrl-root",    action = "rootSetA" },
+    ctrl_opt        = { name = "Root +5th",   class = "ctrl-root",    action = "rootFifthUp" },
+    ctrl_opt_shift  = { name = "Root +Oct",   class = "ctrl-root",    action = "rootOctaveUp" },
   },
-  [41] = { -- ; (NEW FREED KEY: Master Track Selector & Performance Mix)
-    base            = { name = "Trk Focus",   class = "ctrl-track",   action = "trackFocusCycle" },
-    shift           = { name = "All Mute",    class = "ctrl-mute",    action = "allMuteToggle" },
-    opt             = { name = "Top Vol +",   class = "ctrl-vol",     action = "topVolUp" },
-    shift_opt       = { name = "Top Vol -",   class = "ctrl-vol",     action = "topVolDown" },
-    ctrl            = { name = "Bot Vol +",   class = "ctrl-vol",     action = "botVolUp" },
-    shift_ctrl      = { name = "Bot Vol -",   class = "ctrl-vol",     action = "botVolDown" },
-    ctrl_opt        = { name = "Mix Reset",   class = "ctrl-vol",     action = "mixReset" },
-    ctrl_opt_shift  = { name = "Master Mute", class = "ctrl-mute",    action = "allMuteToggle" },
+  [41] = { -- ; (Dedicated Mode Up)
+    base            = { name = "Mode +",      class = "ctrl-mode",    action = "modeUp" },
+    shift           = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
+    opt             = { name = "Major",       class = "ctrl-mode",    action = "modeSetMajor" },
+    shift_opt       = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+    ctrl            = { name = "Mixolydian",  class = "ctrl-mode",    action = "modeSetMixolydian" },
+    shift_ctrl      = { name = "Harmonic",    class = "ctrl-mode",    action = "modeSetHarmonic" },
+    ctrl_opt        = { name = "Mode +2",     class = "ctrl-mode",    action = "modeStep2Up" },
+    ctrl_opt_shift  = { name = "Lydian ☀️",   class = "ctrl-mode",    action = "modeSetLydian" },
+  },
+
+  -- LOWER ROW CONTROLS (Active when KeyStep is connected):
+  [6] = { -- Z
+    base            = { name = "Trk 1: Bass", class = "ctrl-track", action = "trkSelect1" },
+    shift           = { name = "Trk 1 Mute",  class = "ctrl-mute",  action = "trkMute1" },
+    opt             = { name = "Trk 1 Solo",  class = "ctrl-solo",  action = "trkSolo1" },
+    ctrl            = { name = "Trk 1 Arm",   class = "ctrl-track", action = "trkRec1" },
+  },
+  [7] = { -- X
+    base            = { name = "Trk 2: Chd",  class = "ctrl-track", action = "trkSelect2" },
+    shift           = { name = "Trk 2 Mute",  class = "ctrl-mute",  action = "trkMute2" },
+    opt             = { name = "Trk 2 Solo",  class = "ctrl-solo",  action = "trkSolo2" },
+    ctrl            = { name = "Trk 2 Arm",   class = "ctrl-track", action = "trkRec2" },
+  },
+  [8] = { -- C
+    base            = { name = "Trk 3: Lead", class = "ctrl-track", action = "trkSelect3" },
+    shift           = { name = "Trk 3 Mute",  class = "ctrl-mute",  action = "trkMute3" },
+    opt             = { name = "Trk 3 Solo",  class = "ctrl-solo",  action = "trkSolo3" },
+    ctrl            = { name = "Trk 3 Arm",   class = "ctrl-track", action = "trkRec3" },
+  },
+  [9] = { -- V
+    base            = { name = "Trk 4: Arp",  class = "ctrl-track", action = "trkSelect4" },
+    shift           = { name = "Trk 4 Mute",  class = "ctrl-mute",  action = "trkMute4" },
+    opt             = { name = "Trk 4 Solo",  class = "ctrl-solo",  action = "trkSolo4" },
+    ctrl            = { name = "Trk 4 Arm",   class = "ctrl-track", action = "trkRec4" },
+  },
+  [11] = { -- B
+    base            = { name = "Lock Loop",   class = "ctrl-lock",  action = "lockLoop" },
+    shift           = { name = "Lock & Swap", class = "ctrl-lock",  action = "lockAndSwap" },
+    opt             = { name = "Lock 4 Trk",  class = "ctrl-lock",  action = "lockAllTracks" },
+    ctrl            = { name = "Freeze All",  class = "ctrl-lock",  action = "freezeAll" },
+  },
+  [45] = { -- N
+    base            = { name = "Stop Loops",  class = "ctrl-mute",  action = "stopLoops" },
+    shift           = { name = "Stop All",    class = "ctrl-panic", action = "panic" },
+    opt             = { name = "All Mute",    class = "ctrl-mute",  action = "allMuteToggle" },
+    ctrl            = { name = "Reset All",   class = "ctrl-reset", action = "resetAll" },
+  },
+  [46] = { -- M
+    base            = { name = "Vol -",       class = "ctrl-vol",   action = "volDown" },
+    shift           = { name = "BotVol -",    class = "ctrl-vol",   action = "botVolDown" },
+    opt             = { name = "TopVol -",    class = "ctrl-vol",   action = "topVolDown" },
+  },
+  [43] = { -- ,
+    base            = { name = "Vol +",       class = "ctrl-vol",   action = "volUp" },
+    shift           = { name = "BotVol +",    class = "ctrl-vol",   action = "botVolUp" },
+    opt             = { name = "TopVol +",    class = "ctrl-vol",   action = "topVolUp" },
+  },
+  [47] = { -- .
+    base            = { name = "Mod -",       class = "ctrl-modw",  action = "modWheelDown" },
+    shift           = { name = "Rel -",       class = "ctrl-rel",   action = "relDown" },
+  },
+  [44] = { -- /
+    base            = { name = "Mod +",       class = "ctrl-modw",  action = "modWheelUp" },
+    shift           = { name = "Rel +",       class = "ctrl-rel",   action = "relUp" },
   },
   [39] = { -- ' (Chord)
     base            = { name = "Chord",       class = "ctrl-mode",    action = "chordToggle" },
@@ -4807,10 +5048,13 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
 
   -- Overlay Proposed Layout actions and names based on active modifier layer
+  local ksConnected = isKeyStepConnected()
+  local lowerRowCodes = { [6]=true, [7]=true, [8]=true, [9]=true, [11]=true, [45]=true, [46]=true, [43]=true, [47]=true, [44]=true }
   for propCode, layerTable in pairs(PROPOSED_LAYOUT_MAP) do
-    local strCode = tostring(propCode)
-    local layerDef = layerTable[activeLayer] or layerTable.base
-    if layerDef then
+    if not (lowerRowCodes[propCode] and not ksConnected) then
+      local strCode = tostring(propCode)
+      local layerDef = layerTable[activeLayer] or layerTable.base
+      if layerDef then
       keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
       keyUpdates[strCode].displayNote = layerDef.name
       keyUpdates[strCode].note = layerDef.name
@@ -4905,6 +5149,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     end
   end
 
+  local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
+  for codeStr, kUpd in pairs(keyUpdates) do
+    local cNum = tonumber(codeStr)
+    if perTrackCodes[cNum] then
+      kUpd.isPerTrack = true
+    end
+  end
+
   -- Track buttons (keys 18, 19, 20, 21): apply accurate dual-selection, mute, solo, color, audio states, human keypress, and arp step
   local trkKeyMap = { [18] = 1, [19] = 2, [20] = 3, [21] = 4 }
   for kCode, trkId in pairs(trkKeyMap) do
@@ -4947,7 +5199,18 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
+  local activePitches = {}
+  for code, info in pairs(state.pressedKeys or {}) do
+    if type(info) == "table" and not info.isControl and info.pitches then
+      for _, p in ipairs(info.pitches) do
+        table.insert(activePitches, p)
+      end
+    end
+  end
+  local detectedChord = transposer.detectChord(activePitches)
+
   local payload = {
+    detectedChord = detectedChord,
     keystepConnected = isKeyStepConnected(),
     keystepState = _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.getFullState and _G.activeWatchers.keystep.getFullState() or nil,
     activeSurface = state.activeSurface or "qwerty",
@@ -5750,6 +6013,10 @@ local function getScaleGuideInfo(minPitch, maxPitch)
   return harmony.getScaleGuideInfo(state.currentRoot, state.currentScaleIdx, minPitch, maxPitch)
 end
 
+local function detectChord(pitches)
+  return harmony.detectChord(pitches, state.currentRoot, state.currentScaleIdx)
+end
+
 return {
   getEffectiveRowVelocity = getEffectiveRowVelocity,
   getTransposedPitch = getTransposedPitch,
@@ -5758,7 +6025,8 @@ return {
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
   getDiatonicPadChord = getDiatonicPadChord,
-  getScaleGuideInfo = getScaleGuideInfo
+  getScaleGuideInfo = getScaleGuideInfo,
+  detectChord = detectChord
 }
 
 
@@ -6876,8 +7144,8 @@ local HTML_UI_CONTENT = [[
     background-color: #5ea2eb;
     box-shadow: none;
     opacity: 0;
-    /* Slow fade-out so the dot lingers as the note decays */
-    transition: opacity 0.32s ease-out, box-shadow 0.32s ease-out, background-color 0.32s ease-out;
+    /* Zero transition to eliminate WebKit subpixel rasterization shifts during note events */
+    transition: none !important;
     pointer-events: none;
   }
 
@@ -6900,8 +7168,7 @@ local HTML_UI_CONTENT = [[
     opacity: 1.0;
     background-color: #aad6ff;
     box-shadow: 0 0 8px #5ea2eb, 0 0 18px rgba(94, 162, 235, 0.5);
-    /* Fast attack so the dot snaps on with each arp step */
-    transition: opacity 0.04s ease-in, box-shadow 0.04s ease-in, background-color 0.04s ease-in;
+    transition: none !important;
   }
 
   /* Edit Mode & Action Library Drawer Styling */
@@ -8142,7 +8409,7 @@ local HTML_UI_CONTENT = [[
     font-weight: 900 !important;
   }
 
-  /* Scale Guide Key Highlights */
+  /* Scale Guide Key Highlights (Subtle & Non-Intrusive) */
   .keystep-view.scale-guide-active .ks-key-root .ks-key-name {
     color: #eab308 !important;
     font-weight: 900 !important;
@@ -8161,8 +8428,34 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 4px #eab308;
     pointer-events: none;
   }
+  /* In-scale white keys receive a subtle, clean bottom accent pip */
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-in-scale:not(.ks-key-root)::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.7);
+    pointer-events: none;
+  }
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-in-scale .ks-key-name {
+    color: #f1f5f9;
+    font-weight: 700;
+  }
+  /* Out-of-scale keys stay 100% solid & pressable (NEVER dimmed or disabled) */
   .keystep-view.scale-guide-active .ks-key-out-of-scale {
-    opacity: 0.65;
+    opacity: 1 !important;
+  }
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-out-of-scale .ks-key-name {
+    color: #64748b;
+    font-weight: 500;
+  }
+  /* Black keys are function keys: never muted or out-of-scale */
+  .keystep-view.scale-guide-active .ks-key-b.ks-key-out-of-scale {
+    opacity: 1 !important;
   }
 
   /* KeyStep Modal Shift & Performance Styling */
@@ -8246,6 +8539,72 @@ local HTML_UI_CONTENT = [[
     border-color: rgba(100, 116, 139, 0.3);
     background: transparent;
   }
+
+  /* Per-Track Control Keys: ALWAYS use currently selected track's color */
+  .key-pad.per-track-ctrl {
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+  }
+  .key-pad.per-track-ctrl .key-note {
+    color: var(--active-track-color, #00e5ff) !important;
+    font-weight: 700;
+  }
+  .key-pad.per-track-ctrl .key-code {
+    color: rgba(var(--active-track-rgb, 0, 229, 255), 0.75) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active,
+  .key-pad.per-track-ctrl.latch-mode-active,
+  .key-pad.per-track-ctrl.sustain-active,
+  .key-pad.per-track-ctrl.active-toggle {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.22) !important;
+    border-color: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active .key-note,
+  .key-pad.per-track-ctrl.latch-mode-active .key-note,
+  .key-pad.per-track-ctrl.sustain-active .key-note,
+  .key-pad.per-track-ctrl.active-toggle .key-note {
+    color: #ffffff !important;
+    text-shadow: 0 0 8px var(--active-track-color, #00e5ff) !important;
+  }
+
+  /* Header Controls Bound to Active Track */
+  .badge-small.header-per-track,
+  .header-per-track {
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+    color: var(--active-track-color, #00e5ff) !important;
+  }
+
+  /* Live Chord Display (Logic Pro LCD Style) */
+  .chord-display-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(18, 18, 22, 0.95);
+    border: 1px solid rgba(var(--active-track-rgb, 0, 229, 255), 0.45);
+    padding: 3px 8px;
+    border-radius: 6px;
+    min-width: 64px;
+    justify-content: center;
+    cursor: default;
+    user-select: none;
+    transition: none;
+  }
+  .chord-display-badge .chord-icon {
+    font-size: 10px;
+    opacity: 0.7;
+  }
+  .chord-display-badge .chord-name-text {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    color: #ffffff;
+    text-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+  }
+  .chord-display-badge.active-chord {
+    border-color: var(--active-track-color, #00e5ff) !important;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
+    box-shadow: 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -8279,7 +8638,7 @@ local HTML_UI_CONTENT = [[
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <select id="arp-dir-select" class="badge-small" title="Arp Direction">
+      <select id="arp-dir-select" class="badge-small header-per-track" title="Arp Direction (Per Track)">
         <option value="1">UP</option>
         <option value="2">DOWN</option>
         <option value="3">UP-DN</option>
@@ -8288,7 +8647,7 @@ local HTML_UI_CONTENT = [[
         <option value="6">DIV</option>
         <option value="7">RND</option>
       </select>
-      <select id="arp-rate-select" class="badge-small" title="Arp Time Division">
+      <select id="arp-rate-select" class="badge-small header-per-track" title="Arp Time Division (Per Track)">
         <option value="1">4</option>
         <option value="2">2</option>
         <option value="3">1</option>
@@ -8328,6 +8687,10 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
+      <div id="chord-display-badge" class="badge-small chord-display-badge" title="Live Chord Detection (Logic Pro style)">
+        <span class="chord-icon">🎵</span>
+        <span id="chord-name-text" class="chord-name-text">—</span>
+      </div>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="keystep-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Arturia KeyStep 32 Connected">
         <span style="width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.8); display: inline-block;"></span>
@@ -13421,9 +13784,26 @@ local arpAdvancedControlKeysMap = {
 }
 local arpAdvancedNoteKeysMap = {}
 
+local defaultKeyStepLowerRowControls = {
+  [6]  = { key = "Z", name = "Trk 1: Bass", action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [7]  = { key = "X", name = "Trk 2: Chd",  action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [8]  = { key = "C", name = "Trk 3: Lead", action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [9]  = { key = "V", name = "Trk 4: Arp",  action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
+  [11] = { key = "B", name = "Lock Loop",   action = "lockLoop",   shiftAction = "lockAndSwap", shiftName = "Lock & Swap" },
+  [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
+  [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
+  [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
+  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "relDown", shiftName = "Rel -" },
+  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
+}
+
 local function getNoteKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap[code]
+  end
+  local ksConnected = (state.keystepConnected == true)
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return nil
   end
   local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
   if k and k.baseNote ~= nil then return k end
@@ -13433,6 +13813,10 @@ end
 local function getControlKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap[code]
+  end
+  local ksConnected = (state.keystepConnected == true)
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return defaultKeyStepLowerRowControls[code]
   end
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
@@ -13451,15 +13835,20 @@ end
 
 local _cachedActiveNoteKeysMap = nil
 local _cachedActiveControlKeysMap = nil
+local _cachedKsConnected = nil
 
 local function getActiveNoteKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap
   end
-  if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
+  local ksConnected = (state.keystepConnected == true)
+  if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
+  _cachedKsConnected = ksConnected
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  if not ksConnected then
+    for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  end
   for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
   _cachedActiveNoteKeysMap = map
@@ -13470,11 +13859,17 @@ local function getActiveControlKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap
   end
-  if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
+  local ksConnected = (state.keystepConnected == true)
+  if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
+  _cachedKsConnected = ksConnected
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  if ksConnected then
+    for code, k in pairs(defaultKeyStepLowerRowControls) do map[code] = k end
+  else
+    for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  end
   for code, k in pairs(numberRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   _cachedActiveControlKeysMap = map
   return map
@@ -13492,6 +13887,7 @@ return {
   defaultUpperRowKeys = defaultUpperRowKeys,
   defaultLowerRowKeys = defaultLowerRowKeys,
   defaultHomeRowControls = defaultHomeRowControls,
+  defaultKeyStepLowerRowControls = defaultKeyStepLowerRowControls,
   numberRowControls = numberRowControls,
   upperRowKeys = upperRowKeys,
   lowerRowKeys = lowerRowKeys,

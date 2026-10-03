@@ -242,9 +242,177 @@ local function getScaleGuideInfo(root, scaleIdx, minPitch, maxPitch)
   }
 end
 
+local FLAT_NOTE_NAMES = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" }
+local SHARP_NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+
+local function prefersFlats(root, scaleIdx)
+  local r = (root or 0) % 12
+  local s = scaleIdx or 1
+  -- Keys using flats in major: F (5), Bb (10), Eb (3), Ab (8), Db (1), Gb (6)
+  if s == 1 or s == 2 or s == 3 then -- Lydian, Major, Mixolydian
+    if r == 5 or r == 10 or r == 3 or r == 8 or r == 1 or r == 6 then return true end
+  else -- Minor / Dorian / Phrygian / etc.
+    if r == 0 or r == 2 or r == 5 or r == 7 or r == 10 or r == 3 or r == 8 or r == 1 then return true end
+  end
+  return false
+end
+
+local function getContextualNoteName(pitchClass, root, scaleIdx)
+  local useFlats = prefersFlats(root, scaleIdx)
+  local names = useFlats and FLAT_NOTE_NAMES or SHARP_NOTE_NAMES
+  return names[(pitchClass % 12) + 1]
+end
+
+local CHORD_FORMULAS = {
+  -- Triads
+  ["0,4,7"] = { quality = "", name = "Major", score = 100 },
+  ["0,3,7"] = { quality = "m", name = "Minor", score = 100 },
+  ["0,3,6"] = { quality = "dim", name = "Diminished", score = 95 },
+  ["0,4,8"] = { quality = "aug", name = "Augmented", score = 95 },
+  ["0,5,7"] = { quality = "sus4", name = "Sus4", score = 90 },
+  ["0,2,7"] = { quality = "sus2", name = "Sus2", score = 90 },
+
+  -- 7ths
+  ["0,4,7,11"] = { quality = "maj7", name = "Major 7th", score = 110 },
+  ["0,4,7,10"] = { quality = "7", name = "Dominant 7th", score = 110 },
+  ["0,3,7,10"] = { quality = "m7", name = "Minor 7th", score = 110 },
+  ["0,3,6,10"] = { quality = "m7b5", name = "Half Diminished", score = 105 },
+  ["0,3,6,9"]  = { quality = "dim7", name = "Diminished 7th", score = 105 },
+  ["0,3,7,11"] = { quality = "m(maj7)", name = "Minor Major 7th", score = 100 },
+  ["0,4,8,10"] = { quality = "7#5", name = "Augmented 7th", score = 100 },
+  ["0,4,8,11"] = { quality = "maj7#5", name = "Major 7th #5", score = 100 },
+  ["0,4,7,9"]  = { quality = "6", name = "Major 6th", score = 100 },
+  ["0,3,7,9"]  = { quality = "m6", name = "Minor 6th", score = 100 },
+  ["0,2,4,7"]  = { quality = "add9", name = "Add 9", score = 100 },
+  ["0,2,3,7"]  = { quality = "m(add9)", name = "Minor Add 9", score = 100 },
+  ["0,5,7,10"] = { quality = "7sus4", name = "7 Sus4", score = 100 },
+  ["0,2,7,10"] = { quality = "7sus2", name = "7 Sus2", score = 100 },
+
+  -- 9ths
+  ["0,2,4,7,11"] = { quality = "maj9", name = "Major 9th", score = 120 },
+  ["0,2,4,7,10"] = { quality = "9", name = "Dominant 9th", score = 120 },
+  ["0,2,3,7,10"] = { quality = "m9", name = "Minor 9th", score = 120 },
+  ["0,2,4,7,9"]  = { quality = "6/9", name = "6/9", score = 115 },
+  ["0,2,3,7,9"]  = { quality = "m6/9", name = "Minor 6/9", score = 115 },
+  ["0,1,4,7,10"] = { quality = "7b9", name = "7b9", score = 115 },
+  ["0,3,4,7,10"] = { quality = "7#9", name = "7#9", score = 115 },
+
+  -- Incomplete 7ths (no 5th)
+  ["0,4,10"] = { quality = "7(no5)", name = "7 (no 5)", score = 80 },
+  ["0,4,11"] = { quality = "maj7(no5)", name = "maj7 (no 5)", score = 80 },
+  ["0,3,10"] = { quality = "m7(no5)", name = "m7 (no 5)", score = 80 },
+
+  -- Dyads / 2-note
+  ["0,7"] = { quality = "5", name = "Power 5th", score = 70 },
+  ["0,4"] = { quality = "(no5)", name = "Major 3rd", score = 60 },
+  ["0,3"] = { quality = "m(no5)", name = "Minor 3rd", score = 60 },
+  ["0,5"] = { quality = "sus4(no5)", name = "4th", score = 55 },
+  ["0,2"] = { quality = "sus2(no5)", name = "2nd", score = 55 },
+  ["0,10"] = { quality = "7(no5)", name = "b7", score = 60 },
+  ["0,11"] = { quality = "maj7(no5)", name = "7", score = 60 }
+}
+
+local function detectChord(pitches, root, scaleIdx)
+  if not pitches or #pitches == 0 then return "" end
+
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local inScaleMap = {}
+  for _, intv in ipairs(scale.intervals) do
+    inScaleMap[(root + intv) % 12] = true
+  end
+
+  local sortedPitches = {}
+  for _, p in ipairs(pitches) do
+    if type(p) == "number" then table.insert(sortedPitches, p) end
+  end
+  if #sortedPitches == 0 then return "" end
+  table.sort(sortedPitches)
+
+  local bassPitch = sortedPitches[1]
+  local bassPC = bassPitch % 12
+  local bassName = getContextualNoteName(bassPC, root, scaleIdx)
+
+  local uniquePCs = {}
+  local pcPresent = {}
+  for _, p in ipairs(sortedPitches) do
+    local pc = p % 12
+    if not pcPresent[pc] then
+      pcPresent[pc] = true
+      table.insert(uniquePCs, pc)
+    end
+  end
+
+  if #uniquePCs == 1 then
+    return bassName
+  end
+
+  local bestScore = -9999
+  local bestChord = nil
+
+  for _, candidateRoot in ipairs(uniquePCs) do
+    local intervals = {}
+    for _, pc in ipairs(uniquePCs) do
+      table.insert(intervals, (pc - candidateRoot + 12) % 12)
+    end
+    table.sort(intervals)
+    local key = table.concat(intervals, ",")
+
+    local formula = CHORD_FORMULAS[key]
+    if formula then
+      local score = formula.score or 50
+
+      -- Bonus: Root is in the bass
+      if candidateRoot == bassPC then
+        score = score + 30
+      end
+
+      -- Bonus: Root is in the active musical scale
+      if inScaleMap[candidateRoot] then
+        score = score + 20
+      end
+
+      -- Bonus: Root matches active key root
+      if candidateRoot == root then
+        score = score + 15
+      end
+
+      if score > bestScore then
+        bestScore = score
+        bestChord = {
+          root = candidateRoot,
+          quality = formula.quality,
+          name = formula.name,
+          bass = bassPC
+        }
+      end
+    end
+  end
+
+  if not bestChord then
+    -- Fallback: return bass note or interval
+    if #uniquePCs == 2 then
+      local intv = (uniquePCs[2] - uniquePCs[1] + 12) % 12
+      return bassName .. " (+" .. intv .. ")"
+    end
+    return bassName
+  end
+
+  local chordRootName = getContextualNoteName(bestChord.root, root, scaleIdx)
+  local chordStr = chordRootName .. bestChord.quality
+  if bestChord.bass ~= bestChord.root then
+    chordStr = chordStr .. "/" .. bassName
+  end
+
+  return chordStr
+end
+
 return {
   SCALES = SCALES,
   NOTE_NAMES = NOTE_NAMES,
+  FLAT_NOTE_NAMES = FLAT_NOTE_NAMES,
+  SHARP_NOTE_NAMES = SHARP_NOTE_NAMES,
   WHITE_KEY_INDEX = WHITE_KEY_INDEX,
   CHORDS = CHORDS,
   noteNumToName = noteNumToName,
@@ -253,6 +421,9 @@ return {
   getTransposedChordPitches = getTransposedChordPitches,
   getChordPitches = getTransposedChordPitches,
   getDiatonicPadChord = getDiatonicPadChord,
-  getScaleGuideInfo = getScaleGuideInfo
+  getScaleGuideInfo = getScaleGuideInfo,
+  detectChord = detectChord,
+  getContextualNoteName = getContextualNoteName,
+  prefersFlats = prefersFlats
 }
 

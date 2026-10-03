@@ -1109,8 +1109,8 @@ local HTML_UI_CONTENT = [[
     background-color: #5ea2eb;
     box-shadow: none;
     opacity: 0;
-    /* Slow fade-out so the dot lingers as the note decays */
-    transition: opacity 0.32s ease-out, box-shadow 0.32s ease-out, background-color 0.32s ease-out;
+    /* Zero transition to eliminate WebKit subpixel rasterization shifts during note events */
+    transition: none !important;
     pointer-events: none;
   }
 
@@ -1133,8 +1133,7 @@ local HTML_UI_CONTENT = [[
     opacity: 1.0;
     background-color: #aad6ff;
     box-shadow: 0 0 8px #5ea2eb, 0 0 18px rgba(94, 162, 235, 0.5);
-    /* Fast attack so the dot snaps on with each arp step */
-    transition: opacity 0.04s ease-in, box-shadow 0.04s ease-in, background-color 0.04s ease-in;
+    transition: none !important;
   }
 
   /* Edit Mode & Action Library Drawer Styling */
@@ -2375,7 +2374,7 @@ local HTML_UI_CONTENT = [[
     font-weight: 900 !important;
   }
 
-  /* Scale Guide Key Highlights */
+  /* Scale Guide Key Highlights (Subtle & Non-Intrusive) */
   .keystep-view.scale-guide-active .ks-key-root .ks-key-name {
     color: #eab308 !important;
     font-weight: 900 !important;
@@ -2394,8 +2393,34 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 4px #eab308;
     pointer-events: none;
   }
+  /* In-scale white keys receive a subtle, clean bottom accent pip */
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-in-scale:not(.ks-key-root)::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.7);
+    pointer-events: none;
+  }
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-in-scale .ks-key-name {
+    color: #f1f5f9;
+    font-weight: 700;
+  }
+  /* Out-of-scale keys stay 100% solid & pressable (NEVER dimmed or disabled) */
   .keystep-view.scale-guide-active .ks-key-out-of-scale {
-    opacity: 0.65;
+    opacity: 1 !important;
+  }
+  .keystep-view.scale-guide-active .ks-key-w.ks-key-out-of-scale .ks-key-name {
+    color: #64748b;
+    font-weight: 500;
+  }
+  /* Black keys are function keys: never muted or out-of-scale */
+  .keystep-view.scale-guide-active .ks-key-b.ks-key-out-of-scale {
+    opacity: 1 !important;
   }
 
   /* KeyStep Modal Shift & Performance Styling */
@@ -2479,6 +2504,72 @@ local HTML_UI_CONTENT = [[
     border-color: rgba(100, 116, 139, 0.3);
     background: transparent;
   }
+
+  /* Per-Track Control Keys: ALWAYS use currently selected track's color */
+  .key-pad.per-track-ctrl {
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+  }
+  .key-pad.per-track-ctrl .key-note {
+    color: var(--active-track-color, #00e5ff) !important;
+    font-weight: 700;
+  }
+  .key-pad.per-track-ctrl .key-code {
+    color: rgba(var(--active-track-rgb, 0, 229, 255), 0.75) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active,
+  .key-pad.per-track-ctrl.latch-mode-active,
+  .key-pad.per-track-ctrl.sustain-active,
+  .key-pad.per-track-ctrl.active-toggle {
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.22) !important;
+    border-color: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active .key-note,
+  .key-pad.per-track-ctrl.latch-mode-active .key-note,
+  .key-pad.per-track-ctrl.sustain-active .key-note,
+  .key-pad.per-track-ctrl.active-toggle .key-note {
+    color: #ffffff !important;
+    text-shadow: 0 0 8px var(--active-track-color, #00e5ff) !important;
+  }
+
+  /* Header Controls Bound to Active Track */
+  .badge-small.header-per-track,
+  .header-per-track {
+    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+    color: var(--active-track-color, #00e5ff) !important;
+  }
+
+  /* Live Chord Display (Logic Pro LCD Style) */
+  .chord-display-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(18, 18, 22, 0.95);
+    border: 1px solid rgba(var(--active-track-rgb, 0, 229, 255), 0.45);
+    padding: 3px 8px;
+    border-radius: 6px;
+    min-width: 64px;
+    justify-content: center;
+    cursor: default;
+    user-select: none;
+    transition: none;
+  }
+  .chord-display-badge .chord-icon {
+    font-size: 10px;
+    opacity: 0.7;
+  }
+  .chord-display-badge .chord-name-text {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    color: #ffffff;
+    text-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+  }
+  .chord-display-badge.active-chord {
+    border-color: var(--active-track-color, #00e5ff) !important;
+    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
+    box-shadow: 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -2512,7 +2603,7 @@ local HTML_UI_CONTENT = [[
         </div>
         <div id="mode-name" class="mode-name-label">Major / Ionian</div>
       </div>
-      <select id="arp-dir-select" class="badge-small" title="Arp Direction">
+      <select id="arp-dir-select" class="badge-small header-per-track" title="Arp Direction (Per Track)">
         <option value="1">UP</option>
         <option value="2">DOWN</option>
         <option value="3">UP-DN</option>
@@ -2521,7 +2612,7 @@ local HTML_UI_CONTENT = [[
         <option value="6">DIV</option>
         <option value="7">RND</option>
       </select>
-      <select id="arp-rate-select" class="badge-small" title="Arp Time Division">
+      <select id="arp-rate-select" class="badge-small header-per-track" title="Arp Time Division (Per Track)">
         <option value="1">4</option>
         <option value="2">2</option>
         <option value="3">1</option>
@@ -2561,6 +2652,10 @@ local HTML_UI_CONTENT = [[
         <button id="bpm-up" class="bpm-arrow-btn">&#9652;</button>
       </div>
       <button id="logic-sync-btn" class="badge-small" title="Sync BPM to active Logic Pro session">SYNC: ON</button>
+      <div id="chord-display-badge" class="badge-small chord-display-badge" title="Live Chord Detection (Logic Pro style)">
+        <span class="chord-icon">🎵</span>
+        <span id="chord-name-text" class="chord-name-text">—</span>
+      </div>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="keystep-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Arturia KeyStep 32 Connected">
         <span style="width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.8); display: inline-block;"></span>

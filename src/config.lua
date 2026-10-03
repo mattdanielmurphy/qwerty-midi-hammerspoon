@@ -656,9 +656,26 @@ local arpAdvancedControlKeysMap = {
 }
 local arpAdvancedNoteKeysMap = {}
 
+local defaultKeyStepLowerRowControls = {
+  [6]  = { key = "Z", name = "Trk 1: Bass", action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [7]  = { key = "X", name = "Trk 2: Chd",  action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [8]  = { key = "C", name = "Trk 3: Lead", action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [9]  = { key = "V", name = "Trk 4: Arp",  action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
+  [11] = { key = "B", name = "Lock Loop",   action = "lockLoop",   shiftAction = "lockAndSwap", shiftName = "Lock & Swap" },
+  [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
+  [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
+  [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
+  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "relDown", shiftName = "Rel -" },
+  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
+}
+
 local function getNoteKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap[code]
+  end
+  local ksConnected = (state.keystepConnected == true)
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return nil
   end
   local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
   if k and k.baseNote ~= nil then return k end
@@ -668,6 +685,10 @@ end
 local function getControlKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap[code]
+  end
+  local ksConnected = (state.keystepConnected == true)
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return defaultKeyStepLowerRowControls[code]
   end
   local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
   if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
@@ -686,15 +707,20 @@ end
 
 local _cachedActiveNoteKeysMap = nil
 local _cachedActiveControlKeysMap = nil
+local _cachedKsConnected = nil
 
 local function getActiveNoteKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap
   end
-  if _cachedActiveNoteKeysMap then return _cachedActiveNoteKeysMap end
+  local ksConnected = (state.keystepConnected == true)
+  if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
+  _cachedKsConnected = ksConnected
   local map = {}
   for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  if not ksConnected then
+    for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  end
   for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
   for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
   _cachedActiveNoteKeysMap = map
@@ -705,11 +731,17 @@ local function getActiveControlKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap
   end
-  if _cachedActiveControlKeysMap then return _cachedActiveControlKeysMap end
+  local ksConnected = (state.keystepConnected == true)
+  if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
+  _cachedKsConnected = ksConnected
   local map = {}
   for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  if ksConnected then
+    for code, k in pairs(defaultKeyStepLowerRowControls) do map[code] = k end
+  else
+    for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  end
   for code, k in pairs(numberRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
   _cachedActiveControlKeysMap = map
   return map
@@ -727,6 +759,7 @@ return {
   defaultUpperRowKeys = defaultUpperRowKeys,
   defaultLowerRowKeys = defaultLowerRowKeys,
   defaultHomeRowControls = defaultHomeRowControls,
+  defaultKeyStepLowerRowControls = defaultKeyStepLowerRowControls,
   numberRowControls = numberRowControls,
   upperRowKeys = upperRowKeys,
   lowerRowKeys = lowerRowKeys,
