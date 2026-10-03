@@ -709,24 +709,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     if MODE_NOTES[metadata.note] and (metadata.velocity <= SEQUENCE_MARKER_VELOCITY or metadata.note >= 120) then
       handleSequenceNote(metadata.note, metadata.channel, timestamp)
     else
-      if state.playing then
-        local pulses = state.clocksSinceLastNote or 0
-        state.clocksSinceLastNote = 0
-        table.insert(state.sequenceHistory, {
-          note = metadata.note,
-          channel = metadata.channel,
-          time = timestamp,
-          pulses = pulses
-        })
-        while #state.sequenceHistory > MAX_SEQUENCE_HISTORY do
-          table.remove(state.sequenceHistory, 1)
-        end
-        if pulses and pulses >= 2 and pulses <= 36 then
-          local div = nearestDivisionByPulses(pulses)
-          if div then setDivision(div) end
-        end
-      end
-
+      -- Manual performance notes: strictly excluded from sequencer detection & Time Div inference
       local pitchClass = metadata.note % 12
       local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
 
@@ -774,7 +757,9 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
       end
     end
   elseif commandType == "noteOff" or (commandType == "noteOn" and (metadata.velocity or 0) == 0) then
-    if not MODE_NOTES[metadata.note] then
+    local isMarker = (metadata.note >= 120 and metadata.note <= 127 and MODE_NOTES[metadata.note] ~= nil) or
+                     (metadata.note >= 108 and metadata.note <= 115 and MODE_NOTES[metadata.note] ~= nil and state.heldWhiteKeys[metadata.note] == nil and state.activeKeys[metadata.note] == nil)
+    if not isMarker then
       local pitchClass = metadata.note % 12
       local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
 
@@ -932,9 +917,13 @@ function KeyStep.analyzeSequenceAndInferKnobs()
     -- 3. Time Division Knob from recent note pulse deltas
     local pulseDeltas = {}
     for i = 1, #state.sequenceHistory do
-      local p = state.sequenceHistory[i].pulses
-      if p and p >= 2 and p <= 48 then
-        table.insert(pulseDeltas, p)
+      local item = state.sequenceHistory[i]
+      -- Exclude manual performance notes; only evaluate sequencer marker notes
+      if item and (item.note >= 120 or (MODE_NOTES[item.note] and item.note >= 108)) then
+        local p = item.pulses
+        if p and p >= 2 and p <= 48 then
+          table.insert(pulseDeltas, p)
+        end
       end
     end
 

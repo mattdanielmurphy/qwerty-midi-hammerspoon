@@ -155,3 +155,16 @@ test("immediately recalls last known knob positions and analyzes sequence to inf
   expect(source).toContain("KeyStep.getFullState");
   expect(source).toContain("KeyStep.syncToHud");
 });
+
+test("strictly excludes manual performance keys from sequencer detection, sequence history, and Time Div inference", () => {
+  // 1. In noteOn: manual notes must NOT be inserted into sequenceHistory, calculate pulses, or change Time Div
+  expect(source).toContain("Manual performance notes: strictly excluded from sequencer detection & Time Div inference");
+  expect(source).not.toMatch(/else\s+if state\.playing then\s+local pulses = state\.clocksSinceLastNote/);
+
+  // 2. In noteOff: manual keys (including high playable keys) must NOT be swallowed as marker notes
+  expect(source).toContain("state.heldWhiteKeys[metadata.note] == nil and state.activeKeys[metadata.note] == nil");
+
+  // 3. In analyzeSequenceAndInferKnobs: only actual sequence marker notes contribute to pulse intervals
+  expect(source).toContain("if item and (item.note >= 120 or (MODE_NOTES[item.note] and item.note >= 108)) then");
+});
+
