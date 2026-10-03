@@ -140,12 +140,12 @@ test("setup guide advances only on inbound transport and resets on stop or disco
   expect(source).toContain('sendToHud("setup_guide", 1, s.setupGuideStep ~= "hidden", { step = s.setupGuideStep })');
 });
 
-test("provides black-key modal shift mapping across Cutoff, Reverb, Delay, Release, and Envelope", () => {
+test("provides black-key modal shift mapping across Cutoff, Reverb, Delay, Attack, and Decay", () => {
   expect(source).toContain('[1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74');
   expect(source).toContain('[3]  = { id = "reverb",  label = "REVERB",  cc = 91');
   expect(source).toContain('[6]  = { id = "delay",   label = "DELAY",   cc = 92');
-  expect(source).toContain('[8]  = { id = "release", label = "RELEASE", cc = 72');
-  expect(source).toContain('[10] = { id = "envelope", label = "ADSR", cc = 24');
+  expect(source).toContain('[8]  = { id = "attack",  label = "ATTACK",  cc = 24');
+  expect(source).toContain('[10] = { id = "decay",   label = "DECAY",   cc = 25');
   expect(source).toContain("getActiveShiftModeDef");
   expect(source).toContain("sendShiftModeToHud");
 });

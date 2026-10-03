@@ -2966,15 +2966,8 @@ local SHIFT_MODES = {
   [1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74, default = 100, color = "#00e5ff", desc = "Filter Cutoff" },
   [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
   [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
-  [8]  = { id = "release", label = "RELEASE", cc = 72, default = 40,  color = "#00e676", desc = "Synth Release" },
-  [10] = { id = "envelope", label = "ADSR", cc = 24, default = 64, color = "#ffd700", desc = "Envelope Stage" },
-}
-
-local ENVELOPE_STAGES = {
-  { id = "attack", label = "ATTACK", cc = 24, default = 0 },
-  { id = "decay", label = "DECAY", cc = 25, default = 64 },
-  { id = "sustain", label = "SUSTAIN", cc = 26, default = 100 },
-  { id = "release", label = "RELEASE", cc = 27, default = 40 },
+  [8]  = { id = "attack",  label = "ATTACK",  cc = 24, default = 0,   color = "#00e676", desc = "Envelope Attack" },
+  [10] = { id = "decay",   label = "DECAY",   cc = 25, default = 64,  color = "#ffd700", desc = "Envelope Decay & Tail" },
 }
 
 local KeyStep = {}
@@ -3152,34 +3145,33 @@ end
 
 local function getFocusedTrack()
   local s = _G.activeWatchers and _G.activeWatchers.state
-  local id = s and tonumber(s.activeTrack)
-  local trk = s and s.tracks and s.tracks[id or -1]
+  local id = s and (tonumber(s.bottomRowTrack) or 1)
+  local trk = s and s.tracks and s.tracks[id or 1]
   return trk, id
 end
 
 local function currentParamValues()
-  local _, trackId = getFocusedTrack()
+  local trk, trackId = getFocusedTrack()
   if not trackId then return state.paramValues end
   if not state.trackParamValues[trackId] then
     local values = {}
     for _, def in pairs(SHIFT_MODES) do values[def.id] = def.default end
-    for _, stage in ipairs(ENVELOPE_STAGES) do values[stage.id] = stage.default end
     values.modwheel = 0
     state.trackParamValues[trackId] = values
   end
-  return state.trackParamValues[trackId]
+  local values = state.trackParamValues[trackId]
+  if trk then
+    if trk.attack ~= nil then values.attack = trk.attack end
+    if trk.decay ~= nil then values.decay = trk.decay end
+    if trk.volume ~= nil then values.volume = trk.volume end
+  end
+  return values
 end
 
 local function effectiveShiftAssignment(modeDef)
   if not modeDef then
     local values = currentParamValues()
     return { cc = 1, label = "MOD", color = "#a0a0ab", value = values.modwheel or 0 }
-  end
-  if modeDef.id == "envelope" then
-    local stage = ENVELOPE_STAGES[state.envelopeStageIdx] or ENVELOPE_STAGES[1]
-    local values = currentParamValues()
-    return { cc = stage.cc, label = stage.label, color = modeDef.color,
-      value = values[stage.id] or state.paramValues[stage.id] or stage.default, stage = stage.id }
   end
   local values = currentParamValues()
   return { cc = modeDef.cc, label = modeDef.label, color = modeDef.color,
@@ -3310,6 +3302,29 @@ local function sendCC(controller, value, channel)
     controllerValue = value,
     channel = channel or config.outputChannel,
   })
+end
+
+local function dispatchShiftCC(shiftDef, ccVal)
+  local assignment = effectiveShiftAssignment(shiftDef)
+  state.shiftControlTweaked = true
+  currentParamValues()[shiftDef.id] = ccVal
+  state.paramValues[shiftDef.id] = ccVal
+  local trk = getFocusedTrack()
+  local ch = getOutputChannel()
+  if shiftDef.id == "decay" then
+    if trk then trk.decay = ccVal end
+    sendCC(25, ccVal, ch)
+    sendCC(26, ccVal, ch)
+    sendCC(27, ccVal, ch)
+    sendCC(72, ccVal, ch)
+  elseif shiftDef.id == "attack" then
+    if trk then trk.attack = ccVal end
+    sendCC(24, ccVal, ch)
+    sendCC(73, ccVal, ch)
+  else
+    sendCC(assignment.cc, ccVal, ch)
+  end
+  return assignment
 end
 
 local lastRateCcValue = nil
@@ -3462,7 +3477,12 @@ local function setRate(rateVal)
   else
     local volCcVal = rateToVolumeCc(roundedRate)
     sendRateCc(roundedRate)
-    -- Synchronize Master Volume with QWERTY MIDI engine
+    -- Synchronize Volume with QWERTY MIDI engine
+    local trk = getFocusedTrack()
+    if trk then
+      trk.volume = volCcVal
+      sendCC(7, volCcVal, getOutputChannel())
+    end
     if _G.activeWatchers and _G.activeWatchers.state then
       _G.activeWatchers.state.bottomRowVolume = volCcVal
     end
@@ -3696,12 +3716,8 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     state.pitchBend = pitchVal
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
       local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-      state.paramValues[assignment.stage or shiftDef.id] = ccVal
-      sendCC(assignment.cc, ccVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
       sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
       sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     elseif outputDevice then
@@ -3715,11 +3731,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     if ccNum == 1 then
       local shiftDef = getActiveShiftModeDef()
       if shiftDef then
-        state.shiftControlTweaked = true
-        local assignment = effectiveShiftAssignment(shiftDef)
-        currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-        state.paramValues[assignment.stage or shiftDef.id] = ccVal
-        sendCC(assignment.cc, ccVal, getOutputChannel())
+        local assignment = dispatchShiftCC(shiftDef, ccVal)
         sendToHud("mod_wheel", ccVal, true, {
           cc = assignment.cc,
           value = ccVal,
@@ -3834,11 +3846,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           state.shiftPressTimes[metadata.note] = nil
           state.heldShiftKeys[metadata.note] = nil
           local anotherHeld = next(state.shiftPressTimes) ~= nil
-          if modeDef.id == "envelope" and duration < 0.28 and not state.shiftControlTweaked and not anotherHeld then
-            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
-            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
-            state.latchedShiftMode = "envelope"
-          elseif not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
+          if not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
             if state.latchedShiftMode == modeDef.id then state.latchedShiftMode = nil
             else state.latchedShiftMode = modeDef.id end
           end
@@ -4138,12 +4146,7 @@ function KeyStep.handleGuiAction(actionType, data)
         -- Black key clicked on GUI: toggle latch mode!
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef and isDown then
-          if modeDef.id == "envelope" then
-            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
-            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
-            state.latchedShiftMode = "envelope"
-            state.activeShiftMode = "envelope"
-          elseif state.latchedShiftMode == modeDef.id then
+          if state.latchedShiftMode == modeDef.id then
             state.latchedShiftMode = nil
             state.activeShiftMode = nil
           else
@@ -4193,12 +4196,8 @@ function KeyStep.handleGuiAction(actionType, data)
     state.pitchBend = pitchVal
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
       local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-      state.paramValues[assignment.stage or shiftDef.id] = ccVal
-      sendCC(assignment.cc, ccVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
       sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
       sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     elseif outputDevice then
@@ -4209,11 +4208,7 @@ function KeyStep.handleGuiAction(actionType, data)
     local modVal = tonumber(data.value) or 0
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = modVal
-      state.paramValues[assignment.stage or shiftDef.id] = modVal
-      sendCC(assignment.cc, modVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, modVal)
       sendToHud("mod_wheel", modVal, true, { cc = assignment.cc, value = modVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     else
       state.modWheel = modVal
@@ -4824,11 +4819,11 @@ local PROPOSED_LAYOUT_MAP = {
   },
   [47] = { -- .
     base            = { name = "Mod -",       class = "ctrl-modw",  action = "modWheelDown" },
-    shift           = { name = "Rel -",       class = "ctrl-rel",   action = "relDown" },
+    shift           = { name = "Dec -",       class = "ctrl-dec",   action = "decDown" },
   },
   [44] = { -- /
     base            = { name = "Mod +",       class = "ctrl-modw",  action = "modWheelUp" },
-    shift           = { name = "Rel +",       class = "ctrl-rel",   action = "relUp" },
+    shift           = { name = "Dec +",       class = "ctrl-dec",   action = "decUp" },
   },
   [39] = { -- ' (Chord)
     base            = { name = "Chord",       class = "ctrl-mode",    action = "chordToggle" },
@@ -4923,18 +4918,18 @@ local PROPOSED_LAYOUT_MAP = {
     ctrl_opt_shift  = { name = "Clock x2",    class = "ctrl-bpm",     action = "clockMul2" },
   },
   [25] = { -- 9
-    base            = { name = "Rel +",       class = "ctrl-rel",     action = "relUp" },
-    shift           = { name = "Rel -",       class = "ctrl-rel",     action = "relDown" },
-    opt             = { name = "Rel Max",     class = "ctrl-rel",     action = "relMax" },
-    shift_opt       = { name = "Rel Min",     class = "ctrl-rel",     action = "relMin" },
-    ctrl            = { name = "Rel Default", class = "ctrl-rel",     action = "relDefault" },
-    shift_ctrl      = { name = "Rel 50%",     class = "ctrl-rel",     action = "rel50" },
-    ctrl_opt        = { name = "Rel 75%",     class = "ctrl-rel",     action = "rel75" },
-    ctrl_opt_shift  = { name = "Rel 25%",     class = "ctrl-rel",     action = "rel25" },
+    base            = { name = "Atk -",       class = "ctrl-atk",     action = "atkDown" },
+    shift           = { name = "Dec -",       class = "ctrl-dec",     action = "decDown" },
+    opt             = { name = "Atk +",       class = "ctrl-atk",     action = "atkUp" },
+    shift_opt       = { name = "Dec +",       class = "ctrl-dec",     action = "decUp" },
+    ctrl            = { name = "Atk Def",     class = "ctrl-atk",     action = "atkDefault" },
+    shift_ctrl      = { name = "Atk 50%",     class = "ctrl-atk",     action = "atk50" },
+    ctrl_opt        = { name = "Atk 75%",     class = "ctrl-atk",     action = "atk75" },
+    ctrl_opt_shift  = { name = "Atk 25%",     class = "ctrl-atk",     action = "atk25" },
   },
   [29] = { -- 0
-    base            = { name = "Vol +",       class = "ctrl-vol",     action = "volUp" },
-    shift           = { name = "Vol -",       class = "ctrl-vol",     action = "volDown" },
+    base            = { name = "Atk +",       class = "ctrl-atk",     action = "atkUp" },
+    shift           = { name = "Dec +",       class = "ctrl-dec",     action = "decUp" },
     opt             = { name = "Mod CC1 +",   class = "ctrl-modw",    action = "modWheelUp" },
     shift_opt       = { name = "Mod CC1 -",   class = "ctrl-modw",    action = "modWheelDown" },
     ctrl            = { name = "Vol 100%",    class = "ctrl-vol",     action = "vol100" },
@@ -5091,8 +5086,12 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
   local statusStr = table.concat(statusParts, "  •  ")
 
-  local botOctNum = math.floor((octVal + (tonumber(state.bottomRowOctaveOffset) or 0)) / 12)
-  local topOctNum = math.floor((octVal + (tonumber(state.topRowOctaveOffset) or 0) + 12) / 12)
+  local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+  local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+  local botOctOffset = botTrk and botTrk.octaveOffset or (tonumber(state.bottomRowOctaveOffset) or 0)
+  local topOctOffset = topTrk and topTrk.octaveOffset or (tonumber(state.topRowOctaveOffset) or 12)
+  local botOctNum = math.floor((octVal + botOctOffset) / 12)
+  local topOctNum = math.floor((octVal + topOctOffset) / 12)
   local topOctaveStr = (topOctNum >= 0 and "+" or "") .. topOctNum
   local bottomOctaveStr = (botOctNum >= 0 and "+" or "") .. botOctNum
 
@@ -5105,7 +5104,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeDown = "ctrl-mode", modeUp = "ctrl-mode",
     octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
     topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
+    botOctDown = "ctrl-oct", botOctUp = "ctrl-oct",
     topVolDown = "ctrl-vol", topVolUp = "ctrl-vol",
+    botVolDown = "ctrl-vol", botVolUp = "ctrl-vol",
     modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
     volDown = "ctrl-vol", volUp = "ctrl-vol",
     
@@ -5113,6 +5114,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
     arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
     arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
+    atkDown = "ctrl-atk", atkUp = "ctrl-atk",
+    decDown = "ctrl-dec", decUp = "ctrl-dec",
     relDown = "ctrl-rel", relUp = "ctrl-rel", releaseDown = "ctrl-rel", releaseUp = "ctrl-rel",
     bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
     zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
@@ -5512,6 +5515,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [1] = {
         id = 1, name = "Bass", channel = 0, color = "#00e5ff",
         selected = (state.bottomRowTrack == 1),
+        volume = state.tracks and state.tracks[1] and state.tracks[1].volume or 100,
+        octaveOffset = state.tracks and state.tracks[1] and state.tracks[1].octaveOffset or 0,
+        attack = state.tracks and state.tracks[1] and state.tracks[1].attack or 0,
+        decay = state.tracks and state.tracks[1] and state.tracks[1].decay or 64,
         muted = state.tracks and state.tracks[1] and state.tracks[1].muted == true or false,
         soloed = state.tracks and state.tracks[1] and state.tracks[1].soloed == true or false,
         activeAudio = false,
@@ -5521,6 +5528,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [2] = {
         id = 2, name = "Chords", channel = 1, color = "#ff9100",
         selected = (state.bottomRowTrack == 2),
+        volume = state.tracks and state.tracks[2] and state.tracks[2].volume or 100,
+        octaveOffset = state.tracks and state.tracks[2] and state.tracks[2].octaveOffset or 0,
+        attack = state.tracks and state.tracks[2] and state.tracks[2].attack or 0,
+        decay = state.tracks and state.tracks[2] and state.tracks[2].decay or 64,
         muted = state.tracks and state.tracks[2] and state.tracks[2].muted == true or false,
         soloed = state.tracks and state.tracks[2] and state.tracks[2].soloed == true or false,
         activeAudio = false,
@@ -5530,6 +5541,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [3] = {
         id = 3, name = "Lead", channel = 2, color = "#00e676",
         selected = (state.topRowTrack == 3),
+        volume = state.tracks and state.tracks[3] and state.tracks[3].volume or 100,
+        octaveOffset = state.tracks and state.tracks[3] and state.tracks[3].octaveOffset or 12,
+        attack = state.tracks and state.tracks[3] and state.tracks[3].attack or 0,
+        decay = state.tracks and state.tracks[3] and state.tracks[3].decay or 64,
         muted = state.tracks and state.tracks[3] and state.tracks[3].muted == true or false,
         soloed = state.tracks and state.tracks[3] and state.tracks[3].soloed == true or false,
         activeAudio = false,
@@ -5539,6 +5554,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [4] = {
         id = 4, name = "Arp", channel = 3, color = "#d500f9",
         selected = (state.topRowTrack == 4),
+        volume = state.tracks and state.tracks[4] and state.tracks[4].volume or 100,
+        octaveOffset = state.tracks and state.tracks[4] and state.tracks[4].octaveOffset or 12,
+        attack = state.tracks and state.tracks[4] and state.tracks[4].attack or 0,
+        decay = state.tracks and state.tracks[4] and state.tracks[4].decay or 64,
         muted = state.tracks and state.tracks[4] and state.tracks[4].muted == true or false,
         soloed = state.tracks and state.tracks[4] and state.tracks[4].soloed == true or false,
         activeAudio = false,
@@ -5585,8 +5604,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
-    topVolPercent = math.floor((state.topRowVolume / 127) * 100),
-    bottomVolPercent = math.floor((state.bottomRowVolume / 127) * 100),
+    topVolPercent = math.floor(((topTrk and topTrk.volume or state.topRowVolume or 100) / 127) * 100),
+    bottomVolPercent = math.floor(((botTrk and botTrk.volume or state.bottomRowVolume or 100) / 127) * 100),
     effectiveTopVolPercent = math.floor((transposer.getEffectiveRowVelocity(true) / 127) * 100),
     modeFrac = modeFrac,
     modWheel = modVal,
@@ -6208,9 +6227,18 @@ local function fastUpdateArpNow()
     end
   end
 
-  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s);",
+  local bottomArpPitches = {}
+  local botTrkId = state.bottomRowTrack or 1
+  if currentArpPitches[botTrkId] then
+    for p in pairs(currentArpPitches[botTrkId]) do
+      table.insert(bottomArpPitches, p)
+    end
+  end
+
+  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s, %s);",
     hs.json.encode(activeCodes),
-    hs.json.encode(heldCodes))
+    hs.json.encode(heldCodes),
+    hs.json.encode(bottomArpPitches))
   safeEvaluateJS(js)
 end
 
@@ -7160,6 +7188,18 @@ local HTML_UI_CONTENT = [[
 
   .key-pad.ctrl-rel { border-color: rgba(195, 135, 205, 0.45); }
   .key-pad.ctrl-rel .key-note { color: #cf9ee1; font-weight: 600; }
+
+  .key-pad.ctrl-atk { border-color: rgba(0, 230, 118, 0.45); }
+  .key-pad.ctrl-atk .key-note { color: #00e676; font-weight: 600; }
+
+  .key-pad.ctrl-dec { border-color: rgba(255, 215, 0, 0.45); }
+  .key-pad.ctrl-dec .key-note { color: #ffd700; font-weight: 600; }
+
+  .key-pad.ctrl-botoct { border-color: rgba(82, 180, 150, 0.45); }
+  .key-pad.ctrl-botoct .key-note { color: #78c9ad; font-weight: 600; }
+
+  .key-pad.ctrl-botvol { border-color: rgba(200, 170, 100, 0.45); }
+  .key-pad.ctrl-botvol .key-note { color: #d8c280; font-weight: 600; }
 
   .key-pad.ctrl-bpm { border-color: rgba(215, 145, 110, 0.45); }
   .key-pad.ctrl-bpm .key-note { color: #e2ab90; font-weight: 600; }
@@ -8953,6 +8993,38 @@ local HTML_UI_CONTENT = [[
     background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
     box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
   }
+  .ks-key-b.ks-shift-attack {
+    border-color: rgba(0, 230, 118, 0.7) !important;
+    background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-decay {
+    border-color: rgba(255, 215, 0, 0.7) !important;
+    background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-w.arp-step {
+    background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 60%, #38bdf8 100%) !important;
+    border-color: #0284c7 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.7), inset 0 1px 2px rgba(255,255,255,0.8) !important;
+    transform: translateY(2.5px);
+  }
+  .ks-key-w.arp-step .ks-key-name {
+    color: #0369a1 !important;
+    font-weight: 900 !important;
+  }
+  .ks-key-b.arp-step {
+    background: linear-gradient(180deg, #0369a1 0%, #0284c7 60%, #38bdf8 100%) !important;
+    border-color: #38bdf8 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.9), inset 0 1px 2px rgba(255,255,255,0.8) !important;
+    transform: translateY(2px);
+  }
+  .ks-key-b.arp-step .ks-key-name {
+    color: #ffffff !important;
+    font-weight: 900 !important;
+  }
   .ks-scale-lock-badge {
     font-size: 7.5px;
     font-weight: 800;
@@ -9508,22 +9580,22 @@ local HTML_UI_CONTENT = [[
           <!-- 13 Black Keys -->
           <div class="ks-black-keys">
             <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="envelope" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="attack" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="decay" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
 
             <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="envelope" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="attack" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="decay" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
 
             <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="envelope" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="attack" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="decay" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
           </div>
         </div>
       </div>
@@ -12017,7 +12089,7 @@ local HTML_UI_CONTENT = [[
     }
   };
 
-window.updateArpPitches = function(activeCodes, heldCodes) {
+window.updateArpPitches = function(activeCodes, heldCodes, bottomArpPitches) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
     el.classList.remove('arp-playing');
     if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
@@ -12049,6 +12121,22 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
       }
     });
   }
+
+  // Directly illuminate bottom track arpeggio notes on KeyStep (41..72 F to C)
+  if (Array.isArray(bottomArpPitches)) {
+    bottomArpPitches.forEach(pitch => {
+      let mapped = parseInt(pitch, 10);
+      if (!isNaN(mapped)) {
+        while (mapped < 41) mapped += 12;
+        while (mapped > 72) mapped -= 12;
+        const ksKey = document.getElementById('ks-key-' + mapped);
+        if (ksKey) {
+          ksKey.classList.add('active', 'arp-step');
+        }
+      }
+    });
+  }
+
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
@@ -12511,7 +12599,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
       if (isActive && shiftTarget === mode) {
         bKey.classList.add(shiftClass);
       } else {
-        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope');
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope', 'ks-shift-attack', 'ks-shift-decay');
       }
     });
     return;
@@ -14094,8 +14182,8 @@ local state = {
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
   },
 
-  topRowVolume = getSetting("topRowVolume", 100),
-  bottomRowVolume = getSetting("bottomRowVolume", 100),
+  topRowVolume = getSetting("track3Volume", getSetting("topRowVolume", 100)),
+  bottomRowVolume = getSetting("track1Volume", getSetting("bottomRowVolume", 100)),
   topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
   bottomRowChannel = getSetting("bottomRowChannel", 1),    -- MIDI Channel 1 (Ch 2 in 1-based indexing)
   arpChannel = getSetting("arpChannel", 2),            -- Dedicated Arp MIDI Channel 2 (Ch 3 in 1-based indexing)
@@ -14103,7 +14191,11 @@ local state = {
 
   tracks = {
     [1] = {
-      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255", volume = 100,
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255",
+      volume = getSetting("track1Volume", 100),
+      octaveOffset = getSetting("track1OctaveOffset", 0),
+      attack = getSetting("track1Attack", 0),
+      decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -14111,7 +14203,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [2] = {
-      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0", volume = 100,
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0",
+      volume = getSetting("track2Volume", 100),
+      octaveOffset = getSetting("track2OctaveOffset", 0),
+      attack = getSetting("track2Attack", 0),
+      decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -14119,7 +14215,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [3] = {
-      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118", volume = 100,
+      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118",
+      volume = getSetting("track3Volume", 100),
+      octaveOffset = getSetting("track3OctaveOffset", 12),
+      attack = getSetting("track3Attack", 0),
+      decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -14127,7 +14227,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [4] = {
-      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249", volume = 100,
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249",
+      volume = getSetting("track4Volume", 100),
+      octaveOffset = getSetting("track4OctaveOffset", 12),
+      attack = getSetting("track4Attack", 0),
+      decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -14177,6 +14281,28 @@ local function saveSettings()
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
+
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk then
+        hs.settings.set("qwertyMidi_track" .. i .. "Volume", trk.volume or 100)
+        hs.settings.set("qwertyMidi_track" .. i .. "OctaveOffset", trk.octaveOffset or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
+      end
+    end
+    local botTrk = state.tracks[state.bottomRowTrack or 1]
+    if botTrk then
+      state.bottomRowOctaveOffset = botTrk.octaveOffset or 0
+      state.bottomRowVolume = botTrk.volume or 100
+    end
+    local topTrk = state.tracks[state.topRowTrack or 3]
+    if topTrk then
+      state.topRowOctaveOffset = topTrk.octaveOffset or 12
+      state.topRowVolume = topTrk.volume or 100
+    end
+  end
 
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
@@ -14245,8 +14371,8 @@ local defaultNumberRowControls = {
   [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
   [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
   [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "botVolDown",   shiftName = "BotVol -" },
-  [25] = { key = "9", name = "Rel -",    action = "relDown",        shiftAction = "relDown",      shiftName = "Rel -" },
-  [29] = { key = "0", name = "Rel +",    action = "relUp",          shiftAction = "relUp",        shiftName = "Rel +" },
+  [25] = { key = "9", name = "Atk -",    action = "atkDown",        shiftAction = "decDown",      shiftName = "Dec -" },
+  [29] = { key = "0", name = "Atk +",    action = "atkUp",          shiftAction = "decUp",        shiftName = "Dec +" },
   [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
   [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
@@ -14322,10 +14448,16 @@ local ACTION_CATALOG = {
     actions = {
       { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
       { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
-      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
-      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
+      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
       { id = "topVolDown", name = "Top Vol -", typeClass = "ctrl-vol", description = "Decrease top row velocity" },
+      { id = "botVolUp", name = "Bot Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
+      { id = "botVolDown", name = "Bot Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "atkUp", name = "Attack +", typeClass = "ctrl-atk", description = "Increase track synth attack time" },
+      { id = "atkDown", name = "Attack -", typeClass = "ctrl-atk", description = "Decrease track synth attack time" },
+      { id = "decUp", name = "Decay +", typeClass = "ctrl-dec", description = "Increase track synth decay & tail (ADSR)" },
+      { id = "decDown", name = "Decay -", typeClass = "ctrl-dec", description = "Decrease track synth decay & tail (ADSR)" },
       { id = "modWheelUp", name = "Mod +", typeClass = "ctrl-modw", description = "Increase modulation wheel CC1" },
       { id = "modWheelDown", name = "Mod -", typeClass = "ctrl-modw", description = "Decrease modulation wheel CC1" },
       { id = "panic", name = "Panic!", typeClass = "ctrl-panic", description = "Send all-notes-off MIDI panic" }
@@ -14338,8 +14470,6 @@ local ACTION_CATALOG = {
       { id = "redoState", name = "Redo State", typeClass = "ctrl-reset", description = "Redo previous controller state change" },
       { id = "bpmUp", name = "BPM +", typeClass = "ctrl-bpm", description = "Increase tempo" },
       { id = "bpmDown", name = "BPM -", typeClass = "ctrl-bpm", description = "Decrease tempo" },
-      { id = "relUp", name = "Release +", typeClass = "ctrl-rel", description = "Increase release length" },
-      { id = "relDown", name = "Release -", typeClass = "ctrl-rel", description = "Decrease release length" },
       { id = "zoomIn", name = "Zoom +", typeClass = "ctrl-zoom", description = "Zoom in HUD size" },
       { id = "zoomOut", name = "Zoom -", typeClass = "ctrl-zoom", description = "Zoom out HUD size" },
       { id = "resetAll", name = "Reset All", typeClass = "ctrl-reset", description = "Reset settings to defaults" },
@@ -14661,8 +14791,8 @@ local defaultKeyStepLowerRowControls = {
   [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
   [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
   [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
-  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "relDown", shiftName = "Rel -" },
-  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
+  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "decDown", shiftName = "Dec -" },
+  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "decUp", shiftName = "Dec +" }
 }
 
 local function isKsConnected()
@@ -15316,9 +15446,13 @@ local function selectTrack(id)
   if targetId <= 2 then
     state.bottomRowTrack = targetId
     state.bottomRowChannel = trk.channel
+    state.bottomRowOctaveOffset = trk.octaveOffset or 0
+    state.bottomRowVolume = trk.volume or 100
   else
     state.topRowTrack = targetId
     state.topRowChannel = trk.channel
+    state.topRowOctaveOffset = trk.octaveOffset or 12
+    state.topRowVolume = trk.volume or 100
   end
 
   hud.updateWebviewHud({
@@ -15444,9 +15578,12 @@ local function executeControlAction(act, code)
      act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
      act == "arpLinkToggle" or act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
      act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
+     act == "atkDown" or act == "atkUp" or act == "decDown" or act == "decUp" or
      act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
      act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
-     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" then
+     act == "botVolDown" or act == "botVolUp" or
+     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" or
+     act == "octaveDown" or act == "octaveUp" then
     pushStateSnapshot(act)
   end
 
@@ -15463,6 +15600,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
@@ -15486,6 +15626,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
@@ -15509,6 +15652,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "BOT OCTAVE",
@@ -15532,6 +15678,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "BOT OCTAVE",
@@ -15614,6 +15763,11 @@ local function executeControlAction(act, code)
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      if actTrk then
+        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+      end
+      config.saveSettings()
       local spot = {
         title = "OCTAVE",
         value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
@@ -15637,6 +15791,11 @@ local function executeControlAction(act, code)
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      if actTrk then
+        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+      end
+      config.saveSettings()
       local spot = {
         title = "OCTAVE",
         value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
@@ -16003,40 +16162,68 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "topVolDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "topVolUp" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "botVolDown" then
     state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+    end
+    config.saveSettings()
     local spot = {
       title = "BOTTOM ROW VOL",
       value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
       targetId = "vol-indicator-bottom",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "botVolUp" then
     state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+    end
+    config.saveSettings()
     local spot = {
       title = "BOTTOM ROW VOL",
       value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
       targetId = "vol-indicator-bottom",
       color = "#d4a359"
     }
@@ -16044,6 +16231,17 @@ local function executeControlAction(act, code)
   elseif act == "volDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
     state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+    if botTrk then
+      botTrk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    end
+    if topTrk then
+      topTrk.volume = state.topRowVolume
+      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
@@ -16055,6 +16253,17 @@ local function executeControlAction(act, code)
   elseif act == "volUp" or act == "volume" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
     state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+    if botTrk then
+      botTrk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    end
+    if topTrk then
+      topTrk.volume = state.topRowVolume
+      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
@@ -16175,32 +16384,82 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "relDown" or act == "releaseDown" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.max(0, currentVal - 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "relUp" or act == "releaseUp" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.min(127, currentVal + 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
+  elseif act == "atkDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.max(0, (trk.attack or 0) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "header",
+        color = "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "atkUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.min(127, (trk.attack or 0) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "header",
+        color = "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decDown" or act == "relDown" or act == "releaseDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.max(0, (trk.decay or 64) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "header",
+        color = "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decUp" or act == "relUp" or act == "releaseUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.min(127, (trk.decay or 64) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "header",
+        color = "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "bpmEdit" then
     state.bpmInputMode = true
     state.bpmBeforeEdit = state.arpBpm
@@ -16654,6 +16913,7 @@ local function shouldRepeat(act)
   if not act then return false end
   local repeatingActions = {
     bpmUp = true, bpmDown = true,
+    atkUp = true, atkDown = true, decUp = true, decDown = true,
     relUp = true, relDown = true, releaseUp = true, releaseDown = true,
     arpGateUp = true, arpGateDown = true,
     volUp = true, volDown = true, volume = true,

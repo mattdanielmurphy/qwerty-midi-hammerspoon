@@ -837,6 +837,18 @@ local HTML_UI_CONTENT = [[
   .key-pad.ctrl-rel { border-color: rgba(195, 135, 205, 0.45); }
   .key-pad.ctrl-rel .key-note { color: #cf9ee1; font-weight: 600; }
 
+  .key-pad.ctrl-atk { border-color: rgba(0, 230, 118, 0.45); }
+  .key-pad.ctrl-atk .key-note { color: #00e676; font-weight: 600; }
+
+  .key-pad.ctrl-dec { border-color: rgba(255, 215, 0, 0.45); }
+  .key-pad.ctrl-dec .key-note { color: #ffd700; font-weight: 600; }
+
+  .key-pad.ctrl-botoct { border-color: rgba(82, 180, 150, 0.45); }
+  .key-pad.ctrl-botoct .key-note { color: #78c9ad; font-weight: 600; }
+
+  .key-pad.ctrl-botvol { border-color: rgba(200, 170, 100, 0.45); }
+  .key-pad.ctrl-botvol .key-note { color: #d8c280; font-weight: 600; }
+
   .key-pad.ctrl-bpm { border-color: rgba(215, 145, 110, 0.45); }
   .key-pad.ctrl-bpm .key-note { color: #e2ab90; font-weight: 600; }
 
@@ -2629,6 +2641,38 @@ local HTML_UI_CONTENT = [[
     background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
     box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
   }
+  .ks-key-b.ks-shift-attack {
+    border-color: rgba(0, 230, 118, 0.7) !important;
+    background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-decay {
+    border-color: rgba(255, 215, 0, 0.7) !important;
+    background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-w.arp-step {
+    background: linear-gradient(180deg, #e0f2fe 0%, #bae6fd 60%, #38bdf8 100%) !important;
+    border-color: #0284c7 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.7), inset 0 1px 2px rgba(255,255,255,0.8) !important;
+    transform: translateY(2.5px);
+  }
+  .ks-key-w.arp-step .ks-key-name {
+    color: #0369a1 !important;
+    font-weight: 900 !important;
+  }
+  .ks-key-b.arp-step {
+    background: linear-gradient(180deg, #0369a1 0%, #0284c7 60%, #38bdf8 100%) !important;
+    border-color: #38bdf8 !important;
+    border-bottom-width: 1px !important;
+    box-shadow: 0 0 14px rgba(56, 189, 248, 0.9), inset 0 1px 2px rgba(255,255,255,0.8) !important;
+    transform: translateY(2px);
+  }
+  .ks-key-b.arp-step .ks-key-name {
+    color: #ffffff !important;
+    font-weight: 900 !important;
+  }
   .ks-scale-lock-badge {
     font-size: 7.5px;
     font-weight: 800;
@@ -3184,22 +3228,22 @@ local HTML_UI_CONTENT = [[
           <!-- 13 Black Keys -->
           <div class="ks-black-keys">
             <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="envelope" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="attack" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="decay" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
 
             <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="envelope" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="attack" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="decay" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
 
             <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
-            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="envelope" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="attack" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">ATK</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="decay" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">DEC</span></div>
           </div>
         </div>
       </div>
@@ -5693,7 +5737,7 @@ local HTML_UI_CONTENT = [[
     }
   };
 
-window.updateArpPitches = function(activeCodes, heldCodes) {
+window.updateArpPitches = function(activeCodes, heldCodes, bottomArpPitches) {
   document.querySelectorAll('.key-pad.arp-playing').forEach(el => {
     el.classList.remove('arp-playing');
     if (!el.dataset.physicallyPressed) el.classList.remove('pressed');
@@ -5725,6 +5769,22 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
       }
     });
   }
+
+  // Directly illuminate bottom track arpeggio notes on KeyStep (41..72 F to C)
+  if (Array.isArray(bottomArpPitches)) {
+    bottomArpPitches.forEach(pitch => {
+      let mapped = parseInt(pitch, 10);
+      if (!isNaN(mapped)) {
+        while (mapped < 41) mapped += 12;
+        while (mapped > 72) mapped -= 12;
+        const ksKey = document.getElementById('ks-key-' + mapped);
+        if (ksKey) {
+          ksKey.classList.add('active', 'arp-step');
+        }
+      }
+    });
+  }
+
   if (Array.isArray(heldCodes)) {
     heldCodes.forEach(code => {
       const el = document.getElementById('key-' + code);
@@ -6187,7 +6247,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
       if (isActive && shiftTarget === mode) {
         bKey.classList.add(shiftClass);
       } else {
-        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope');
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope', 'ks-shift-attack', 'ks-shift-decay');
       }
     });
     return;

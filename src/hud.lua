@@ -345,11 +345,11 @@ local PROPOSED_LAYOUT_MAP = {
   },
   [47] = { -- .
     base            = { name = "Mod -",       class = "ctrl-modw",  action = "modWheelDown" },
-    shift           = { name = "Rel -",       class = "ctrl-rel",   action = "relDown" },
+    shift           = { name = "Dec -",       class = "ctrl-dec",   action = "decDown" },
   },
   [44] = { -- /
     base            = { name = "Mod +",       class = "ctrl-modw",  action = "modWheelUp" },
-    shift           = { name = "Rel +",       class = "ctrl-rel",   action = "relUp" },
+    shift           = { name = "Dec +",       class = "ctrl-dec",   action = "decUp" },
   },
   [39] = { -- ' (Chord)
     base            = { name = "Chord",       class = "ctrl-mode",    action = "chordToggle" },
@@ -444,18 +444,18 @@ local PROPOSED_LAYOUT_MAP = {
     ctrl_opt_shift  = { name = "Clock x2",    class = "ctrl-bpm",     action = "clockMul2" },
   },
   [25] = { -- 9
-    base            = { name = "Rel +",       class = "ctrl-rel",     action = "relUp" },
-    shift           = { name = "Rel -",       class = "ctrl-rel",     action = "relDown" },
-    opt             = { name = "Rel Max",     class = "ctrl-rel",     action = "relMax" },
-    shift_opt       = { name = "Rel Min",     class = "ctrl-rel",     action = "relMin" },
-    ctrl            = { name = "Rel Default", class = "ctrl-rel",     action = "relDefault" },
-    shift_ctrl      = { name = "Rel 50%",     class = "ctrl-rel",     action = "rel50" },
-    ctrl_opt        = { name = "Rel 75%",     class = "ctrl-rel",     action = "rel75" },
-    ctrl_opt_shift  = { name = "Rel 25%",     class = "ctrl-rel",     action = "rel25" },
+    base            = { name = "Atk -",       class = "ctrl-atk",     action = "atkDown" },
+    shift           = { name = "Dec -",       class = "ctrl-dec",     action = "decDown" },
+    opt             = { name = "Atk +",       class = "ctrl-atk",     action = "atkUp" },
+    shift_opt       = { name = "Dec +",       class = "ctrl-dec",     action = "decUp" },
+    ctrl            = { name = "Atk Def",     class = "ctrl-atk",     action = "atkDefault" },
+    shift_ctrl      = { name = "Atk 50%",     class = "ctrl-atk",     action = "atk50" },
+    ctrl_opt        = { name = "Atk 75%",     class = "ctrl-atk",     action = "atk75" },
+    ctrl_opt_shift  = { name = "Atk 25%",     class = "ctrl-atk",     action = "atk25" },
   },
   [29] = { -- 0
-    base            = { name = "Vol +",       class = "ctrl-vol",     action = "volUp" },
-    shift           = { name = "Vol -",       class = "ctrl-vol",     action = "volDown" },
+    base            = { name = "Atk +",       class = "ctrl-atk",     action = "atkUp" },
+    shift           = { name = "Dec +",       class = "ctrl-dec",     action = "decUp" },
     opt             = { name = "Mod CC1 +",   class = "ctrl-modw",    action = "modWheelUp" },
     shift_opt       = { name = "Mod CC1 -",   class = "ctrl-modw",    action = "modWheelDown" },
     ctrl            = { name = "Vol 100%",    class = "ctrl-vol",     action = "vol100" },
@@ -612,8 +612,12 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   if state.arpEnabled then table.insert(statusParts, state.arpLatchActive and "ARP: LATCH" or "ARP: ON") end
   local statusStr = table.concat(statusParts, "  •  ")
 
-  local botOctNum = math.floor((octVal + (tonumber(state.bottomRowOctaveOffset) or 0)) / 12)
-  local topOctNum = math.floor((octVal + (tonumber(state.topRowOctaveOffset) or 0) + 12) / 12)
+  local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+  local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+  local botOctOffset = botTrk and botTrk.octaveOffset or (tonumber(state.bottomRowOctaveOffset) or 0)
+  local topOctOffset = topTrk and topTrk.octaveOffset or (tonumber(state.topRowOctaveOffset) or 12)
+  local botOctNum = math.floor((octVal + botOctOffset) / 12)
+  local topOctNum = math.floor((octVal + topOctOffset) / 12)
   local topOctaveStr = (topOctNum >= 0 and "+" or "") .. topOctNum
   local bottomOctaveStr = (botOctNum >= 0 and "+" or "") .. botOctNum
 
@@ -626,7 +630,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     modeDown = "ctrl-mode", modeUp = "ctrl-mode",
     octaveDown = "ctrl-oct", octaveUp = "ctrl-oct",
     topOctDown = "ctrl-topoct", topOctUp = "ctrl-topoct",
+    botOctDown = "ctrl-oct", botOctUp = "ctrl-oct",
     topVolDown = "ctrl-vol", topVolUp = "ctrl-vol",
+    botVolDown = "ctrl-vol", botVolUp = "ctrl-vol",
     modWheelDown = "ctrl-modw", modWheelUp = "ctrl-modw",
     volDown = "ctrl-vol", volUp = "ctrl-vol",
     
@@ -634,6 +640,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpDirDown = "ctrl-arpdir", arpDirUp = "ctrl-arpdir",
     arpRateDown = "ctrl-arprate", arpRateUp = "ctrl-arprate",
     arpGateDown = "ctrl-arpgate", arpGateUp = "ctrl-arpgate",
+    atkDown = "ctrl-atk", atkUp = "ctrl-atk",
+    decDown = "ctrl-dec", decUp = "ctrl-dec",
     relDown = "ctrl-rel", relUp = "ctrl-rel", releaseDown = "ctrl-rel", releaseUp = "ctrl-rel",
     bpmDown = "ctrl-bpm", bpmUp = "ctrl-bpm",
     zoomOut = "ctrl-zoom", zoomIn = "ctrl-zoom",
@@ -1033,6 +1041,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [1] = {
         id = 1, name = "Bass", channel = 0, color = "#00e5ff",
         selected = (state.bottomRowTrack == 1),
+        volume = state.tracks and state.tracks[1] and state.tracks[1].volume or 100,
+        octaveOffset = state.tracks and state.tracks[1] and state.tracks[1].octaveOffset or 0,
+        attack = state.tracks and state.tracks[1] and state.tracks[1].attack or 0,
+        decay = state.tracks and state.tracks[1] and state.tracks[1].decay or 64,
         muted = state.tracks and state.tracks[1] and state.tracks[1].muted == true or false,
         soloed = state.tracks and state.tracks[1] and state.tracks[1].soloed == true or false,
         activeAudio = false,
@@ -1042,6 +1054,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [2] = {
         id = 2, name = "Chords", channel = 1, color = "#ff9100",
         selected = (state.bottomRowTrack == 2),
+        volume = state.tracks and state.tracks[2] and state.tracks[2].volume or 100,
+        octaveOffset = state.tracks and state.tracks[2] and state.tracks[2].octaveOffset or 0,
+        attack = state.tracks and state.tracks[2] and state.tracks[2].attack or 0,
+        decay = state.tracks and state.tracks[2] and state.tracks[2].decay or 64,
         muted = state.tracks and state.tracks[2] and state.tracks[2].muted == true or false,
         soloed = state.tracks and state.tracks[2] and state.tracks[2].soloed == true or false,
         activeAudio = false,
@@ -1051,6 +1067,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [3] = {
         id = 3, name = "Lead", channel = 2, color = "#00e676",
         selected = (state.topRowTrack == 3),
+        volume = state.tracks and state.tracks[3] and state.tracks[3].volume or 100,
+        octaveOffset = state.tracks and state.tracks[3] and state.tracks[3].octaveOffset or 12,
+        attack = state.tracks and state.tracks[3] and state.tracks[3].attack or 0,
+        decay = state.tracks and state.tracks[3] and state.tracks[3].decay or 64,
         muted = state.tracks and state.tracks[3] and state.tracks[3].muted == true or false,
         soloed = state.tracks and state.tracks[3] and state.tracks[3].soloed == true or false,
         activeAudio = false,
@@ -1060,6 +1080,10 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       [4] = {
         id = 4, name = "Arp", channel = 3, color = "#d500f9",
         selected = (state.topRowTrack == 4),
+        volume = state.tracks and state.tracks[4] and state.tracks[4].volume or 100,
+        octaveOffset = state.tracks and state.tracks[4] and state.tracks[4].octaveOffset or 12,
+        attack = state.tracks and state.tracks[4] and state.tracks[4].attack or 0,
+        decay = state.tracks and state.tracks[4] and state.tracks[4].decay or 64,
         muted = state.tracks and state.tracks[4] and state.tracks[4].muted == true or false,
         soloed = state.tracks and state.tracks[4] and state.tracks[4].soloed == true or false,
         activeAudio = false,
@@ -1106,8 +1130,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     statusText = statusStr,
     topOctaveStr = topOctaveStr,
     bottomOctaveStr = bottomOctaveStr,
-    topVolPercent = math.floor((state.topRowVolume / 127) * 100),
-    bottomVolPercent = math.floor((state.bottomRowVolume / 127) * 100),
+    topVolPercent = math.floor(((topTrk and topTrk.volume or state.topRowVolume or 100) / 127) * 100),
+    bottomVolPercent = math.floor(((botTrk and botTrk.volume or state.bottomRowVolume or 100) / 127) * 100),
     effectiveTopVolPercent = math.floor((transposer.getEffectiveRowVelocity(true) / 127) * 100),
     modeFrac = modeFrac,
     modWheel = modVal,
@@ -1729,9 +1753,18 @@ local function fastUpdateArpNow()
     end
   end
 
-  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s);",
+  local bottomArpPitches = {}
+  local botTrkId = state.bottomRowTrack or 1
+  if currentArpPitches[botTrkId] then
+    for p in pairs(currentArpPitches[botTrkId]) do
+      table.insert(bottomArpPitches, p)
+    end
+  end
+
+  local js = string.format("if (window.updateArpPitches) window.updateArpPitches(%s, %s, %s);",
     hs.json.encode(activeCodes),
-    hs.json.encode(heldCodes))
+    hs.json.encode(heldCodes),
+    hs.json.encode(bottomArpPitches))
   safeEvaluateJS(js)
 end
 

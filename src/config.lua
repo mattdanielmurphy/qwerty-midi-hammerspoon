@@ -116,8 +116,8 @@ local state = {
     [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
   },
 
-  topRowVolume = getSetting("topRowVolume", 100),
-  bottomRowVolume = getSetting("bottomRowVolume", 100),
+  topRowVolume = getSetting("track3Volume", getSetting("topRowVolume", 100)),
+  bottomRowVolume = getSetting("track1Volume", getSetting("bottomRowVolume", 100)),
   topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
   bottomRowChannel = getSetting("bottomRowChannel", 1),    -- MIDI Channel 1 (Ch 2 in 1-based indexing)
   arpChannel = getSetting("arpChannel", 2),            -- Dedicated Arp MIDI Channel 2 (Ch 3 in 1-based indexing)
@@ -125,7 +125,11 @@ local state = {
 
   tracks = {
     [1] = {
-      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255", volume = 100,
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255",
+      volume = getSetting("track1Volume", 100),
+      octaveOffset = getSetting("track1OctaveOffset", 0),
+      attack = getSetting("track1Attack", 0),
+      decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -133,7 +137,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [2] = {
-      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0", volume = 100,
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0",
+      volume = getSetting("track2Volume", 100),
+      octaveOffset = getSetting("track2OctaveOffset", 0),
+      attack = getSetting("track2Attack", 0),
+      decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -141,7 +149,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [3] = {
-      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118", volume = 100,
+      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118",
+      volume = getSetting("track3Volume", 100),
+      octaveOffset = getSetting("track3OctaveOffset", 12),
+      attack = getSetting("track3Attack", 0),
+      decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -149,7 +161,11 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [4] = {
-      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249", volume = 100,
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249",
+      volume = getSetting("track4Volume", 100),
+      octaveOffset = getSetting("track4OctaveOffset", 12),
+      attack = getSetting("track4Attack", 0),
+      decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -199,6 +215,28 @@ local function saveSettings()
   state.topRowVolume = tonumber(state.topRowVolume) or 100
   state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
   state.zoomLevel = tonumber(state.zoomLevel) or 1.0
+
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk then
+        hs.settings.set("qwertyMidi_track" .. i .. "Volume", trk.volume or 100)
+        hs.settings.set("qwertyMidi_track" .. i .. "OctaveOffset", trk.octaveOffset or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
+      end
+    end
+    local botTrk = state.tracks[state.bottomRowTrack or 1]
+    if botTrk then
+      state.bottomRowOctaveOffset = botTrk.octaveOffset or 0
+      state.bottomRowVolume = botTrk.volume or 100
+    end
+    local topTrk = state.tracks[state.topRowTrack or 3]
+    if topTrk then
+      state.topRowOctaveOffset = topTrk.octaveOffset or 12
+      state.topRowVolume = topTrk.volume or 100
+    end
+  end
 
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
@@ -267,8 +305,8 @@ local defaultNumberRowControls = {
   [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
   [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
   [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "botVolDown",   shiftName = "BotVol -" },
-  [25] = { key = "9", name = "Rel -",    action = "relDown",        shiftAction = "relDown",      shiftName = "Rel -" },
-  [29] = { key = "0", name = "Rel +",    action = "relUp",          shiftAction = "relUp",        shiftName = "Rel +" },
+  [25] = { key = "9", name = "Atk -",    action = "atkDown",        shiftAction = "decDown",      shiftName = "Dec -" },
+  [29] = { key = "0", name = "Atk +",    action = "atkUp",          shiftAction = "decUp",        shiftName = "Dec +" },
   [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
   [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
 }
@@ -344,10 +382,16 @@ local ACTION_CATALOG = {
     actions = {
       { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
       { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
-      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
-      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
+      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
       { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
       { id = "topVolDown", name = "Top Vol -", typeClass = "ctrl-vol", description = "Decrease top row velocity" },
+      { id = "botVolUp", name = "Bot Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
+      { id = "botVolDown", name = "Bot Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "atkUp", name = "Attack +", typeClass = "ctrl-atk", description = "Increase track synth attack time" },
+      { id = "atkDown", name = "Attack -", typeClass = "ctrl-atk", description = "Decrease track synth attack time" },
+      { id = "decUp", name = "Decay +", typeClass = "ctrl-dec", description = "Increase track synth decay & tail (ADSR)" },
+      { id = "decDown", name = "Decay -", typeClass = "ctrl-dec", description = "Decrease track synth decay & tail (ADSR)" },
       { id = "modWheelUp", name = "Mod +", typeClass = "ctrl-modw", description = "Increase modulation wheel CC1" },
       { id = "modWheelDown", name = "Mod -", typeClass = "ctrl-modw", description = "Decrease modulation wheel CC1" },
       { id = "panic", name = "Panic!", typeClass = "ctrl-panic", description = "Send all-notes-off MIDI panic" }
@@ -360,8 +404,6 @@ local ACTION_CATALOG = {
       { id = "redoState", name = "Redo State", typeClass = "ctrl-reset", description = "Redo previous controller state change" },
       { id = "bpmUp", name = "BPM +", typeClass = "ctrl-bpm", description = "Increase tempo" },
       { id = "bpmDown", name = "BPM -", typeClass = "ctrl-bpm", description = "Decrease tempo" },
-      { id = "relUp", name = "Release +", typeClass = "ctrl-rel", description = "Increase release length" },
-      { id = "relDown", name = "Release -", typeClass = "ctrl-rel", description = "Decrease release length" },
       { id = "zoomIn", name = "Zoom +", typeClass = "ctrl-zoom", description = "Zoom in HUD size" },
       { id = "zoomOut", name = "Zoom -", typeClass = "ctrl-zoom", description = "Zoom out HUD size" },
       { id = "resetAll", name = "Reset All", typeClass = "ctrl-reset", description = "Reset settings to defaults" },
@@ -683,8 +725,8 @@ local defaultKeyStepLowerRowControls = {
   [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
   [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
   [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
-  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "relDown", shiftName = "Rel -" },
-  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
+  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "decDown", shiftName = "Dec -" },
+  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "decUp", shiftName = "Dec +" }
 }
 
 local function isKsConnected()

@@ -8,7 +8,7 @@ test("only the authoritative HUD render updates track-button selection state", (
 
   expect(fastUpdate).not.toBeNull();
   expect(fastUpdate[1]).not.toContain("trkStates");
-  expect(fastUpdate[1]).toContain("window.updateArpPitches(%s, %s)");
+  expect(fastUpdate[1]).toContain("window.updateArpPitches(%s, %s, %s)");
   expect(web).not.toContain("window.updateArpPitches = function(activeCodes, heldCodes, trkAudioStates)");
 });
 

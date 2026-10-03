@@ -379,9 +379,13 @@ local function selectTrack(id)
   if targetId <= 2 then
     state.bottomRowTrack = targetId
     state.bottomRowChannel = trk.channel
+    state.bottomRowOctaveOffset = trk.octaveOffset or 0
+    state.bottomRowVolume = trk.volume or 100
   else
     state.topRowTrack = targetId
     state.topRowChannel = trk.channel
+    state.topRowOctaveOffset = trk.octaveOffset or 12
+    state.topRowVolume = trk.volume or 100
   end
 
   hud.updateWebviewHud({
@@ -507,9 +511,12 @@ local function executeControlAction(act, code)
      act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
      act == "arpLinkToggle" or act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
      act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
+     act == "atkDown" or act == "atkUp" or act == "decDown" or act == "decUp" or
      act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
      act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
-     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" then
+     act == "botVolDown" or act == "botVolUp" or
+     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" or
+     act == "octaveDown" or act == "octaveUp" then
     pushStateSnapshot(act)
   end
 
@@ -526,6 +533,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
@@ -549,6 +559,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "TOP OCTAVE",
@@ -572,6 +585,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "BOT OCTAVE",
@@ -595,6 +611,9 @@ local function executeControlAction(act, code)
       state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
       arpeggiator.updateLatchedArpNotes()
       local spot = {
         title = "BOT OCTAVE",
@@ -677,6 +696,11 @@ local function executeControlAction(act, code)
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      if actTrk then
+        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+      end
+      config.saveSettings()
       local spot = {
         title = "OCTAVE",
         value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
@@ -700,6 +724,11 @@ local function executeControlAction(act, code)
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      if actTrk then
+        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+      end
+      config.saveSettings()
       local spot = {
         title = "OCTAVE",
         value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
@@ -1066,40 +1095,68 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "topVolDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "topVolUp" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "TOP ROW VOL",
       value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = "Upper Keys Level",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
       targetId = "vol-indicator-top",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "botVolDown" then
     state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+    end
+    config.saveSettings()
     local spot = {
       title = "BOTTOM ROW VOL",
       value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
       targetId = "vol-indicator-bottom",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "botVolUp" then
     state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+    end
+    config.saveSettings()
     local spot = {
       title = "BOTTOM ROW VOL",
       value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Lower Keys Level",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
       targetId = "vol-indicator-bottom",
       color = "#d4a359"
     }
@@ -1107,6 +1164,17 @@ local function executeControlAction(act, code)
   elseif act == "volDown" then
     state.topRowVolume = math.max(0, state.topRowVolume - 4)
     state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+    if botTrk then
+      botTrk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    end
+    if topTrk then
+      topTrk.volume = state.topRowVolume
+      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
@@ -1118,6 +1186,17 @@ local function executeControlAction(act, code)
   elseif act == "volUp" or act == "volume" then
     state.topRowVolume = math.min(127, state.topRowVolume + 4)
     state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+    if botTrk then
+      botTrk.volume = state.bottomRowVolume
+      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    end
+    if topTrk then
+      topTrk.volume = state.topRowVolume
+      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+    end
+    config.saveSettings()
     local spot = {
       title = "ROW VOLUMES",
       value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
@@ -1238,32 +1317,82 @@ local function executeControlAction(act, code)
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
-  elseif act == "relDown" or act == "releaseDown" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.max(0, currentVal - 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "relUp" or act == "releaseUp" then
-    local currentVal = state.ccStates[72] or 64
-    local newVal = math.min(127, currentVal + 4)
-    state.ccStates[72] = newVal
-    midi.sendMidiCC(72, newVal)
-    local spot = {
-      title = "SYNTH RELEASE",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #72 Level",
-      targetId = "header",
-      color = "#cf9ee1"
-    }
-    hud.updateWebviewHud(spot)
+  elseif act == "atkDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.max(0, (trk.attack or 0) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "header",
+        color = "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "atkUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.min(127, (trk.attack or 0) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "header",
+        color = "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decDown" or act == "relDown" or act == "releaseDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.max(0, (trk.decay or 64) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "header",
+        color = "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decUp" or act == "relUp" or act == "releaseUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.min(127, (trk.decay or 64) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "header",
+        color = "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
   elseif act == "bpmEdit" then
     state.bpmInputMode = true
     state.bpmBeforeEdit = state.arpBpm
@@ -1717,6 +1846,7 @@ local function shouldRepeat(act)
   if not act then return false end
   local repeatingActions = {
     bpmUp = true, bpmDown = true,
+    atkUp = true, atkDown = true, decUp = true, decDown = true,
     relUp = true, relDown = true, releaseUp = true, releaseDown = true,
     arpGateUp = true, arpGateDown = true,
     volUp = true, volDown = true, volume = true,

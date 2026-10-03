@@ -19,15 +19,8 @@ local SHIFT_MODES = {
   [1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74, default = 100, color = "#00e5ff", desc = "Filter Cutoff" },
   [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
   [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
-  [8]  = { id = "release", label = "RELEASE", cc = 72, default = 40,  color = "#00e676", desc = "Synth Release" },
-  [10] = { id = "envelope", label = "ADSR", cc = 24, default = 64, color = "#ffd700", desc = "Envelope Stage" },
-}
-
-local ENVELOPE_STAGES = {
-  { id = "attack", label = "ATTACK", cc = 24, default = 0 },
-  { id = "decay", label = "DECAY", cc = 25, default = 64 },
-  { id = "sustain", label = "SUSTAIN", cc = 26, default = 100 },
-  { id = "release", label = "RELEASE", cc = 27, default = 40 },
+  [8]  = { id = "attack",  label = "ATTACK",  cc = 24, default = 0,   color = "#00e676", desc = "Envelope Attack" },
+  [10] = { id = "decay",   label = "DECAY",   cc = 25, default = 64,  color = "#ffd700", desc = "Envelope Decay & Tail" },
 }
 
 local KeyStep = {}
@@ -205,34 +198,33 @@ end
 
 local function getFocusedTrack()
   local s = _G.activeWatchers and _G.activeWatchers.state
-  local id = s and tonumber(s.activeTrack)
-  local trk = s and s.tracks and s.tracks[id or -1]
+  local id = s and (tonumber(s.bottomRowTrack) or 1)
+  local trk = s and s.tracks and s.tracks[id or 1]
   return trk, id
 end
 
 local function currentParamValues()
-  local _, trackId = getFocusedTrack()
+  local trk, trackId = getFocusedTrack()
   if not trackId then return state.paramValues end
   if not state.trackParamValues[trackId] then
     local values = {}
     for _, def in pairs(SHIFT_MODES) do values[def.id] = def.default end
-    for _, stage in ipairs(ENVELOPE_STAGES) do values[stage.id] = stage.default end
     values.modwheel = 0
     state.trackParamValues[trackId] = values
   end
-  return state.trackParamValues[trackId]
+  local values = state.trackParamValues[trackId]
+  if trk then
+    if trk.attack ~= nil then values.attack = trk.attack end
+    if trk.decay ~= nil then values.decay = trk.decay end
+    if trk.volume ~= nil then values.volume = trk.volume end
+  end
+  return values
 end
 
 local function effectiveShiftAssignment(modeDef)
   if not modeDef then
     local values = currentParamValues()
     return { cc = 1, label = "MOD", color = "#a0a0ab", value = values.modwheel or 0 }
-  end
-  if modeDef.id == "envelope" then
-    local stage = ENVELOPE_STAGES[state.envelopeStageIdx] or ENVELOPE_STAGES[1]
-    local values = currentParamValues()
-    return { cc = stage.cc, label = stage.label, color = modeDef.color,
-      value = values[stage.id] or state.paramValues[stage.id] or stage.default, stage = stage.id }
   end
   local values = currentParamValues()
   return { cc = modeDef.cc, label = modeDef.label, color = modeDef.color,
@@ -363,6 +355,29 @@ local function sendCC(controller, value, channel)
     controllerValue = value,
     channel = channel or config.outputChannel,
   })
+end
+
+local function dispatchShiftCC(shiftDef, ccVal)
+  local assignment = effectiveShiftAssignment(shiftDef)
+  state.shiftControlTweaked = true
+  currentParamValues()[shiftDef.id] = ccVal
+  state.paramValues[shiftDef.id] = ccVal
+  local trk = getFocusedTrack()
+  local ch = getOutputChannel()
+  if shiftDef.id == "decay" then
+    if trk then trk.decay = ccVal end
+    sendCC(25, ccVal, ch)
+    sendCC(26, ccVal, ch)
+    sendCC(27, ccVal, ch)
+    sendCC(72, ccVal, ch)
+  elseif shiftDef.id == "attack" then
+    if trk then trk.attack = ccVal end
+    sendCC(24, ccVal, ch)
+    sendCC(73, ccVal, ch)
+  else
+    sendCC(assignment.cc, ccVal, ch)
+  end
+  return assignment
 end
 
 local lastRateCcValue = nil
@@ -515,7 +530,12 @@ local function setRate(rateVal)
   else
     local volCcVal = rateToVolumeCc(roundedRate)
     sendRateCc(roundedRate)
-    -- Synchronize Master Volume with QWERTY MIDI engine
+    -- Synchronize Volume with QWERTY MIDI engine
+    local trk = getFocusedTrack()
+    if trk then
+      trk.volume = volCcVal
+      sendCC(7, volCcVal, getOutputChannel())
+    end
     if _G.activeWatchers and _G.activeWatchers.state then
       _G.activeWatchers.state.bottomRowVolume = volCcVal
     end
@@ -749,12 +769,8 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     state.pitchBend = pitchVal
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
       local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-      state.paramValues[assignment.stage or shiftDef.id] = ccVal
-      sendCC(assignment.cc, ccVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
       sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
       sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     elseif outputDevice then
@@ -768,11 +784,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     if ccNum == 1 then
       local shiftDef = getActiveShiftModeDef()
       if shiftDef then
-        state.shiftControlTweaked = true
-        local assignment = effectiveShiftAssignment(shiftDef)
-        currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-        state.paramValues[assignment.stage or shiftDef.id] = ccVal
-        sendCC(assignment.cc, ccVal, getOutputChannel())
+        local assignment = dispatchShiftCC(shiftDef, ccVal)
         sendToHud("mod_wheel", ccVal, true, {
           cc = assignment.cc,
           value = ccVal,
@@ -887,11 +899,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           state.shiftPressTimes[metadata.note] = nil
           state.heldShiftKeys[metadata.note] = nil
           local anotherHeld = next(state.shiftPressTimes) ~= nil
-          if modeDef.id == "envelope" and duration < 0.28 and not state.shiftControlTweaked and not anotherHeld then
-            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
-            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
-            state.latchedShiftMode = "envelope"
-          elseif not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
+          if not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
             if state.latchedShiftMode == modeDef.id then state.latchedShiftMode = nil
             else state.latchedShiftMode = modeDef.id end
           end
@@ -1191,12 +1199,7 @@ function KeyStep.handleGuiAction(actionType, data)
         -- Black key clicked on GUI: toggle latch mode!
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef and isDown then
-          if modeDef.id == "envelope" then
-            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
-            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
-            state.latchedShiftMode = "envelope"
-            state.activeShiftMode = "envelope"
-          elseif state.latchedShiftMode == modeDef.id then
+          if state.latchedShiftMode == modeDef.id then
             state.latchedShiftMode = nil
             state.activeShiftMode = nil
           else
@@ -1246,12 +1249,8 @@ function KeyStep.handleGuiAction(actionType, data)
     state.pitchBend = pitchVal
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
       local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
-      state.paramValues[assignment.stage or shiftDef.id] = ccVal
-      sendCC(assignment.cc, ccVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
       sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
       sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     elseif outputDevice then
@@ -1262,11 +1261,7 @@ function KeyStep.handleGuiAction(actionType, data)
     local modVal = tonumber(data.value) or 0
     local shiftDef = getActiveShiftModeDef()
     if shiftDef then
-      local assignment = effectiveShiftAssignment(shiftDef)
-      state.shiftControlTweaked = true
-      currentParamValues()[assignment.stage or shiftDef.id] = modVal
-      state.paramValues[assignment.stage or shiftDef.id] = modVal
-      sendCC(assignment.cc, modVal, getOutputChannel())
+      local assignment = dispatchShiftCC(shiftDef, modVal)
       sendToHud("mod_wheel", modVal, true, { cc = assignment.cc, value = modVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     else
       state.modWheel = modVal
