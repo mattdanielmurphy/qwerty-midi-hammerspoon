@@ -125,7 +125,7 @@ local state = {
 
   tracks = {
     [1] = {
-      id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -133,7 +133,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [2] = {
-      id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -141,7 +141,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [3] = {
-      id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
+      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -149,7 +149,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [4] = {
-      id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -414,9 +414,27 @@ local function applyCustomLayout(customData)
 
   local actionIdx = getActionIndex()
 
+  -- Legacy saved layout migration: replace F (code 3) -> arpLatchToggle with Octave +
+  if type(customData.home_row_controls) == "table" then
+    for _, item in ipairs(customData.home_row_controls) do
+      if item.code == 3 and (item.action == "arpLatchToggle" or item.action == "lockLoop" or item.action == "lockAndSwap") then
+        item.action = "octaveUp"
+        item.name = "Oct +"
+        item.shiftAction = "topVolUp"
+        item.shiftName = "TopVol +"
+      end
+    end
+  end
+
   for codeStr, binding in pairs(customData) do
     local code = tonumber(codeStr)
     if code and type(binding) == "table" then
+      if code == 3 and (binding.action == "arpLatchToggle" or binding.action == "lockLoop" or binding.action == "lockAndSwap") then
+        binding.action = "octaveUp"
+        binding.name = "Oct +"
+        binding.shiftAction = "topVolUp"
+        binding.shiftName = "TopVol +"
+      end
       if binding.action == "none" or binding.isNote == true or (binding.action == nil and binding.shiftAction == nil and binding.baseNote == nil) then
         -- Revert to default note or control for this keycode
         local defaultDef = defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultHomeRowControls[code] or defaultNumberRowControls[code]
@@ -669,11 +687,18 @@ local defaultKeyStepLowerRowControls = {
   [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
 }
 
+local function isKsConnected()
+  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
+    return _G.activeWatchers.keystep.isConnected() == true
+  end
+  return state.keystepConnected == true
+end
+
 local function getNoteKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap[code]
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if ksConnected and defaultKeyStepLowerRowControls[code] then
     return nil
   end
@@ -686,7 +711,7 @@ local function getControlKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap[code]
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if ksConnected and defaultKeyStepLowerRowControls[code] then
     return defaultKeyStepLowerRowControls[code]
   end
@@ -713,7 +738,7 @@ local function getActiveNoteKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
   _cachedKsConnected = ksConnected
   local map = {}
@@ -731,7 +756,7 @@ local function getActiveControlKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
   _cachedKsConnected = ksConnected
   local map = {}
@@ -779,5 +804,6 @@ return {
   getControlKey = getControlKey,
   getNumberControlKey = getNumberControlKey,
   getActiveNoteKeysMap = getActiveNoteKeysMap,
-  getActiveControlKeysMap = getActiveControlKeysMap
+  getActiveControlKeysMap = getActiveControlKeysMap,
+  isKeyStepConnected = isKsConnected
 }

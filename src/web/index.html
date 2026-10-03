@@ -2540,31 +2540,33 @@
     background: transparent;
   }
 
-  /* Per-Track Control Keys: ALWAYS use currently selected track's color */
+  /* Per-Track Control Keys: ALWAYS use assigned track's color */
   .key-pad.per-track-ctrl {
-    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.1) !important;
   }
   .key-pad.per-track-ctrl .key-note {
-    color: var(--active-track-color, #00e5ff) !important;
+    color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
     font-weight: 700;
+    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.5);
   }
   .key-pad.per-track-ctrl .key-code {
-    color: rgba(var(--active-track-rgb, 0, 229, 255), 0.75) !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.85) !important;
   }
   .key-pad.per-track-ctrl.latch-active,
   .key-pad.per-track-ctrl.latch-mode-active,
   .key-pad.per-track-ctrl.sustain-active,
   .key-pad.per-track-ctrl.active-toggle {
-    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.22) !important;
-    border-color: var(--active-track-color, #00e5ff) !important;
-    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.28) !important;
+    border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    box-shadow: 0 0 12px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6), inset 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
   }
   .key-pad.per-track-ctrl.latch-active .key-note,
   .key-pad.per-track-ctrl.latch-mode-active .key-note,
   .key-pad.per-track-ctrl.sustain-active .key-note,
   .key-pad.per-track-ctrl.active-toggle .key-note {
     color: #ffffff !important;
-    text-shadow: 0 0 8px var(--active-track-color, #00e5ff) !important;
+    text-shadow: 0 0 8px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Header Controls Bound to Active Track */
@@ -2604,6 +2606,114 @@
     border-color: var(--active-track-color, #00e5ff) !important;
     background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
     box-shadow: 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
+  }
+
+  /* Selected Chord Mini Piano (Header) */
+  .chord-mini-piano {
+    position: relative;
+    display: inline-flex;
+    width: 52px;
+    height: 14px;
+    background: #141418;
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    margin-left: 4px;
+    overflow: hidden;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+  .cmp-white-key {
+    flex: 1 1 0;
+    height: 100%;
+    background: #232328;
+    border-right: 1px solid #141416;
+    box-sizing: border-box;
+    transition: background 0.05s ease;
+  }
+  .cmp-white-key:last-child {
+    border-right: none;
+  }
+  .cmp-black-key {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    width: 4.5px;
+    background: #0c0c0e;
+    border: 1px solid #000;
+    border-top: none;
+    border-radius: 0 0 1px 1px;
+    transform: translateX(-50%);
+    z-index: 2;
+    box-sizing: border-box;
+    transition: background 0.05s ease;
+  }
+  .cmp-white-key.chord-key-active,
+  .cmp-black-key.chord-key-active {
+    background: #ffffff !important;
+    box-shadow: 0 0 4px #ffffff;
+    z-index: 3;
+  }
+  .cmp-white-key.chord-key-root,
+  .cmp-black-key.chord-key-root {
+    background: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+    z-index: 4;
+  }
+
+  /* 88-Key Performance Piano Diagram (Footer) */
+  .performance-piano-88-wrap {
+    margin-top: 4px;
+    width: 100%;
+    background: rgba(12, 12, 16, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    padding: 2px 3px;
+    box-sizing: border-box;
+  }
+  .performance-piano-88 {
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 16px;
+    background: #111114;
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+    user-select: none;
+  }
+  .p88-white-key {
+    flex: 1 1 0;
+    height: 100%;
+    background: #2c2c32;
+    border-right: 1px solid #16161a;
+    box-sizing: border-box;
+    transition: background 0.04s ease;
+  }
+  .p88-white-key:last-child {
+    border-right: none;
+  }
+  .p88-white-key.is-c-key {
+    border-left: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .p88-black-key {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    background: #0a0a0d;
+    border: 0.5px solid #000;
+    border-top: none;
+    box-sizing: border-box;
+    z-index: 2;
+    transform: translateX(-50%);
+    border-radius: 0 0 1.5px 1.5px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.7);
+    transition: background 0.04s ease;
+  }
+  .p88-white-key.piano-key-active,
+  .p88-black-key.piano-key-active {
+    background: var(--note-track-color, #00e5ff) !important;
+    box-shadow: 0 0 8px var(--note-track-color, #00e5ff), inset 0 0 3px #ffffff !important;
+    z-index: 3;
   }
 </style>
 </head>
@@ -2690,6 +2800,7 @@
       <div id="chord-display-badge" class="badge-small chord-display-badge" title="Live Chord Detection (Logic Pro style)">
         <span class="chord-icon">🎵</span>
         <span id="chord-name-text" class="chord-name-text">—</span>
+        <div id="chord-mini-piano" class="chord-mini-piano" title="Selected Chord Pitch Diagram"></div>
       </div>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="keystep-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Arturia KeyStep 32 Connected">
@@ -2730,6 +2841,9 @@
             <div id="vol-fill-bottom" class="vol-bar-fill"></div>
           </div>
         </div>
+      </div>
+      <div id="performance-piano-88-wrap" class="performance-piano-88-wrap" title="88-Key Real-Time MIDI Piano Monitor (A0–C8)">
+        <div id="performance-piano-88" class="performance-piano-88"></div>
       </div>
     </div>
 
@@ -4201,6 +4315,8 @@
   // Auto-initialize grid instantly on document load and notify Lua host
   window.addEventListener('DOMContentLoaded', () => {
     initGrid(LAYOUT_DATA);
+    if (typeof initChordMiniPiano === 'function') initChordMiniPiano();
+    if (typeof initPerformancePiano88 === 'function') initPerformancePiano88();
 
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'domReady' });
@@ -4933,8 +5049,14 @@
     const t0 = performance.now();
     try {
       if (!data) return;
-      if (data.detectedChord !== undefined) {
+      if (data.selectedChord !== undefined) {
+        window.updateChordDisplay(data.selectedChord ? data.selectedChord.name : '', data.selectedChord);
+      } else if (data.detectedChord !== undefined) {
         window.updateChordDisplay(data.detectedChord);
+      }
+
+      if (data.activePianoNotes !== undefined && typeof window.syncActivePianoNotes === 'function') {
+        window.syncActivePianoNotes(data.activePianoNotes);
       }
 
       if (data.keystepConnected !== undefined) {
@@ -5259,7 +5381,19 @@
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               }
             }
-            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.typeClass || '');
+            if (k.assignedTrackColor) {
+              el.style.setProperty('--assigned-track-color', k.assignedTrackColor);
+              if (k.assignedTrackRgb) {
+                el.style.setProperty('--assigned-track-rgb', k.assignedTrackRgb);
+              }
+            } else {
+              el.style.removeProperty('--assigned-track-color');
+              el.style.removeProperty('--assigned-track-rgb');
+            }
+
+            const isPerTrack = !!k.isPerTrack || !!k.assignedTrackColor;
+            const typeClass = (k.typeClass || '') + (isPerTrack && !(k.typeClass || '').includes('per-track-ctrl') ? ' per-track-ctrl' : '');
+            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + typeClass;
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
                 ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-soloed', 'trk-audio-active', 'trk-human-active', 'trk-arp-step'].includes(c)
@@ -5512,13 +5646,177 @@ window.updateKeyState = function(code, pressed, latched, chordName) {
   }
 };
 
-window.updateChordDisplay = function(chordName) {
+// Mini piano for Selected Chord Type
+let cmpElements = [];
+function initChordMiniPiano() {
+  const container = document.getElementById('chord-mini-piano');
+  if (!container || container.children.length > 0) return;
+  container.innerHTML = '';
+  cmpElements = [];
+
+  // 8 white keys (C through C): indices 0..7
+  // White keys pitch classes: C(0), D(2), E(4), F(5), G(7), A(9), B(11), C(0)
+  const whitePcs = [0, 2, 4, 5, 7, 9, 11, 0];
+  for (let i = 0; i < 8; i++) {
+    const w = document.createElement('div');
+    w.className = 'cmp-white-key';
+    w.dataset.pc = whitePcs[i];
+    container.appendChild(w);
+    cmpElements.push(w);
+  }
+
+  // 5 black keys: C#(1), D#(3), F#(6), G#(8), A#(10)
+  // Positioned between white keys
+  const blackKeys = [
+    { pc: 1, whiteBoundary: 1 }, // after white 0 (C)
+    { pc: 3, whiteBoundary: 2 }, // after white 1 (D)
+    { pc: 6, whiteBoundary: 4 }, // after white 3 (F)
+    { pc: 8, whiteBoundary: 5 }, // after white 4 (G)
+    { pc: 10, whiteBoundary: 6 } // after white 5 (A)
+  ];
+  for (let i = 0; i < blackKeys.length; i++) {
+    const bk = blackKeys[i];
+    const b = document.createElement('div');
+    b.className = 'cmp-black-key';
+    b.dataset.pc = bk.pc;
+    const pct = (bk.whiteBoundary / 8) * 100;
+    b.style.left = pct + '%';
+    container.appendChild(b);
+    cmpElements.push(b);
+  }
+}
+
+function updateChordMiniPiano(chordData) {
+  initChordMiniPiano();
+  if (!cmpElements || cmpElements.length === 0) return;
+  if (!chordData || !chordData.pitchClasses || chordData.pitchClasses.length === 0) {
+    for (let i = 0; i < cmpElements.length; i++) {
+      cmpElements[i].classList.remove('chord-key-active', 'chord-key-root');
+    }
+    return;
+  }
+  const pcs = new Set(chordData.pitchClasses);
+  const rootPc = (chordData.root !== undefined) ? (chordData.root % 12) : null;
+  for (let i = 0; i < cmpElements.length; i++) {
+    const el = cmpElements[i];
+    const pc = parseInt(el.dataset.pc, 10);
+    const inChord = pcs.has(pc);
+    const isRoot = inChord && (rootPc !== null) && (pc === rootPc);
+    el.classList.toggle('chord-key-active', inChord && !isRoot);
+    el.classList.toggle('chord-key-root', isRoot);
+  }
+}
+
+window.updateChordDisplay = function(chordName, chordData) {
   const badge = document.getElementById('chord-display-badge');
   if (!badge) return;
-  const name = String(chordName || '').trim();
+  const name = String(chordName || (chordData && (chordData.label || chordData.name)) || '').trim();
   const text = badge.querySelector('.chord-name-text');
   if (text) text.textContent = name || '—';
   badge.classList.toggle('active-chord', !!name);
+  if (chordData && chordData.label) {
+    badge.title = chordData.label;
+  }
+  updateChordMiniPiano(chordData);
+};
+
+/* ── 88-Key Performance Piano Real-Time Visualizer (A0–C8) ── */
+const P88_LOWEST_NOTE = 21;  // A0
+const P88_HIGHEST_NOTE = 108; // C8
+const P88_BLACK_KEYS_SEMITONES = { 1: true, 3: true, 6: true, 8: true, 10: true };
+const P88_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+let p88Elements = {};
+
+function initPerformancePiano88() {
+  const container = document.getElementById('performance-piano-88');
+  if (!container || container.children.length > 0) return;
+  container.innerHTML = '';
+  p88Elements = {};
+
+  const whiteKeyCount = 52;
+  // Create 52 white keys
+  for (let n = P88_LOWEST_NOTE; n <= P88_HIGHEST_NOTE; n++) {
+    const semitone = n % 12;
+    if (!P88_BLACK_KEYS_SEMITONES[semitone]) {
+      const octave = Math.floor(n / 12) - 1;
+      const noteName = P88_NOTE_NAMES[semitone] + octave;
+      const wKey = document.createElement('div');
+      wKey.className = 'p88-white-key' + (semitone === 0 ? ' is-c-key' : '');
+      wKey.id = 'p88-key-' + n;
+      wKey.dataset.note = n;
+      wKey.dataset.name = noteName;
+      wKey.title = noteName + ' (MIDI ' + n + ')';
+      container.appendChild(wKey);
+      p88Elements[n] = wKey;
+    }
+  }
+
+  // Create 36 black keys positioned over white key boundaries
+  let whiteIdxTracker = 0;
+  for (let n = P88_LOWEST_NOTE; n <= P88_HIGHEST_NOTE; n++) {
+    const semitone = n % 12;
+    const isBlack = !!P88_BLACK_KEYS_SEMITONES[semitone];
+    const octave = Math.floor(n / 12) - 1;
+    const noteName = P88_NOTE_NAMES[semitone] + octave;
+
+    if (!isBlack) {
+      whiteIdxTracker++;
+    } else {
+      const bKey = document.createElement('div');
+      bKey.className = 'p88-black-key';
+      bKey.id = 'p88-key-' + n;
+      bKey.dataset.note = n;
+      bKey.dataset.name = noteName;
+      bKey.title = noteName + ' (MIDI ' + n + ')';
+      const pct = (whiteIdxTracker / whiteKeyCount) * 100;
+      bKey.style.left = pct.toFixed(4) + '%';
+      bKey.style.width = ((1 / whiteKeyCount) * 65).toFixed(4) + '%';
+      container.appendChild(bKey);
+      p88Elements[n] = bKey;
+    }
+  }
+}
+
+window.updatePianoNote = function(noteNum, isActive, trackId, trackColor) {
+  if (!p88Elements[noteNum]) initPerformancePiano88();
+  const el = p88Elements[noteNum] || document.getElementById('p88-key-' + noteNum);
+  if (!el) return;
+  if (isActive) {
+    el.classList.add('piano-key-active');
+    const color = trackColor || '#00e5ff';
+    el.style.setProperty('--note-track-color', color);
+  } else {
+    el.classList.remove('piano-key-active');
+    el.style.removeProperty('--note-track-color');
+  }
+};
+
+window.clearPianoNotes = function() {
+  const activeKeys = document.querySelectorAll('.piano-key-active');
+  for (let i = 0; i < activeKeys.length; i++) {
+    activeKeys[i].classList.remove('piano-key-active');
+    activeKeys[i].style.removeProperty('--note-track-color');
+  }
+};
+
+window.syncActivePianoNotes = function(activeLedger) {
+  initPerformancePiano88();
+  if (!activeLedger) return;
+  const ledgerNotes = {};
+  for (const [noteStr, info] of Object.entries(activeLedger)) {
+    const n = parseInt(noteStr, 10);
+    ledgerNotes[n] = true;
+    window.updatePianoNote(n, true, info.track, info.color);
+  }
+  const activeKeys = document.querySelectorAll('.piano-key-active');
+  for (let i = 0; i < activeKeys.length; i++) {
+    const n = parseInt(activeKeys[i].dataset.note, 10);
+    if (!ledgerNotes[n]) {
+      activeKeys[i].classList.remove('piano-key-active');
+      activeKeys[i].style.removeProperty('--note-track-color');
+    }
+  }
 };
 
 /* ── Arturia KeyStep 32 Hardware Connection & Dynamic Surface Stacking ── */

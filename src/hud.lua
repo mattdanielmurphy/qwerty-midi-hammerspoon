@@ -97,6 +97,17 @@ local function updateChordDisplay()
   safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s);", chordParam))
 end
 
+local function updatePianoNote(noteNum, isActive, trackId, trackColor)
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  safeEvaluateJS(string.format("if (window.updatePianoNote) window.updatePianoNote(%d, %s, %d, %q);",
+    tonumber(noteNum) or 0, isActive and "true" or "false", tonumber(trackId) or 0, tostring(trackColor or "")))
+end
+
+local function clearPianoNotes()
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  safeEvaluateJS("if (window.clearPianoNotes) window.clearPianoNotes();")
+end
+
 local function updateKeyStepControl(controlId, value, pressed, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
   local extraJson = "null"
@@ -471,7 +482,12 @@ local PROPOSED_LAYOUT_MAP = {
   }
 }
 
+local lowerRowCodes = { [6]=true, [7]=true, [8]=true, [9]=true, [11]=true, [45]=true, [46]=true, [43]=true, [47]=true, [44]=true }
+
 local function getProposedActionDef(code)
+  if lowerRowCodes[code] and not isKeyStepConnected() then
+    return nil
+  end
   local s = state.shiftHeld == true
   local a = state.altHeld == true
   local c = state.ctrlHeld == true
@@ -493,6 +509,9 @@ local function getProposedActionDef(code)
 end
 
 local function getProposedActionSpotlight(code)
+  if lowerRowCodes[code] and not isKeyStepConnected() then
+    return nil
+  end
   local s = state.shiftHeld == true
   local a = state.altHeld == true
   local c = state.ctrlHeld == true
@@ -852,15 +871,6 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             keyUpdates[strCode].sustainActive = false
           end
         end
-      elseif propCode == 3 then -- Key F
-        if activeLayer == "base" then
-          if isArpLatch then
-            keyUpdates[strCode].displayNote = "Latch 🔒"
-            keyUpdates[strCode].note = "Latch 🔒"
-            keyUpdates[strCode].typeClass = "latch-mode-active"
-            keyUpdates[strCode].sustainActive = true
-          end
-        end
       elseif propCode == 48 then -- Key 48 (Tab: Sustain)
         local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
         if sMode == "smart" then
@@ -885,10 +895,47 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
   end
 
-  local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
+  local activeTrkId = state.activeTrack or 1
+  local botTrkId = state.bottomRowTrack or 1
+  local topTrkId = state.topRowTrack or 3
+
+  local function resolveAssignedTrackId(cNum)
+    -- Track selectors
+    if cNum == 18 or (ksConnected and cNum == 6) then return 1 end
+    if cNum == 19 or (ksConnected and cNum == 7) then return 2 end
+    if cNum == 20 or (ksConnected and cNum == 8) then return 3 end
+    if cNum == 21 or (ksConnected and cNum == 9) then return 4 end
+
+    -- Top-row controls: 5 (23: TopVol -), 6 (22: TopVol +)
+    if cNum == 23 or cNum == 22 then
+      return topTrkId
+    end
+
+    -- Bottom-row controls: 7 (26: BotVol -), 8 (28: BotVol +)
+    if cNum == 26 or cNum == 28 then
+      return botTrkId
+    end
+    -- Lower row when KeyStep connected (B:11, N:45, M:46, ,:43, .:47, /:44)
+    if ksConnected and (cNum == 11 or cNum == 45 or cNum == 46 or cNum == 43 or cNum == 47 or cNum == 44) then
+      return botTrkId
+    end
+
+    -- Home row per-track controls (0: Arp, 48: Tab/Sustain, 39: '/Chord)
+    if cNum == 0 or cNum == 48 or cNum == 39 then
+      return activeTrkId
+    end
+
+    return nil
+  end
+
   for codeStr, kUpd in pairs(keyUpdates) do
     local cNum = tonumber(codeStr)
-    if perTrackCodes[cNum] then
+    local assignedId = resolveAssignedTrackId(cNum)
+    if assignedId and state.tracks and state.tracks[assignedId] then
+      local t = state.tracks[assignedId]
+      kUpd.assignedTrackId = assignedId
+      kUpd.assignedTrackColor = t.color
+      kUpd.assignedTrackRgb = t.rgb
       kUpd.isPerTrack = true
     end
   end
@@ -937,7 +984,33 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
   local detectedChord = getActiveChord()
 
+  local cIdx = (activeTrk and activeTrk.chordIdx) or state.chordIdx or 1
+  local chordDef = state.CHORDS and state.CHORDS[cIdx] or { name = "Triad", offsets = { 0, 2, 4 } }
+  local rootPitch = 60 + (state.currentRoot or 0)
+  local chordPitches = transposer.getChordPitches(rootPitch, false, true, cIdx)
+  local chordPitchNames = {}
+  local chordPitchClasses = {}
+  if chordPitches then
+    for _, p in ipairs(chordPitches) do
+      table.insert(chordPitchNames, transposer.noteNumToName(p))
+      table.insert(chordPitchClasses, p % 12)
+    end
+  end
+
+  local rootNameStr = config.NOTE_NAMES and config.NOTE_NAMES[(state.currentRoot or 0) + 1] or "C"
+  local selectedChordInfo = {
+    name = chordDef.name,
+    root = state.currentRoot or 0,
+    rootName = rootNameStr,
+    pitches = chordPitches,
+    pitchClasses = chordPitchClasses,
+    noteNames = chordPitchNames,
+    label = rootNameStr .. " " .. chordDef.name .. " (" .. table.concat(chordPitchNames, " · ") .. ")"
+  }
+
   local payload = {
+    selectedChord = selectedChordInfo,
+    activePianoNotes = midi.getActiveNoteLedger(),
     detectedChord = detectedChord,
     keystepConnected = isKeyStepConnected(),
     keystepState = _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.getFullState and _G.activeWatchers.keystep.getFullState() or nil,
@@ -1688,5 +1761,7 @@ return {
   updateConnectionStatus = updateConnectionStatus,
   getProposedActionSpotlight = getProposedActionSpotlight,
   getProposedActionDef = getProposedActionDef,
+  updatePianoNote = updatePianoNote,
+  clearPianoNotes = clearPianoNotes,
   PROPOSED_LAYOUT_MAP = PROPOSED_LAYOUT_MAP
 }

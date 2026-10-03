@@ -102,12 +102,12 @@ test('KeyStep modal shift keybed, scale lock badge, and shift status pill are wi
   expect(source).toContain('data-shift="reverb"');
   expect(source).toContain('data-shift="delay"');
   expect(source).toContain('data-shift="release"');
-  expect(source).toContain('data-shift="volume"');
+  expect(source).toContain('data-shift="envelope"');
   expect(source).toContain('<span class="ks-key-sub">CUT</span>');
   expect(source).toContain('<span class="ks-key-sub">REV</span>');
   expect(source).toContain('<span class="ks-key-sub">DLY</span>');
   expect(source).toContain('<span class="ks-key-sub">REL</span>');
-  expect(source).toContain('<span class="ks-key-sub">VOL</span>');
+  expect(source).toContain('<span class="ks-key-sub">ADSR</span>');
 
   // Dispatcher handles shift_mode and transposer_enabled
   expect(source).toContain("controlId === 'shift_mode'");

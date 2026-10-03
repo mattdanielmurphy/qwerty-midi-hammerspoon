@@ -4576,6 +4576,17 @@ local function updateChordDisplay()
   safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s);", chordParam))
 end
 
+local function updatePianoNote(noteNum, isActive, trackId, trackColor)
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  safeEvaluateJS(string.format("if (window.updatePianoNote) window.updatePianoNote(%d, %s, %d, %q);",
+    tonumber(noteNum) or 0, isActive and "true" or "false", tonumber(trackId) or 0, tostring(trackColor or "")))
+end
+
+local function clearPianoNotes()
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  safeEvaluateJS("if (window.clearPianoNotes) window.clearPianoNotes();")
+end
+
 local function updateKeyStepControl(controlId, value, pressed, extra)
   if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
   local extraJson = "null"
@@ -4950,7 +4961,12 @@ local PROPOSED_LAYOUT_MAP = {
   }
 }
 
+local lowerRowCodes = { [6]=true, [7]=true, [8]=true, [9]=true, [11]=true, [45]=true, [46]=true, [43]=true, [47]=true, [44]=true }
+
 local function getProposedActionDef(code)
+  if lowerRowCodes[code] and not isKeyStepConnected() then
+    return nil
+  end
   local s = state.shiftHeld == true
   local a = state.altHeld == true
   local c = state.ctrlHeld == true
@@ -4972,6 +4988,9 @@ local function getProposedActionDef(code)
 end
 
 local function getProposedActionSpotlight(code)
+  if lowerRowCodes[code] and not isKeyStepConnected() then
+    return nil
+  end
   local s = state.shiftHeld == true
   local a = state.altHeld == true
   local c = state.ctrlHeld == true
@@ -5331,15 +5350,6 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
             keyUpdates[strCode].sustainActive = false
           end
         end
-      elseif propCode == 3 then -- Key F
-        if activeLayer == "base" then
-          if isArpLatch then
-            keyUpdates[strCode].displayNote = "Latch 🔒"
-            keyUpdates[strCode].note = "Latch 🔒"
-            keyUpdates[strCode].typeClass = "latch-mode-active"
-            keyUpdates[strCode].sustainActive = true
-          end
-        end
       elseif propCode == 48 then -- Key 48 (Tab: Sustain)
         local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
         if sMode == "smart" then
@@ -5364,10 +5374,47 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
   end
 
-  local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
+  local activeTrkId = state.activeTrack or 1
+  local botTrkId = state.bottomRowTrack or 1
+  local topTrkId = state.topRowTrack or 3
+
+  local function resolveAssignedTrackId(cNum)
+    -- Track selectors
+    if cNum == 18 or (ksConnected and cNum == 6) then return 1 end
+    if cNum == 19 or (ksConnected and cNum == 7) then return 2 end
+    if cNum == 20 or (ksConnected and cNum == 8) then return 3 end
+    if cNum == 21 or (ksConnected and cNum == 9) then return 4 end
+
+    -- Top-row controls: 5 (23: TopVol -), 6 (22: TopVol +)
+    if cNum == 23 or cNum == 22 then
+      return topTrkId
+    end
+
+    -- Bottom-row controls: 7 (26: BotVol -), 8 (28: BotVol +)
+    if cNum == 26 or cNum == 28 then
+      return botTrkId
+    end
+    -- Lower row when KeyStep connected (B:11, N:45, M:46, ,:43, .:47, /:44)
+    if ksConnected and (cNum == 11 or cNum == 45 or cNum == 46 or cNum == 43 or cNum == 47 or cNum == 44) then
+      return botTrkId
+    end
+
+    -- Home row per-track controls (0: Arp, 48: Tab/Sustain, 39: '/Chord)
+    if cNum == 0 or cNum == 48 or cNum == 39 then
+      return activeTrkId
+    end
+
+    return nil
+  end
+
   for codeStr, kUpd in pairs(keyUpdates) do
     local cNum = tonumber(codeStr)
-    if perTrackCodes[cNum] then
+    local assignedId = resolveAssignedTrackId(cNum)
+    if assignedId and state.tracks and state.tracks[assignedId] then
+      local t = state.tracks[assignedId]
+      kUpd.assignedTrackId = assignedId
+      kUpd.assignedTrackColor = t.color
+      kUpd.assignedTrackRgb = t.rgb
       kUpd.isPerTrack = true
     end
   end
@@ -5416,7 +5463,33 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
 
   local detectedChord = getActiveChord()
 
+  local cIdx = (activeTrk and activeTrk.chordIdx) or state.chordIdx or 1
+  local chordDef = state.CHORDS and state.CHORDS[cIdx] or { name = "Triad", offsets = { 0, 2, 4 } }
+  local rootPitch = 60 + (state.currentRoot or 0)
+  local chordPitches = transposer.getChordPitches(rootPitch, false, true, cIdx)
+  local chordPitchNames = {}
+  local chordPitchClasses = {}
+  if chordPitches then
+    for _, p in ipairs(chordPitches) do
+      table.insert(chordPitchNames, transposer.noteNumToName(p))
+      table.insert(chordPitchClasses, p % 12)
+    end
+  end
+
+  local rootNameStr = config.NOTE_NAMES and config.NOTE_NAMES[(state.currentRoot or 0) + 1] or "C"
+  local selectedChordInfo = {
+    name = chordDef.name,
+    root = state.currentRoot or 0,
+    rootName = rootNameStr,
+    pitches = chordPitches,
+    pitchClasses = chordPitchClasses,
+    noteNames = chordPitchNames,
+    label = rootNameStr .. " " .. chordDef.name .. " (" .. table.concat(chordPitchNames, " · ") .. ")"
+  }
+
   local payload = {
+    selectedChord = selectedChordInfo,
+    activePianoNotes = midi.getActiveNoteLedger(),
     detectedChord = detectedChord,
     keystepConnected = isKeyStepConnected(),
     keystepState = _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.getFullState and _G.activeWatchers.keystep.getFullState() or nil,
@@ -6167,6 +6240,8 @@ return {
   updateConnectionStatus = updateConnectionStatus,
   getProposedActionSpotlight = getProposedActionSpotlight,
   getProposedActionDef = getProposedActionDef,
+  updatePianoNote = updatePianoNote,
+  clearPianoNotes = clearPianoNotes,
   PROPOSED_LAYOUT_MAP = PROPOSED_LAYOUT_MAP
 }
 
@@ -8784,31 +8859,33 @@ local HTML_UI_CONTENT = [[
     background: transparent;
   }
 
-  /* Per-Track Control Keys: ALWAYS use currently selected track's color */
+  /* Per-Track Control Keys: ALWAYS use assigned track's color */
   .key-pad.per-track-ctrl {
-    border-color: rgba(var(--active-track-rgb, 0, 229, 255), 0.5) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.1) !important;
   }
   .key-pad.per-track-ctrl .key-note {
-    color: var(--active-track-color, #00e5ff) !important;
+    color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
     font-weight: 700;
+    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.5);
   }
   .key-pad.per-track-ctrl .key-code {
-    color: rgba(var(--active-track-rgb, 0, 229, 255), 0.75) !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.85) !important;
   }
   .key-pad.per-track-ctrl.latch-active,
   .key-pad.per-track-ctrl.latch-mode-active,
   .key-pad.per-track-ctrl.sustain-active,
   .key-pad.per-track-ctrl.active-toggle {
-    background: rgba(var(--active-track-rgb, 0, 229, 255), 0.22) !important;
-    border-color: var(--active-track-color, #00e5ff) !important;
-    box-shadow: 0 0 10px rgba(var(--active-track-rgb, 0, 229, 255), 0.5), inset 0 0 6px rgba(var(--active-track-rgb, 0, 229, 255), 0.3) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.28) !important;
+    border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    box-shadow: 0 0 12px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6), inset 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
   }
   .key-pad.per-track-ctrl.latch-active .key-note,
   .key-pad.per-track-ctrl.latch-mode-active .key-note,
   .key-pad.per-track-ctrl.sustain-active .key-note,
   .key-pad.per-track-ctrl.active-toggle .key-note {
     color: #ffffff !important;
-    text-shadow: 0 0 8px var(--active-track-color, #00e5ff) !important;
+    text-shadow: 0 0 8px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Header Controls Bound to Active Track */
@@ -8848,6 +8925,114 @@ local HTML_UI_CONTENT = [[
     border-color: var(--active-track-color, #00e5ff) !important;
     background: rgba(var(--active-track-rgb, 0, 229, 255), 0.2) !important;
     box-shadow: 0 0 8px rgba(var(--active-track-rgb, 0, 229, 255), 0.4) !important;
+  }
+
+  /* Selected Chord Mini Piano (Header) */
+  .chord-mini-piano {
+    position: relative;
+    display: inline-flex;
+    width: 52px;
+    height: 14px;
+    background: #141418;
+    border-radius: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    margin-left: 4px;
+    overflow: hidden;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+  .cmp-white-key {
+    flex: 1 1 0;
+    height: 100%;
+    background: #232328;
+    border-right: 1px solid #141416;
+    box-sizing: border-box;
+    transition: background 0.05s ease;
+  }
+  .cmp-white-key:last-child {
+    border-right: none;
+  }
+  .cmp-black-key {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    width: 4.5px;
+    background: #0c0c0e;
+    border: 1px solid #000;
+    border-top: none;
+    border-radius: 0 0 1px 1px;
+    transform: translateX(-50%);
+    z-index: 2;
+    box-sizing: border-box;
+    transition: background 0.05s ease;
+  }
+  .cmp-white-key.chord-key-active,
+  .cmp-black-key.chord-key-active {
+    background: #ffffff !important;
+    box-shadow: 0 0 4px #ffffff;
+    z-index: 3;
+  }
+  .cmp-white-key.chord-key-root,
+  .cmp-black-key.chord-key-root {
+    background: var(--active-track-color, #00e5ff) !important;
+    box-shadow: 0 0 6px var(--active-track-color, #00e5ff);
+    z-index: 4;
+  }
+
+  /* 88-Key Performance Piano Diagram (Footer) */
+  .performance-piano-88-wrap {
+    margin-top: 4px;
+    width: 100%;
+    background: rgba(12, 12, 16, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    padding: 2px 3px;
+    box-sizing: border-box;
+  }
+  .performance-piano-88 {
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 16px;
+    background: #111114;
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.8);
+    user-select: none;
+  }
+  .p88-white-key {
+    flex: 1 1 0;
+    height: 100%;
+    background: #2c2c32;
+    border-right: 1px solid #16161a;
+    box-sizing: border-box;
+    transition: background 0.04s ease;
+  }
+  .p88-white-key:last-child {
+    border-right: none;
+  }
+  .p88-white-key.is-c-key {
+    border-left: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .p88-black-key {
+    position: absolute;
+    top: 0;
+    height: 60%;
+    background: #0a0a0d;
+    border: 0.5px solid #000;
+    border-top: none;
+    box-sizing: border-box;
+    z-index: 2;
+    transform: translateX(-50%);
+    border-radius: 0 0 1.5px 1.5px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.7);
+    transition: background 0.04s ease;
+  }
+  .p88-white-key.piano-key-active,
+  .p88-black-key.piano-key-active {
+    background: var(--note-track-color, #00e5ff) !important;
+    box-shadow: 0 0 8px var(--note-track-color, #00e5ff), inset 0 0 3px #ffffff !important;
+    z-index: 3;
   }
 </style>
 </head>
@@ -8934,6 +9119,7 @@ local HTML_UI_CONTENT = [[
       <div id="chord-display-badge" class="badge-small chord-display-badge" title="Live Chord Detection (Logic Pro style)">
         <span class="chord-icon">🎵</span>
         <span id="chord-name-text" class="chord-name-text">—</span>
+        <div id="chord-mini-piano" class="chord-mini-piano" title="Selected Chord Pitch Diagram"></div>
       </div>
       <select id="layout-select" class="badge-small" title="Select Keyboard Layout"></select>
       <div id="keystep-badge" class="badge-small" style="display: none; align-items: center; gap: 5px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Arturia KeyStep 32 Connected">
@@ -8974,6 +9160,9 @@ local HTML_UI_CONTENT = [[
             <div id="vol-fill-bottom" class="vol-bar-fill"></div>
           </div>
         </div>
+      </div>
+      <div id="performance-piano-88-wrap" class="performance-piano-88-wrap" title="88-Key Real-Time MIDI Piano Monitor (A0–C8)">
+        <div id="performance-piano-88" class="performance-piano-88"></div>
       </div>
     </div>
 
@@ -10445,6 +10634,8 @@ local HTML_UI_CONTENT = [[
   // Auto-initialize grid instantly on document load and notify Lua host
   window.addEventListener('DOMContentLoaded', () => {
     initGrid(LAYOUT_DATA);
+    if (typeof initChordMiniPiano === 'function') initChordMiniPiano();
+    if (typeof initPerformancePiano88 === 'function') initPerformancePiano88();
 
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
       window.webkit.messageHandlers.midiControllerUC.postMessage({ type: 'domReady' });
@@ -11177,8 +11368,14 @@ local HTML_UI_CONTENT = [[
     const t0 = performance.now();
     try {
       if (!data) return;
-      if (data.detectedChord !== undefined) {
+      if (data.selectedChord !== undefined) {
+        window.updateChordDisplay(data.selectedChord ? data.selectedChord.name : '', data.selectedChord);
+      } else if (data.detectedChord !== undefined) {
         window.updateChordDisplay(data.detectedChord);
+      }
+
+      if (data.activePianoNotes !== undefined && typeof window.syncActivePianoNotes === 'function') {
+        window.syncActivePianoNotes(data.activePianoNotes);
       }
 
       if (data.keystepConnected !== undefined) {
@@ -11503,7 +11700,19 @@ local HTML_UI_CONTENT = [[
                 halfBottom.textContent = k.note || builtIn.noteLabel || builtIn.keyLabel || '';
               }
             }
-            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + (k.typeClass || '');
+            if (k.assignedTrackColor) {
+              el.style.setProperty('--assigned-track-color', k.assignedTrackColor);
+              if (k.assignedTrackRgb) {
+                el.style.setProperty('--assigned-track-rgb', k.assignedTrackRgb);
+              }
+            } else {
+              el.style.removeProperty('--assigned-track-color');
+              el.style.removeProperty('--assigned-track-rgb');
+            }
+
+            const isPerTrack = !!k.isPerTrack || !!k.assignedTrackColor;
+            const typeClass = (k.typeClass || '') + (isPerTrack && !(k.typeClass || '').includes('per-track-ctrl') ? ' per-track-ctrl' : '');
+            const baseClass = 'key-pad ' + (k.isControl ? 'control-pad ' : '') + (isTrackCard ? 'track-card ' : '') + typeClass;
             if (el.dataset.baseClass !== baseClass) {
               const currentStatusClasses = Array.from(el.classList).filter(c =>
                 ['latched-key', 'pressed', 'sustain-active', 'arp-held', 'arp-playing', 'trk-selected', 'trk-muted', 'trk-soloed', 'trk-audio-active', 'trk-human-active', 'trk-arp-step'].includes(c)
@@ -11756,13 +11965,177 @@ window.updateKeyState = function(code, pressed, latched, chordName) {
   }
 };
 
-window.updateChordDisplay = function(chordName) {
+// Mini piano for Selected Chord Type
+let cmpElements = [];
+function initChordMiniPiano() {
+  const container = document.getElementById('chord-mini-piano');
+  if (!container || container.children.length > 0) return;
+  container.innerHTML = '';
+  cmpElements = [];
+
+  // 8 white keys (C through C): indices 0..7
+  // White keys pitch classes: C(0), D(2), E(4), F(5), G(7), A(9), B(11), C(0)
+  const whitePcs = [0, 2, 4, 5, 7, 9, 11, 0];
+  for (let i = 0; i < 8; i++) {
+    const w = document.createElement('div');
+    w.className = 'cmp-white-key';
+    w.dataset.pc = whitePcs[i];
+    container.appendChild(w);
+    cmpElements.push(w);
+  }
+
+  // 5 black keys: C#(1), D#(3), F#(6), G#(8), A#(10)
+  // Positioned between white keys
+  const blackKeys = [
+    { pc: 1, whiteBoundary: 1 }, // after white 0 (C)
+    { pc: 3, whiteBoundary: 2 }, // after white 1 (D)
+    { pc: 6, whiteBoundary: 4 }, // after white 3 (F)
+    { pc: 8, whiteBoundary: 5 }, // after white 4 (G)
+    { pc: 10, whiteBoundary: 6 } // after white 5 (A)
+  ];
+  for (let i = 0; i < blackKeys.length; i++) {
+    const bk = blackKeys[i];
+    const b = document.createElement('div');
+    b.className = 'cmp-black-key';
+    b.dataset.pc = bk.pc;
+    const pct = (bk.whiteBoundary / 8) * 100;
+    b.style.left = pct + '%';
+    container.appendChild(b);
+    cmpElements.push(b);
+  }
+}
+
+function updateChordMiniPiano(chordData) {
+  initChordMiniPiano();
+  if (!cmpElements || cmpElements.length === 0) return;
+  if (!chordData || !chordData.pitchClasses || chordData.pitchClasses.length === 0) {
+    for (let i = 0; i < cmpElements.length; i++) {
+      cmpElements[i].classList.remove('chord-key-active', 'chord-key-root');
+    }
+    return;
+  }
+  const pcs = new Set(chordData.pitchClasses);
+  const rootPc = (chordData.root !== undefined) ? (chordData.root % 12) : null;
+  for (let i = 0; i < cmpElements.length; i++) {
+    const el = cmpElements[i];
+    const pc = parseInt(el.dataset.pc, 10);
+    const inChord = pcs.has(pc);
+    const isRoot = inChord && (rootPc !== null) && (pc === rootPc);
+    el.classList.toggle('chord-key-active', inChord && !isRoot);
+    el.classList.toggle('chord-key-root', isRoot);
+  }
+}
+
+window.updateChordDisplay = function(chordName, chordData) {
   const badge = document.getElementById('chord-display-badge');
   if (!badge) return;
-  const name = String(chordName || '').trim();
+  const name = String(chordName || (chordData && (chordData.label || chordData.name)) || '').trim();
   const text = badge.querySelector('.chord-name-text');
   if (text) text.textContent = name || '—';
   badge.classList.toggle('active-chord', !!name);
+  if (chordData && chordData.label) {
+    badge.title = chordData.label;
+  }
+  updateChordMiniPiano(chordData);
+};
+
+/* ── 88-Key Performance Piano Real-Time Visualizer (A0–C8) ── */
+const P88_LOWEST_NOTE = 21;  // A0
+const P88_HIGHEST_NOTE = 108; // C8
+const P88_BLACK_KEYS_SEMITONES = { 1: true, 3: true, 6: true, 8: true, 10: true };
+const P88_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+let p88Elements = {};
+
+function initPerformancePiano88() {
+  const container = document.getElementById('performance-piano-88');
+  if (!container || container.children.length > 0) return;
+  container.innerHTML = '';
+  p88Elements = {};
+
+  const whiteKeyCount = 52;
+  // Create 52 white keys
+  for (let n = P88_LOWEST_NOTE; n <= P88_HIGHEST_NOTE; n++) {
+    const semitone = n % 12;
+    if (!P88_BLACK_KEYS_SEMITONES[semitone]) {
+      const octave = Math.floor(n / 12) - 1;
+      const noteName = P88_NOTE_NAMES[semitone] + octave;
+      const wKey = document.createElement('div');
+      wKey.className = 'p88-white-key' + (semitone === 0 ? ' is-c-key' : '');
+      wKey.id = 'p88-key-' + n;
+      wKey.dataset.note = n;
+      wKey.dataset.name = noteName;
+      wKey.title = noteName + ' (MIDI ' + n + ')';
+      container.appendChild(wKey);
+      p88Elements[n] = wKey;
+    }
+  }
+
+  // Create 36 black keys positioned over white key boundaries
+  let whiteIdxTracker = 0;
+  for (let n = P88_LOWEST_NOTE; n <= P88_HIGHEST_NOTE; n++) {
+    const semitone = n % 12;
+    const isBlack = !!P88_BLACK_KEYS_SEMITONES[semitone];
+    const octave = Math.floor(n / 12) - 1;
+    const noteName = P88_NOTE_NAMES[semitone] + octave;
+
+    if (!isBlack) {
+      whiteIdxTracker++;
+    } else {
+      const bKey = document.createElement('div');
+      bKey.className = 'p88-black-key';
+      bKey.id = 'p88-key-' + n;
+      bKey.dataset.note = n;
+      bKey.dataset.name = noteName;
+      bKey.title = noteName + ' (MIDI ' + n + ')';
+      const pct = (whiteIdxTracker / whiteKeyCount) * 100;
+      bKey.style.left = pct.toFixed(4) + '%';
+      bKey.style.width = ((1 / whiteKeyCount) * 65).toFixed(4) + '%';
+      container.appendChild(bKey);
+      p88Elements[n] = bKey;
+    }
+  }
+}
+
+window.updatePianoNote = function(noteNum, isActive, trackId, trackColor) {
+  if (!p88Elements[noteNum]) initPerformancePiano88();
+  const el = p88Elements[noteNum] || document.getElementById('p88-key-' + noteNum);
+  if (!el) return;
+  if (isActive) {
+    el.classList.add('piano-key-active');
+    const color = trackColor || '#00e5ff';
+    el.style.setProperty('--note-track-color', color);
+  } else {
+    el.classList.remove('piano-key-active');
+    el.style.removeProperty('--note-track-color');
+  }
+};
+
+window.clearPianoNotes = function() {
+  const activeKeys = document.querySelectorAll('.piano-key-active');
+  for (let i = 0; i < activeKeys.length; i++) {
+    activeKeys[i].classList.remove('piano-key-active');
+    activeKeys[i].style.removeProperty('--note-track-color');
+  }
+};
+
+window.syncActivePianoNotes = function(activeLedger) {
+  initPerformancePiano88();
+  if (!activeLedger) return;
+  const ledgerNotes = {};
+  for (const [noteStr, info] of Object.entries(activeLedger)) {
+    const n = parseInt(noteStr, 10);
+    ledgerNotes[n] = true;
+    window.updatePianoNote(n, true, info.track, info.color);
+  }
+  const activeKeys = document.querySelectorAll('.piano-key-active');
+  for (let i = 0; i < activeKeys.length; i++) {
+    const n = parseInt(activeKeys[i].dataset.note, 10);
+    if (!ledgerNotes[n]) {
+      activeKeys[i].classList.remove('piano-key-active');
+      activeKeys[i].style.removeProperty('--note-track-color');
+    }
+  }
 };
 
 /* ── Arturia KeyStep 32 Hardware Connection & Dynamic Surface Stacking ── */
@@ -13561,7 +13934,7 @@ local state = {
 
   tracks = {
     [1] = {
-      id = 1, name = "Bass", channel = 0, color = "#00e5ff", volume = 100,
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255", volume = 100,
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -13569,7 +13942,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [2] = {
-      id = 2, name = "Chords", channel = 1, color = "#ff9100", volume = 100,
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -13577,7 +13950,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [3] = {
-      id = 3, name = "Lead", channel = 2, color = "#00e676", volume = 100,
+      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -13585,7 +13958,7 @@ local state = {
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
     [4] = {
-      id = 4, name = "Arp", channel = 3, color = "#d500f9", volume = 100,
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249", volume = 100,
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
@@ -13850,9 +14223,27 @@ local function applyCustomLayout(customData)
 
   local actionIdx = getActionIndex()
 
+  -- Legacy saved layout migration: replace F (code 3) -> arpLatchToggle with Octave +
+  if type(customData.home_row_controls) == "table" then
+    for _, item in ipairs(customData.home_row_controls) do
+      if item.code == 3 and (item.action == "arpLatchToggle" or item.action == "lockLoop" or item.action == "lockAndSwap") then
+        item.action = "octaveUp"
+        item.name = "Oct +"
+        item.shiftAction = "topVolUp"
+        item.shiftName = "TopVol +"
+      end
+    end
+  end
+
   for codeStr, binding in pairs(customData) do
     local code = tonumber(codeStr)
     if code and type(binding) == "table" then
+      if code == 3 and (binding.action == "arpLatchToggle" or binding.action == "lockLoop" or binding.action == "lockAndSwap") then
+        binding.action = "octaveUp"
+        binding.name = "Oct +"
+        binding.shiftAction = "topVolUp"
+        binding.shiftName = "TopVol +"
+      end
       if binding.action == "none" or binding.isNote == true or (binding.action == nil and binding.shiftAction == nil and binding.baseNote == nil) then
         -- Revert to default note or control for this keycode
         local defaultDef = defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultHomeRowControls[code] or defaultNumberRowControls[code]
@@ -14105,11 +14496,18 @@ local defaultKeyStepLowerRowControls = {
   [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "relUp", shiftName = "Rel +" }
 }
 
+local function isKsConnected()
+  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
+    return _G.activeWatchers.keystep.isConnected() == true
+  end
+  return state.keystepConnected == true
+end
+
 local function getNoteKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap[code]
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if ksConnected and defaultKeyStepLowerRowControls[code] then
     return nil
   end
@@ -14122,7 +14520,7 @@ local function getControlKey(code)
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap[code]
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if ksConnected and defaultKeyStepLowerRowControls[code] then
     return defaultKeyStepLowerRowControls[code]
   end
@@ -14149,7 +14547,7 @@ local function getActiveNoteKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedNoteKeysMap
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
   _cachedKsConnected = ksConnected
   local map = {}
@@ -14167,7 +14565,7 @@ local function getActiveControlKeysMap()
   if state.currentMode == "ArpAdvanced" then
     return arpAdvancedControlKeysMap
   end
-  local ksConnected = (state.keystepConnected == true)
+  local ksConnected = isKsConnected()
   if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
   _cachedKsConnected = ksConnected
   local map = {}
@@ -14215,7 +14613,8 @@ return {
   getControlKey = getControlKey,
   getNumberControlKey = getNumberControlKey,
   getActiveNoteKeysMap = getActiveNoteKeysMap,
-  getActiveControlKeysMap = getActiveControlKeysMap
+  getActiveControlKeysMap = getActiveControlKeysMap,
+  isKeyStepConnected = isKsConnected
 }
 
 end
@@ -15732,7 +16131,7 @@ local function executeControlAction(act, code)
     arpeggiator.updateLatchedArpNotes()
     hud.updateWebviewHud({ title = "OCTAVE RESET", value = "0 Oct", subtext = "All Octave Shifts Centered", targetId = "key-2", color = "#50fa7b" })
 
-  -- Master Arp & Track Loop Lock (Consolidated on F)
+  -- Master Arp & Track Loop Lock (Consolidated on B)
   elseif act == "lockLoop" then
     local curId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[curId]
@@ -15742,7 +16141,7 @@ local function executeControlAction(act, code)
       trk.arpLatchActive = true
       state.arpEnabled = true
       state.arpLatchActive = true
-      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = trk.color or "#ffd700" })
+      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-11", color = trk.color or "#ffd700" })
     end
   elseif act == "lockAndSwap" then
     local curId = state.activeTrack or 1
@@ -15755,7 +16154,7 @@ local function executeControlAction(act, code)
     local nextId = (curId % 4) + 1
     selectTrack(nextId)
     local nextTrk = state.tracks and state.tracks[nextId]
-    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-11", color = "#ffd700" })
   elseif act == "lockAllTracks" then
     if state.tracks then
       for _, t in pairs(state.tracks) do
@@ -15768,10 +16167,10 @@ local function executeControlAction(act, code)
     end
     state.arpEnabled = true
     state.arpLatchActive = true
-    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-11", color = "#ffd700" })
   elseif act == "stopLoops" then
     arpeggiator.stopAllLoops()
-    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-3", color = "#ff5555" })
+    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-45", color = "#ff5555" })
   elseif act == "freezeAll" then
     state.arpLatchActive = true
     if state.tracks then
@@ -15779,7 +16178,7 @@ local function executeControlAction(act, code)
         if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
       end
     end
-    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-3", color = "#64d8f0" })
+    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-11", color = "#64d8f0" })
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
@@ -16627,6 +17026,46 @@ local function getMidiDevice()
   return _G.activeWatchers.midiDevice
 end
 
+local activeNoteLedger = {} -- [noteNum] = { [channel] = { track = trackId, color = color, vel = vel } }
+
+local function getTrackForChannel(channel)
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if not state then
+    pcall(function()
+      local config = __require("config")
+      state = config and config.state
+    end)
+  end
+  if state and state.tracks then
+    for trkId, trk in pairs(state.tracks) do
+      if trk.channel == channel then
+        return trkId, trk.color or "#00e5ff"
+      end
+    end
+  end
+  local fallbackColors = { [1] = "#00e5ff", [2] = "#ff9100", [3] = "#00e676", [4] = "#d500f9" }
+  local trkId = ((channel or 0) % 4) + 1
+  return trkId, fallbackColors[trkId] or "#00e5ff"
+end
+
+local function getActiveNoteLedger()
+  local snapshot = {}
+  for note, voices in pairs(activeNoteLedger) do
+    for ch, voice in pairs(voices) do
+      snapshot[tostring(note)] = { note = note, channel = ch, track = voice.track, color = voice.color }
+      break
+    end
+  end
+  return snapshot
+end
+
+local function clearActiveNotes()
+  activeNoteLedger = {}
+  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.clearPianoNotes then
+    _G.activeWatchers.hud.clearPianoNotes()
+  end
+end
+
 local function sendMidiNote(cmd, noteNum, vel, channel)
   if type(noteNum) == "table" then
     channel = channel or noteNum.channel
@@ -16634,9 +17073,13 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
   end
   if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
   local dev = getMidiDevice()
+  local ch = channel or 0
+  local isNoteOn = (cmd == "noteOn" and (vel or 0) > 0)
+  local isNoteOff = (cmd == "noteOff" or (cmd == "noteOn" and (vel or 0) == 0))
+  local trkId, trkColor = getTrackForChannel(ch)
+
   if dev then
-    local ch = channel or 0
-    if cmd == "noteOff" or (cmd == "noteOn" and vel == 0) then
+    if isNoteOff then
       dev:sendCommand("noteOff", { note = noteNum, velocity = 0, channel = ch })
       dev:sendCommand("noteOn", { note = noteNum, velocity = 0, channel = ch })
     else
@@ -16644,8 +17087,36 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
     end
   end
 
+  -- Update active note ledger & real-time piano visualizer
+  if isNoteOn then
+    activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
+    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel }
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
+      _G.activeWatchers.hud.updatePianoNote(noteNum, true, trkId, trkColor)
+    end
+  elseif isNoteOff then
+    if activeNoteLedger[noteNum] then
+      activeNoteLedger[noteNum][ch] = nil
+      if next(activeNoteLedger[noteNum]) == nil then
+        activeNoteLedger[noteNum] = nil
+      end
+    end
+    local stillActive = (activeNoteLedger[noteNum] ~= nil)
+    local remainingTrkId = 0
+    local remainingColor = ""
+    if stillActive then
+      for _, voice in pairs(activeNoteLedger[noteNum]) do
+        remainingTrkId = voice.track
+        remainingColor = voice.color
+        break
+      end
+    end
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
+      _G.activeWatchers.hud.updatePianoNote(noteNum, stillActive, remainingTrkId, remainingColor)
+    end
+  end
+
   if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastNotes then
-    local isNoteOn = (cmd == "noteOn" and (vel or 0) > 0)
     _G.activeWatchers.sync.broadcastNotes(noteNum, isNoteOn)
   end
 end
@@ -16667,6 +17138,7 @@ end
 
 local function panicAllChannels()
   local dev = getMidiDevice()
+  clearActiveNotes()
   if not dev then return end
 
   for ch = 0, 15 do
@@ -16688,7 +17160,10 @@ return {
   sendMidiNote = sendMidiNote,
   sendMidiCC = sendMidiCC,
   sendSustainCC = sendSustainCC,
-  panicAllChannels = panicAllChannels
+  panicAllChannels = panicAllChannels,
+  getActiveNoteLedger = getActiveNoteLedger,
+  clearActiveNotes = clearActiveNotes,
+  getTrackForChannel = getTrackForChannel
 }
 
 end

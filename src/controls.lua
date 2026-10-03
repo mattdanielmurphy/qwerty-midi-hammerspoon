@@ -1363,7 +1363,7 @@ local function executeControlAction(act, code)
     arpeggiator.updateLatchedArpNotes()
     hud.updateWebviewHud({ title = "OCTAVE RESET", value = "0 Oct", subtext = "All Octave Shifts Centered", targetId = "key-2", color = "#50fa7b" })
 
-  -- Master Arp & Track Loop Lock (Consolidated on F)
+  -- Master Arp & Track Loop Lock (Consolidated on B)
   elseif act == "lockLoop" then
     local curId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[curId]
@@ -1373,7 +1373,7 @@ local function executeControlAction(act, code)
       trk.arpLatchActive = true
       state.arpEnabled = true
       state.arpLatchActive = true
-      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-3", color = trk.color or "#ffd700" })
+      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-11", color = trk.color or "#ffd700" })
     end
   elseif act == "lockAndSwap" then
     local curId = state.activeTrack or 1
@@ -1386,7 +1386,7 @@ local function executeControlAction(act, code)
     local nextId = (curId % 4) + 1
     selectTrack(nextId)
     local nextTrk = state.tracks and state.tracks[nextId]
-    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-11", color = "#ffd700" })
   elseif act == "lockAllTracks" then
     if state.tracks then
       for _, t in pairs(state.tracks) do
@@ -1399,10 +1399,10 @@ local function executeControlAction(act, code)
     end
     state.arpEnabled = true
     state.arpLatchActive = true
-    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-3", color = "#ffd700" })
+    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-11", color = "#ffd700" })
   elseif act == "stopLoops" then
     arpeggiator.stopAllLoops()
-    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-3", color = "#ff5555" })
+    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-45", color = "#ff5555" })
   elseif act == "freezeAll" then
     state.arpLatchActive = true
     if state.tracks then
@@ -1410,7 +1410,7 @@ local function executeControlAction(act, code)
         if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
       end
     end
-    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-3", color = "#64d8f0" })
+    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-11", color = "#64d8f0" })
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
