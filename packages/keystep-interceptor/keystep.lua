@@ -757,6 +757,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           playPitch = transposerRef.getTransposedPitch(metadata.note, false)
         end
         state.heldWhiteKeys[metadata.note] = playPitch
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
         forwardNote("noteOn", {
           note = playPitch,
           velocity = metadata.velocity,
@@ -820,6 +821,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           end
         end
         state.heldWhiteKeys[metadata.note] = nil
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
         forwardNote("noteOff", {
           note = playPitch,
           velocity = 0,
@@ -1191,6 +1193,14 @@ end
 
 function KeyStep.getState()
   return monitorState()
+end
+
+function KeyStep.getHeldPitches()
+  local pitches = {}
+  for _, pitch in pairs(state.heldWhiteKeys or {}) do
+    if type(pitch) == "number" then pitches[#pitches + 1] = pitch end
+  end
+  return pitches
 end
 
 function KeyStep.resetTiming()

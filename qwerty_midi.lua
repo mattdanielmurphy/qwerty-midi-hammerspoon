@@ -3687,6 +3687,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           playPitch = transposerRef.getTransposedPitch(metadata.note, false)
         end
         state.heldWhiteKeys[metadata.note] = playPitch
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
         forwardNote("noteOn", {
           note = playPitch,
           velocity = metadata.velocity,
@@ -3750,6 +3751,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           end
         end
         state.heldWhiteKeys[metadata.note] = nil
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
         forwardNote("noteOff", {
           note = playPitch,
           velocity = 0,
@@ -4123,6 +4125,14 @@ function KeyStep.getState()
   return monitorState()
 end
 
+function KeyStep.getHeldPitches()
+  local pitches = {}
+  for _, pitch in pairs(state.heldWhiteKeys or {}) do
+    if type(pitch) == "number" then pitches[#pitches + 1] = pitch end
+  end
+  return pitches
+end
+
 function KeyStep.resetTiming()
   clearClockTiming()
   clearNoteTiming()
@@ -4349,6 +4359,12 @@ local function getActiveChord()
       end
     end
   end
+  local keyStep = _G.activeWatchers and (_G.activeWatchers.keystep or _G.activeWatchers.keyStepController)
+  if keyStep and keyStep.getHeldPitches then
+    for _, p in ipairs(keyStep.getHeldPitches()) do
+      table.insert(activePitches, p)
+    end
+  end
   return transposer.detectChord(activePitches)
 end
 
@@ -4360,6 +4376,13 @@ local function updateSingleKeyState(code, pressed, latched, chordName)
   local chordParam = chordName and string.format("%q", chordName) or '""'
   safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s, %s);",
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false", chordParam))
+end
+
+local function updateChordDisplay()
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  local chordName = getActiveChord()
+  local chordParam = chordName and string.format("%q", chordName) or '""'
+  safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s);", chordParam))
 end
 
 local function updateKeyStepControl(controlId, value, pressed, extra)
@@ -5148,6 +5171,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       end
     end
   end
+  end
 
   local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
   for codeStr, kUpd in pairs(keyUpdates) do
@@ -5199,15 +5223,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
-  local activePitches = {}
-  for code, info in pairs(state.pressedKeys or {}) do
-    if type(info) == "table" and not info.isControl and info.pitches then
-      for _, p in ipairs(info.pitches) do
-        table.insert(activePitches, p)
-      end
-    end
-  end
-  local detectedChord = transposer.detectChord(activePitches)
+  local detectedChord = getActiveChord()
 
   local payload = {
     detectedChord = detectedChord,
@@ -5941,6 +5957,7 @@ return {
   setControlsModule = setControlsModule,
   fastUpdateArp = queueArpHudUpdate,
   updateSingleKeyState = updateSingleKeyState,
+  updateChordDisplay = updateChordDisplay,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,
@@ -10929,6 +10946,9 @@ local HTML_UI_CONTENT = [[
     const t0 = performance.now();
     try {
       if (!data) return;
+      if (data.detectedChord !== undefined) {
+        window.updateChordDisplay(data.detectedChord);
+      }
 
       if (data.keystepConnected !== undefined) {
         if (typeof setKeyStepConnected === 'function') setKeyStepConnected(data.keystepConnected);
@@ -11458,7 +11478,8 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
   }
 };
 
-window.updateKeyState = function(code, pressed, latched) {
+window.updateKeyState = function(code, pressed, latched, chordName) {
+  window.updateChordDisplay(chordName || '');
   const isTrackButton = code >= 18 && code <= 21;
   if (isTrackButton) return;
   const el = document.getElementById('key-' + code);
@@ -11502,6 +11523,15 @@ window.updateKeyState = function(code, pressed, latched) {
       }
     }
   }
+};
+
+window.updateChordDisplay = function(chordName) {
+  const badge = document.getElementById('chord-display-badge');
+  if (!badge) return;
+  const name = String(chordName || '').trim();
+  const text = badge.querySelector('.chord-name-text');
+  if (text) text.textContent = name || '—';
+  badge.classList.toggle('active-chord', !!name);
 };
 
 /* ── Arturia KeyStep 32 Hardware Connection & Dynamic Surface Stacking ── */
@@ -15941,7 +15971,7 @@ local function handleKeyDown(code)
         end)
       end
     end
-    hud.updateWebviewHud()
+    hud.updateSingleKeyState(code, true, false)
     if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     return true
   end
@@ -15971,7 +16001,6 @@ local function handleKeyUp(code)
   if keyInfo and type(keyInfo) == "table" and keyInfo.isProposed then
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
     return true
   end
 
@@ -16043,7 +16072,6 @@ local function handleKeyUp(code)
       midi.sendMidiNote("noteOff", pitch, 0, ch)
     end
     hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
     return true
   end
 

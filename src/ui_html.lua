@@ -4894,6 +4894,9 @@ local HTML_UI_CONTENT = [[
     const t0 = performance.now();
     try {
       if (!data) return;
+      if (data.detectedChord !== undefined) {
+        window.updateChordDisplay(data.detectedChord);
+      }
 
       if (data.keystepConnected !== undefined) {
         if (typeof setKeyStepConnected === 'function') setKeyStepConnected(data.keystepConnected);
@@ -5423,7 +5426,8 @@ window.updateArpPitches = function(activeCodes, heldCodes) {
   }
 };
 
-window.updateKeyState = function(code, pressed, latched) {
+window.updateKeyState = function(code, pressed, latched, chordName) {
+  window.updateChordDisplay(chordName || '');
   const isTrackButton = code >= 18 && code <= 21;
   if (isTrackButton) return;
   const el = document.getElementById('key-' + code);
@@ -5467,6 +5471,15 @@ window.updateKeyState = function(code, pressed, latched) {
       }
     }
   }
+};
+
+window.updateChordDisplay = function(chordName) {
+  const badge = document.getElementById('chord-display-badge');
+  if (!badge) return;
+  const name = String(chordName || '').trim();
+  const text = badge.querySelector('.chord-name-text');
+  if (text) text.textContent = name || '—';
+  badge.classList.toggle('active-chord', !!name);
 };
 
 /* ── Arturia KeyStep 32 Hardware Connection & Dynamic Surface Stacking ── */

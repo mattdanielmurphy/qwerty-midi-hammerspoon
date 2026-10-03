@@ -71,6 +71,12 @@ local function getActiveChord()
       end
     end
   end
+  local keyStep = _G.activeWatchers and (_G.activeWatchers.keystep or _G.activeWatchers.keyStepController)
+  if keyStep and keyStep.getHeldPitches then
+    for _, p in ipairs(keyStep.getHeldPitches()) do
+      table.insert(activePitches, p)
+    end
+  end
   return transposer.detectChord(activePitches)
 end
 
@@ -82,6 +88,13 @@ local function updateSingleKeyState(code, pressed, latched, chordName)
   local chordParam = chordName and string.format("%q", chordName) or '""'
   safeEvaluateJS(string.format("if (window.updateKeyState) window.updateKeyState(%d, %s, %s, %s);",
     tonumber(code) or 0, pressed and "true" or "false", latched and "true" or "false", chordParam))
+end
+
+local function updateChordDisplay()
+  if not _G.activeWatchers.midiWebview or not _G.activeWatchers.domIsReady then return end
+  local chordName = getActiveChord()
+  local chordParam = chordName and string.format("%q", chordName) or '""'
+  safeEvaluateJS(string.format("if (window.updateChordDisplay) window.updateChordDisplay(%s);", chordParam))
 end
 
 local function updateKeyStepControl(controlId, value, pressed, extra)
@@ -870,6 +883,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       end
     end
   end
+  end
 
   local perTrackCodes = { [0] = true, [48] = true, [39] = true, [23] = true, [22] = true, [26] = true, [28] = true }
   for codeStr, kUpd in pairs(keyUpdates) do
@@ -921,15 +935,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
   local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
 
-  local activePitches = {}
-  for code, info in pairs(state.pressedKeys or {}) do
-    if type(info) == "table" and not info.isControl and info.pitches then
-      for _, p in ipairs(info.pitches) do
-        table.insert(activePitches, p)
-      end
-    end
-  end
-  local detectedChord = transposer.detectChord(activePitches)
+  local detectedChord = getActiveChord()
 
   local payload = {
     detectedChord = detectedChord,
@@ -1663,6 +1669,7 @@ return {
   setControlsModule = setControlsModule,
   fastUpdateArp = queueArpHudUpdate,
   updateSingleKeyState = updateSingleKeyState,
+  updateChordDisplay = updateChordDisplay,
   updateWebviewHud = updateWebviewHud,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,

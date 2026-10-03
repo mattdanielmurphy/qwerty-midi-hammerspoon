@@ -1880,7 +1880,7 @@ local function handleKeyDown(code)
         end)
       end
     end
-    hud.updateWebviewHud()
+    hud.updateSingleKeyState(code, true, false)
     if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     return true
   end
@@ -1910,7 +1910,6 @@ local function handleKeyUp(code)
   if keyInfo and type(keyInfo) == "table" and keyInfo.isProposed then
     state.pressedKeys[code] = nil
     hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
     return true
   end
 
@@ -1982,7 +1981,6 @@ local function handleKeyUp(code)
       midi.sendMidiNote("noteOff", pitch, 0, ch)
     end
     hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
     return true
   end
 
