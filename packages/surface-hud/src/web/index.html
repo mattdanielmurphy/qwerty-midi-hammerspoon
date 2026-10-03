@@ -424,7 +424,7 @@
     border: 1px solid #706558;
     border-radius: 1.5px;
     background: transparent;
-    transition: all 0.15s ease;
+    transition: none;
   }
   .stacked-rows-icon.top-active .rect.top {
     background: #d4a359;
@@ -510,7 +510,7 @@
     outline: none;
     font-family: inherit;
     letter-spacing: 0.5px;
-    transition: all 0.15s ease;
+    transition: none;
     -webkit-app-region: no-drag;
     height: 24px;
     display: flex;
@@ -593,7 +593,7 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    transition: background 0.05s ease, border-color 0.05s ease;
+    transition: none;
     cursor: pointer;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
@@ -1237,20 +1237,20 @@
   #hud-container.edit-mode-active #performance-view {
     /* The drawer is 270px, with 2px border = 272px total. Shrink main content to fit. */
     width: calc(980px - 272px);
-    transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   /* Constrain width only if drawer is open */
   #hud-container.drawer-open .keyboard-grid,
   #hud-container.drawer-open #performance-view {
     max-width: calc(980px - 272px);
-    transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   .keyboard-grid {
     gap: 6px;
     flex: 1;
-    transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   #hud-container.edit-mode-active .keyboard-row {
@@ -1258,14 +1258,7 @@
   }
 
   #hud-container.edit-mode-active .key-pad {
-    transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
-                height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  /* Remove height/width overrides in Edit Mode to allow natural sizing */
-  #hud-container.edit-mode-active .key-pad {
-    transition: font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
   #hud-container.edit-mode-active .key-pad .key-code {
     font-size: 8px;
@@ -3265,21 +3258,17 @@
     card.classList.remove('hidden');
     card.style.transition = 'none';
     card.style.opacity = '1';
-    card.style.transform = 'translateY(0) scale(1.0)';
+    card.style.transform = 'none';
     card.style.left = '';
     card.style.top = '';
 
-    card.offsetHeight;
-
-    card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-
     spotlightTimer1 = setTimeout(() => {
+      card.style.transition = 'opacity 0.25s ease';
       card.style.opacity = '0';
-      card.style.transform = 'translateY(-10px) scale(0.85)';
 
       spotlightTimer2 = setTimeout(() => {
         card.classList.add('hidden');
-      }, 400);
+      }, 250);
     }, 1000);
   }
 

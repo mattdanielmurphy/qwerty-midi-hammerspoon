@@ -3144,11 +3144,15 @@ local function setBpm(bpm)
     local volCcVal = rateToVolumeCc(rateVal)
     sendRateCc(rateVal)
     -- Synchronize Master Volume with QWERTY MIDI engine
+    local volChanged = false
     if _G.activeWatchers and _G.activeWatchers.state then
-      _G.activeWatchers.state.topRowVolume = volCcVal
-      _G.activeWatchers.state.bottomRowVolume = volCcVal
+      if _G.activeWatchers.state.topRowVolume ~= volCcVal or _G.activeWatchers.state.bottomRowVolume ~= volCcVal then
+        _G.activeWatchers.state.topRowVolume = volCcVal
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
+        volChanged = true
+      end
     end
-    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+    if volChanged and _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
       _G.activeWatchers.hud.updateWebviewHud()
     end
     sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = rateVal })
@@ -3322,7 +3326,7 @@ local function handleClock(timestamp)
 
         -- Deadband / hysteresis to prevent 1-BPM jitter flickering in steady state
         local lastBpm = state.bpm or 120
-        if math.abs(currentBpm - lastBpm) >= 0.65 then
+        if math.abs(currentBpm - lastBpm) >= 1.2 then
           local roundedBpm = math.floor(currentBpm + 0.5)
           roundedBpm = math.max(30, math.min(240, roundedBpm))
           setBpm(roundedBpm)
