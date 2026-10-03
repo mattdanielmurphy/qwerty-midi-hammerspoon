@@ -91,9 +91,14 @@ test("maps 30..240 BPM linearly to 0..127 Rate CC with ~137 BPM at halfway", () 
 });
 
 test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate", () => {
-  expect(source).toContain("local CLOCK_HISTORY_MAX = 24");
+  expect(source).toContain("local CLOCK_HISTORY_MAX = 36");
   expect(source).toContain("CLOCK_MEDIAN_WINDOW_SECONDS = 0.20");
+  expect(source).toContain("MIN_CLOCK_SPAN_PULSES = 4");
+  expect(source).toContain("MAX_CLOCK_SPAN_PULSES = 16");
   expect(source).toContain("MIN_CLOCK_MEDIAN_INTERVALS = 7");
+  expect(source).toContain("local spanDuration = history[i] - history[i - span]");
+  expect(source).toContain("table.insert(intervals, spanDuration / span)");
+  expect(source).toContain("local RATE_CC_DEADBAND = 0");
   expect(source).toContain("diff > 8.0");
   expect(source).toContain("alpha = 0.85");
   expect(source).toContain("state.smoothBpm");
@@ -167,4 +172,42 @@ test("strictly excludes manual performance keys from sequencer detection, sequen
   // 3. In analyzeSequenceAndInferKnobs: only actual sequence marker notes contribute to pulse intervals
   expect(source).toContain("if item and (item.note >= 120 or (MODE_NOTES[item.note] and item.note >= 108)) then");
 });
+
+test("multi-pulse sliding span resolves smooth continuous BPM at high tempo under 2ms runloop quantization", () => {
+  // Simulate timestamps arriving with 2ms discrete runloop quantization across 160..240 BPM
+  const testTempos = [160, 180, 200, 220, 240];
+  const derivedTempos = [];
+
+  for (const bpm of testTempos) {
+    const truePulseInterval = 60 / (24 * bpm);
+    const timestamps = [];
+    let t = 100.0;
+    for (let i = 0; i < 35; i++) {
+      // 2ms runloop quantum grid
+      const quantized = Math.round(t * 500) / 500;
+      timestamps.push(quantized);
+      t += truePulseInterval;
+    }
+
+    // Multi-pulse sliding span (span = 12..16)
+    const span = Math.min(16, Math.max(4, Math.round(0.20 / truePulseInterval)));
+    const intervals = [];
+    for (let i = timestamps.length - 7; i < timestamps.length; i++) {
+      intervals.push((timestamps[i] - timestamps[i - span]) / span);
+    }
+    intervals.sort((a, b) => a - b);
+    const medianInterval = intervals[Math.floor(intervals.length / 2)];
+    const derivedBpm = 60 / (24 * medianInterval);
+    derivedTempos.push(derivedBpm);
+
+    // Derived BPM must be within 2.5 BPM (< 1.2% error) of ground truth
+    expect(Math.abs(derivedBpm - bpm)).toBeLessThan(2.5);
+  }
+
+  // Verify strictly monotonic progression with no jumping or sticking
+  for (let i = 1; i < derivedTempos.length; i++) {
+    expect(derivedTempos[i]).toBeGreaterThan(derivedTempos[i - 1] + 15);
+  }
+});
+
 

@@ -53,7 +53,11 @@ local HTML_UI_CONTENT = [[
     position: relative;
     transform-origin: bottom center;
     transform: scale(1.4);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: none;
+    -webkit-font-smoothing: antialiased;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+    transform-style: flat;
   }
 
   /* Top Header Spotlight Notification Card */
@@ -115,16 +119,15 @@ local HTML_UI_CONTENT = [[
       0 0 calc(var(--mod-intensity) * 18px) rgba(255, 255, 255, calc(var(--mod-intensity) * 0.3)),
       inset 0 0 calc(var(--mod-intensity) * 24px) rgba(255, 255, 255, calc(var(--mod-intensity) * 0.15));
     border-color: rgba(255, 255, 255, calc(0.2 + var(--mod-intensity) * 0.4));
-    transition: box-shadow 0.08s ease, border-color 0.08s ease, height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
     border-radius: 14px;
   }
   #hud-container.edit-mode-active {
     height: 460px;
   }
   body.mode-select-active #hud-container {
-    opacity: 0.7;
-    filter: blur(1px);
-    transition: all 0.2s;
+    opacity: 0.75;
+    transition: none;
   }
 
   .mod-gradient-overlay {
@@ -427,7 +430,7 @@ local HTML_UI_CONTENT = [[
     border: 1px solid #706558;
     border-radius: 1.5px;
     background: transparent;
-    transition: all 0.15s ease;
+    transition: none;
   }
   .stacked-rows-icon.top-active .rect.top {
     background: #d4a359;
@@ -513,7 +516,7 @@ local HTML_UI_CONTENT = [[
     outline: none;
     font-family: inherit;
     letter-spacing: 0.5px;
-    transition: all 0.15s ease;
+    transition: none;
     -webkit-app-region: no-drag;
     height: 24px;
     display: flex;
@@ -596,7 +599,7 @@ local HTML_UI_CONTENT = [[
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    transition: background 0.05s ease, border-color 0.05s ease;
+    transition: none;
     cursor: pointer;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
@@ -848,7 +851,7 @@ local HTML_UI_CONTENT = [[
     border-radius: 2px;
     cursor: pointer;
     user-select: none;
-    transition: all 0.1s ease;
+    transition: none;
     border: 1px solid rgba(255, 255, 255, 0.15);
     background: rgba(255, 255, 255, 0.07);
     color: rgba(255, 255, 255, 0.45);
@@ -1579,20 +1582,20 @@ local HTML_UI_CONTENT = [[
   #hud-container.edit-mode-active #performance-view {
     /* The drawer is 270px, with 2px border = 272px total. Shrink main content to fit. */
     width: calc(980px - 272px);
-    transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   /* Constrain width only if drawer is open */
   #hud-container.drawer-open .keyboard-grid,
   #hud-container.drawer-open #performance-view {
     max-width: calc(980px - 272px);
-    transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   .keyboard-grid {
     gap: 6px;
     flex: 1;
-    transition: max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
 
   #hud-container.edit-mode-active .keyboard-row {
@@ -1600,14 +1603,7 @@ local HTML_UI_CONTENT = [[
   }
 
   #hud-container.edit-mode-active .key-pad {
-    transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1), 
-                height 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-                font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  /* Remove height/width overrides in Edit Mode to allow natural sizing */
-  #hud-container.edit-mode-active .key-pad {
-    transition: font-size 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: none;
   }
   #hud-container.edit-mode-active .key-pad .key-code {
     font-size: 8px;
@@ -2106,7 +2102,7 @@ local HTML_UI_CONTENT = [[
     border-radius: 50%;
     background: #94a3b8;
     margin-bottom: 1px;
-    transition: background-color 0.05s ease, box-shadow 0.05s ease;
+    transition: none;
   }
   .ks-rate-led.flash {
     background: #0284c7 !important;
@@ -2303,7 +2299,7 @@ local HTML_UI_CONTENT = [[
     cursor: pointer;
     box-sizing: border-box;
     position: relative;
-    transition: transform 0.05s ease, background 0.08s ease;
+    transition: none;
   }
   .ks-key-w:last-child {
     border-right: none;
@@ -2356,7 +2352,7 @@ local HTML_UI_CONTENT = [[
     pointer-events: auto;
     box-sizing: border-box;
     z-index: 3;
-    transition: transform 0.05s ease, background 0.08s ease;
+    transition: none;
   }
   .ks-key-b:hover {
     background: linear-gradient(180deg, #373b45 0%, #1c1d22 100%);
@@ -2419,7 +2415,7 @@ local HTML_UI_CONTENT = [[
     color: #94a3b8;
     border: 1px solid rgba(255, 255, 255, 0.15);
     letter-spacing: 0.5px;
-    transition: all 0.15s ease;
+    transition: none;
   }
   .ks-shift-status-pill.active {
     font-weight: 900;
@@ -2472,7 +2468,7 @@ local HTML_UI_CONTENT = [[
     padding: 1px 4px;
     cursor: pointer;
     user-select: none;
-    transition: all 0.15s ease;
+    transition: none;
     margin-right: 6px;
   }
   .ks-scale-lock-badge:hover {
@@ -4779,21 +4775,17 @@ local HTML_UI_CONTENT = [[
     card.classList.remove('hidden');
     card.style.transition = 'none';
     card.style.opacity = '1';
-    card.style.transform = 'translateY(0) scale(1.0)';
+    card.style.transform = 'none';
     card.style.left = '';
     card.style.top = '';
 
-    card.offsetHeight;
-
-    card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
-
     spotlightTimer1 = setTimeout(() => {
+      card.style.transition = 'opacity 0.25s ease';
       card.style.opacity = '0';
-      card.style.transform = 'translateY(-10px) scale(0.85)';
 
       spotlightTimer2 = setTimeout(() => {
         card.classList.add('hidden');
-      }, 400);
+      }, 250);
     }, 1000);
   }
 

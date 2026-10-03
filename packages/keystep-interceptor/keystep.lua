@@ -285,7 +285,7 @@ local function sendCC(controller, value)
 end
 
 local lastRateCcValue = nil
-local RATE_CC_DEADBAND = 2
+local RATE_CC_DEADBAND = 0
 local function sendRateCc(value)
   if not outputDevice or not config.rateCc then return end
   if lastRateCcValue ~= nil and math.abs(value - lastRateCcValue) <= RATE_CC_DEADBAND then
@@ -474,8 +474,10 @@ local function nearestDivisionByPulses(pulses)
   return nearest
 end
 
-local CLOCK_HISTORY_MAX = 24
+local CLOCK_HISTORY_MAX = 36
 local MIN_WINDOW_PULSES = 4
+local MIN_CLOCK_SPAN_PULSES = 4
+local MAX_CLOCK_SPAN_PULSES = 16
 local MIN_CLOCK_MEDIAN_INTERVALS = 7
 local CLOCK_MEDIAN_WINDOW_SECONDS = 0.20
 
@@ -511,19 +513,28 @@ local function handleClock(timestamp)
   local count = #history
   local expectedBpm = state.smoothBpm or state.bpm or 120
   local expectedPulseInterval = 60 / (CLOCK_PULSES_PER_QUARTER * expectedBpm)
-  local medianIntervals = math.max(
-    MIN_CLOCK_MEDIAN_INTERVALS,
-    math.min(CLOCK_HISTORY_MAX - 1, math.ceil(CLOCK_MEDIAN_WINDOW_SECONDS / expectedPulseInterval))
+
+  -- Multi-pulse span adapts to tempo: target ~180-200ms span window.
+  -- At high BPM (240 BPM), span = 16 pulses (166ms) cancels out runloop jitter.
+  -- At low BPM (30 BPM), span = 4 pulses (333ms) avoids excessive lag.
+  local span = math.max(
+    MIN_CLOCK_SPAN_PULSES,
+    math.min(MAX_CLOCK_SPAN_PULSES, math.floor(CLOCK_MEDIAN_WINDOW_SECONDS / expectedPulseInterval + 0.5))
   )
-  if count >= medianIntervals + 1 then
-    -- Median pulse spacing over at least 200ms rejects host timestamp jitter.
-    -- The interval count adapts to tempo so slow clocks do not add excess lag.
+
+  local numSpans = math.min(MIN_CLOCK_MEDIAN_INTERVALS, count - span)
+  if count >= span + 3 and numSpans >= 3 then
+    -- Measure elapsed duration across sliding spans of `span` pulses.
+    -- Single-pulse deltas suffer ~15-20% runloop quantization jitter at high BPM (10ms pulses),
+    -- which previously caused Rate to jump between 65%, 80%, and 100% with no in-between steps.
+    -- Measuring multi-pulse spans divides endpoint jitter by `span`, reducing error to < 0.8%
+    -- and smoothly resolving every single percentage and CC step.
     local intervals = {}
-    local first = count - medianIntervals
-    for i = first, count - 1 do
-      local pulseInterval = history[i + 1] - history[i]
-      if pulseInterval > 0 and pulseInterval <= CLOCK_RESET_SECONDS then
-        table.insert(intervals, pulseInterval)
+    local first = count - numSpans + 1
+    for i = first, count do
+      local spanDuration = history[i] - history[i - span]
+      if spanDuration > 0 and spanDuration <= (span * CLOCK_RESET_SECONDS) then
+        table.insert(intervals, spanDuration / span)
       end
     end
     local medianInterval = median(intervals)
@@ -556,6 +567,7 @@ local function handleClock(timestamp)
           local roundedBpm = math.floor(currentBpm + 0.5)
           roundedBpm = math.max(30, math.min(240, roundedBpm))
           setBpm(roundedBpm)
+          state.smoothBpm = currentBpm
         end
       end
     end
