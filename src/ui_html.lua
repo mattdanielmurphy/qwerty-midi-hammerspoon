@@ -1724,6 +1724,42 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
+  .ks-setup-guide {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(390px, calc(100% - 32px));
+    box-sizing: border-box;
+    padding: 10px 14px;
+    border: 1px solid rgba(212, 163, 89, 0.72);
+    border-radius: 9px;
+    background: rgba(22, 20, 18, 0.96);
+    color: #f3eee7;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.62);
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+    pointer-events: none;
+  }
+  .ks-setup-guide.visible { display: flex; align-items: center; gap: 12px; }
+  .ks-setup-guide-icon {
+    display: grid;
+    grid-template-columns: repeat(2, 12px);
+    gap: 5px;
+    flex: 0 0 auto;
+  }
+  .ks-setup-guide-icon i {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #34312d; border: 1px solid #817768;
+  }
+  .ks-setup-guide[data-step="transport"] .ks-setup-guide-icon i:first-child,
+  .ks-setup-guide[data-step="kbd_play"] .ks-setup-guide-icon i:last-child {
+    background: #42d392; border-color: #a4ffd1; box-shadow: 0 0 8px rgba(66, 211, 146, 0.7);
+  }
+  .ks-setup-guide strong { display: block; color: #ffd38b; margin-bottom: 2px; }
+  .ks-setup-guide span { color: #e0d9d0; }
+
   /* ── Arturia KeyStep 32 Hardware Silhouette & Styles ── */
   #hud-container.keystep-connected,
   #hud-container.nanokey-connected {
@@ -2478,7 +2514,7 @@ local HTML_UI_CONTENT = [[
     background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
     box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
   }
-  .ks-key-b.ks-shift-volume {
+  .ks-key-b.ks-shift-envelope {
     border-color: rgba(255, 215, 0, 0.7) !important;
     background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
     box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
@@ -2700,6 +2736,10 @@ local HTML_UI_CONTENT = [[
 
     <!-- Arturia KeyStep 32 Authentic Hardware View -->
     <div class="keystep-view" id="keystep-view" style="display: none;">
+      <aside class="ks-setup-guide" id="ks-setup-guide" role="status" aria-live="polite" data-step="transport">
+        <span class="ks-setup-guide-icon" aria-hidden="true"><i></i><i></i></span>
+        <span><strong id="ks-setup-guide-title">KeyStep setup · 1 of 2</strong><span id="ks-setup-guide-copy">Press Play/Pause until Play is solid and Tap blinks.</span></span>
+      </aside>
       <!-- LEFT CHEEK: Model branding, Hold/Shift, Oct-/Oct+, Capacitive Pitch & Mod Strips -->
       <div class="ks-left-cheek ks-control-bay">
         <div class="ks-cheek-header">
@@ -2748,7 +2788,7 @@ local HTML_UI_CONTENT = [[
               <span class="ks-strip-arrow">▼</span>
             </div>
             <div class="ks-strip-footer">
-              <span class="ks-strip-name">Pitch</span>
+              <span class="ks-strip-name" id="ks-pitch-name">Pitch</span>
               <span class="ks-strip-val" id="ks-pitch-val">±0</span>
             </div>
           </div>
@@ -2819,7 +2859,7 @@ local HTML_UI_CONTENT = [[
               <span class="ks-trans-sub">Append</span>
             </div>
             <div class="ks-trans-btn-wrap">
-              <button class="ks-btn ks-btn-trans ks-btn-stop active" id="ks-btn-stop" title="Stop">
+              <button class="ks-btn ks-btn-trans ks-btn-stop" id="ks-btn-stop" title="Stop">
                 <span class="ks-btn-led"></span>■
               </button>
               <span class="ks-trans-sub">Clear Last</span>
@@ -2899,21 +2939,21 @@ local HTML_UI_CONTENT = [[
           <div class="ks-black-keys">
             <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="volume" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="envelope" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
 
             <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="volume" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="envelope" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
 
             <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="volume" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="envelope" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
           </div>
         </div>
       </div>
@@ -5529,6 +5569,22 @@ window.setKeyStepConnected = function(connected) {
     badge.style.display = connected ? 'inline-flex' : 'none';
   }
 };
+window.setKeyStepSetupGuide = function(step) {
+  const card = document.getElementById('ks-setup-guide');
+  const title = document.getElementById('ks-setup-guide-title');
+  const copy = document.getElementById('ks-setup-guide-copy');
+  if (!card || !title || !copy) return;
+  const visible = step === 'transport' || step === 'kbd_play';
+  card.classList.toggle('visible', visible);
+  card.dataset.step = visible ? step : 'transport';
+  if (step === 'kbd_play') {
+    title.textContent = 'KeyStep setup · 2 of 2';
+    copy.textContent = 'Hold Shift and tap Oct+ (Kbd Play) before playing a note.';
+  } else {
+    title.textContent = 'KeyStep setup · 1 of 2';
+    copy.textContent = 'Press Play/Pause until Play is solid and Tap blinks.';
+  }
+};
 window.setNanokeyConnected = window.setKeyStepConnected;
 
 const ARP_MODE_NAMES = ["1: Up", "2: Down", "3: Inc", "4: Exc", "5: Rand", "6: Order", "7: Up x2", "8: Dwn x2"];
@@ -5555,6 +5611,10 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
 
   if (controlId === 'connection') {
     window.setKeyStepConnected(!!pressed);
+    return;
+  }
+  if (controlId === 'setup_guide') {
+    window.setKeyStepSetupGuide(extra.step || 'hidden');
     return;
   }
 
@@ -5602,7 +5662,25 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const norm = (16383 - pitchVal) / 16383; // 0 to 1
     if (thumb) thumb.style.top = (norm * 100).toFixed(1) + '%';
     const stDiff = ((pitchVal - 8192) / 8192 * 2).toFixed(1);
-    if (valEl) valEl.textContent = (pitchVal === 8192 ? '±0' : (stDiff > 0 ? '+' + stDiff : stDiff));
+    if (valEl) valEl.textContent = (extra && extra.assignment)
+      ? `CC${extra.cc}: ${extra.value}`
+      : (pitchVal === 8192 ? '±0' : (stDiff > 0 ? '+' + stDiff : stDiff));
+    const pitchName = document.getElementById('ks-pitch-name');
+    if (pitchName && extra && extra.assignment) {
+      pitchName.textContent = extra.label || 'CC';
+      pitchName.style.color = extra.color || '';
+    }
+    return;
+  }
+
+  if (controlId === 'pitch_assignment') {
+    const pitchName = document.getElementById('ks-pitch-name');
+    const valEl = document.getElementById('ks-pitch-val');
+    if (pitchName) {
+      pitchName.textContent = (extra && extra.mode !== 'default') ? (extra.label || 'CC') : 'Pitch';
+      pitchName.style.color = (extra && extra.mode !== 'default') ? (extra.color || '') : '';
+    }
+    if (valEl) valEl.textContent = (extra && extra.mode !== 'default') ? `CC${extra.cc}: ${value}` : '±0';
     return;
   }
 
@@ -5648,7 +5726,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
       if (isActive && shiftTarget === mode) {
         bKey.classList.add(shiftClass);
       } else {
-        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-volume');
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope');
       }
     });
     return;
@@ -5764,12 +5842,14 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
 
   // Transport
   if (controlId === 'transport') {
-    const isPlaying = (value === 1 || extra.action === 'play');
+    const status = extra.status || (extra.action === 'play' ? 'running' : (extra.action === 'stop' ? 'stopped' : 'unknown'));
+    const isPlaying = status === 'running';
     window._ksInternalState.playing = isPlaying;
+    window._ksInternalState.transportStatus = status;
     const btnPlay = document.getElementById('ks-btn-play');
     const btnStop = document.getElementById('ks-btn-stop');
-    if (btnPlay) btnPlay.classList.toggle('active', isPlaying);
-    if (btnStop) btnStop.classList.toggle('active', !isPlaying);
+    if (btnPlay) btnPlay.classList.toggle('active', status === 'running');
+    if (btnStop) btnStop.classList.toggle('active', status === 'stopped');
     return;
   }
 
@@ -5832,10 +5912,17 @@ window.syncFullKeyStepState = function(stateObj) {
   if (stateObj.seqArp !== undefined) {
     window.updateKeyStepState('seq_arp', stateObj.seqArp === 'seq' ? 1 : 0, true, { mode: stateObj.seqArp });
   }
+  if (stateObj.setupGuideStep !== undefined) {
+    window.setKeyStepSetupGuide(stateObj.setupGuideStep);
+  }
   if (stateObj.octave !== undefined) window.updateKeyStepState('octave', stateObj.octave);
   if (stateObj.pitchBend !== undefined) window.updateKeyStepState('pitch_bend', stateObj.pitchBend);
   if (stateObj.modWheel !== undefined) window.updateKeyStepState('mod_wheel', stateObj.modWheel);
-  if (stateObj.playing !== undefined) window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
+  if (stateObj.transportStatus !== undefined) {
+    window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, !!stateObj.playing, { action: stateObj.transportStatus, status: stateObj.transportStatus });
+  } else if (stateObj.playing !== undefined) {
+    window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
+  }
   if (stateObj.hold !== undefined) window.updateKeyStepState('hold', stateObj.hold ? 127 : 0, stateObj.hold);
   if (stateObj.shift !== undefined) window.updateKeyStepState('shift', stateObj.shift ? 1 : 0, stateObj.shift);
   if (stateObj.transposerEnabled !== undefined) {

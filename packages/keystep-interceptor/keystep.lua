@@ -20,7 +20,14 @@ local SHIFT_MODES = {
   [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
   [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
   [8]  = { id = "release", label = "RELEASE", cc = 72, default = 40,  color = "#00e676", desc = "Synth Release" },
-  [10] = { id = "volume",  label = "VOLUME",  cc = 7,  default = 100, color = "#ffd700", desc = "Master Volume" },
+  [10] = { id = "envelope", label = "ADSR", cc = 24, default = 64, color = "#ffd700", desc = "Envelope Stage" },
+}
+
+local ENVELOPE_STAGES = {
+  { id = "attack", label = "ATTACK", cc = 24, default = 0 },
+  { id = "decay", label = "DECAY", cc = 25, default = 64 },
+  { id = "sustain", label = "SUSTAIN", cc = 26, default = 100 },
+  { id = "release", label = "RELEASE", cc = 27, default = 40 },
 }
 
 local KeyStep = {}
@@ -57,6 +64,7 @@ local monitor = nil
 local monitorRefreshTimer = nil
 local running = false
 local hudRef = nil
+local noteHandler = nil
 
 local ARP_MODES = {
   [1] = "Up",
@@ -147,6 +155,7 @@ local state = {
   sustain = 0,
   seqArpMode = loadSetting("qwertyMidi_ks_seqArpMode", "arp"),
   playing = false,
+  transportStatus = "unknown",
   recording = false,
   shift = false,
   hold = false,
@@ -157,6 +166,8 @@ local state = {
   latchedShiftMode = nil,
   shiftPressTimes = {},
   shiftControlTweaked = false,
+  heldShiftKeys = {},
+  envelopeStageIdx = loadSetting("qwertyMidi_ks_envelopeStageIdx", 0),
   heldWhiteKeys = {},
   paramValues = {
     cutoff = 100,
@@ -166,13 +177,21 @@ local state = {
     volume = 100,
     modwheel = 0,
   },
+  trackParamValues = {},
   transposerEnabled = loadSetting("qwertyMidi_ks_transposerEnabled", true),
+  setupAcknowledged = false,
+  setupGuideStep = "hidden",
 }
 
 local function sendToHud(controlId, value, pressed, extra)
   if hudRef and hudRef.updateKeyStepControl then
     hudRef.updateKeyStepControl(controlId, value, pressed, extra)
   end
+end
+
+local function setSetupGuide(step)
+  state.setupGuideStep = step or "hidden"
+  sendToHud("setup_guide", 1, state.setupGuideStep ~= "hidden", { step = state.setupGuideStep })
 end
 
 local function getActiveShiftModeDef()
@@ -184,17 +203,78 @@ local function getActiveShiftModeDef()
   return nil
 end
 
+local function getFocusedTrack()
+  local s = _G.activeWatchers and _G.activeWatchers.state
+  local id = s and tonumber(s.activeTrack)
+  local trk = s and s.tracks and s.tracks[id or -1]
+  return trk, id
+end
+
+local function currentParamValues()
+  local _, trackId = getFocusedTrack()
+  if not trackId then return state.paramValues end
+  if not state.trackParamValues[trackId] then
+    local values = {}
+    for _, def in pairs(SHIFT_MODES) do values[def.id] = def.default end
+    for _, stage in ipairs(ENVELOPE_STAGES) do values[stage.id] = stage.default end
+    values.modwheel = 0
+    state.trackParamValues[trackId] = values
+  end
+  return state.trackParamValues[trackId]
+end
+
+local function effectiveShiftAssignment(modeDef)
+  if not modeDef then
+    local values = currentParamValues()
+    return { cc = 1, label = "MOD", color = "#a0a0ab", value = values.modwheel or 0 }
+  end
+  if modeDef.id == "envelope" then
+    local stage = ENVELOPE_STAGES[state.envelopeStageIdx] or ENVELOPE_STAGES[1]
+    local values = currentParamValues()
+    return { cc = stage.cc, label = stage.label, color = modeDef.color,
+      value = values[stage.id] or state.paramValues[stage.id] or stage.default, stage = stage.id }
+  end
+  local values = currentParamValues()
+  return { cc = modeDef.cc, label = modeDef.label, color = modeDef.color,
+    value = values[modeDef.id] or state.paramValues[modeDef.id] or modeDef.default }
+end
+
+local function getOutputChannel()
+  local trk = getFocusedTrack()
+  return (trk and trk.channel) or config.outputChannel
+end
+
+local function resolveHeldShiftMode()
+  local newestTime, newestMode = -1, nil
+  for note, pressedAt in pairs(state.shiftPressTimes) do
+    if pressedAt >= newestTime then
+      local def = SHIFT_MODES[(tonumber(note) or 0) % 12]
+      if def then newestTime, newestMode = pressedAt, def.id end
+    end
+  end
+  state.activeShiftMode = newestMode or state.latchedShiftMode
+end
+
 local function sendShiftModeToHud()
   local modeDef = getActiveShiftModeDef()
+  local assignment = effectiveShiftAssignment(modeDef)
   local isLatched = (state.latchedShiftMode ~= nil and state.latchedShiftMode == (modeDef and modeDef.id))
   sendToHud("shift_mode", modeDef and 1 or 0, modeDef ~= nil, {
     mode = modeDef and modeDef.id or "default",
     label = modeDef and modeDef.label or "DEFAULT",
-    cc = modeDef and modeDef.cc or 1,
-    value = modeDef and (state.paramValues[modeDef.id] or modeDef.default) or state.modWheel,
+    cc = assignment.cc,
+    value = assignment.value,
     color = modeDef and modeDef.color or "#a0a0ab",
     latched = isLatched,
-    desc = modeDef and modeDef.desc or "Modwheel / Rate"
+    desc = modeDef and (assignment.stage and ("Envelope " .. assignment.stage) or modeDef.desc) or "Mod Wheel"
+  })
+  sendToHud("mod_wheel", assignment.value, true, {
+    cc = assignment.cc, value = assignment.value, mode = modeDef and modeDef.id or "default",
+    label = assignment.label, color = assignment.color, stage = assignment.stage
+  })
+  sendToHud("pitch_assignment", assignment.value, true, {
+    cc = assignment.cc, label = assignment.label, color = assignment.color,
+    mode = modeDef and modeDef.id or "default"
   })
 end
 
@@ -213,6 +293,7 @@ local function monitorState()
     bpm = state.bpm,
     connected = state.connected,
     deviceName = state.deviceName,
+    setupGuideStep = state.setupGuideStep or "hidden",
     lastEvent = state.lastEvent,
     eventAge = age,
     clockPulseCount = state.clockPulseCount,
@@ -275,12 +356,12 @@ local function getQwertyOutput()
   return nil
 end
 
-local function sendCC(controller, value)
+local function sendCC(controller, value, channel)
   if not outputDevice then return end
   outputDevice:sendCommand("controlChange", {
     controllerNumber = controller,
     controllerValue = value,
-    channel = config.outputChannel,
+    channel = channel or config.outputChannel,
   })
 end
 
@@ -368,7 +449,6 @@ local function setBpm(bpm)
     if shiftDef.id == "volume" then
       local volCcVal = rateToVolumeCc(rateVal)
       if _G.activeWatchers and _G.activeWatchers.state then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
       end
     end
@@ -388,7 +468,6 @@ local function setBpm(bpm)
     local volChanged = false
     if _G.activeWatchers and _G.activeWatchers.state then
       if _G.activeWatchers.state.topRowVolume ~= volCcVal or _G.activeWatchers.state.bottomRowVolume ~= volCcVal then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
         volChanged = true
       end
@@ -421,7 +500,6 @@ local function setRate(rateVal)
     if shiftDef.id == "volume" then
       local volCcVal = rateToVolumeCc(roundedRate)
       if _G.activeWatchers and _G.activeWatchers.state then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
       end
     end
@@ -439,7 +517,6 @@ local function setRate(rateVal)
     sendRateCc(roundedRate)
     -- Synchronize Master Volume with QWERTY MIDI engine
     if _G.activeWatchers and _G.activeWatchers.state then
-      _G.activeWatchers.state.topRowVolume = volCcVal
       _G.activeWatchers.state.bottomRowVolume = volCcVal
     end
     if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
@@ -654,22 +731,36 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     handleClock(timestamp)
   elseif isStart then
     state.playing = true
+    state.transportStatus = "running"
+    setSetupGuide(state.setupAcknowledged and "hidden" or "kbd_play")
     clearNoteTiming()
     recordEvent("Transport started", timestamp)
-    sendToHud("transport", 1, true, { action = "play" })
+    sendToHud("transport", 1, true, { action = "play", status = "running", source = "start" })
   elseif isStop then
     state.playing = false
+    state.transportStatus = "stopped"
+    setSetupGuide("transport")
     clearClockTiming()
     clearNoteTiming()
     recordEvent("Transport stopped", timestamp)
-    sendToHud("transport", 0, false, { action = "stop" })
-  elseif commandType == "pitchBend" then
+    sendToHud("transport", 0, false, { action = "stop", status = "stopped", source = "stop" })
+  elseif commandType == "pitchWheelChange" then
     local pitchVal = metadata.pitchChange or 8192
     state.pitchBend = pitchVal
-    if outputDevice then
-      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = metadata.channel or config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+      state.paramValues[assignment.stage or shiftDef.id] = ccVal
+      sendCC(assignment.cc, ccVal, getOutputChannel())
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     end
-    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     recordEvent("Pitch bend " .. tostring(pitchVal), timestamp)
   elseif commandType == "controlChange" then
     local ccNum = metadata.controllerNumber
@@ -678,27 +769,25 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
       local shiftDef = getActiveShiftModeDef()
       if shiftDef then
         state.shiftControlTweaked = true
-        state.paramValues[shiftDef.id] = ccVal
-        sendCC(shiftDef.cc, ccVal)
-        if shiftDef.id == "volume" then
-          if _G.activeWatchers and _G.activeWatchers.state then
-            _G.activeWatchers.state.topRowVolume = ccVal
-            _G.activeWatchers.state.bottomRowVolume = ccVal
-          end
-        end
+        local assignment = effectiveShiftAssignment(shiftDef)
+        currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+        state.paramValues[assignment.stage or shiftDef.id] = ccVal
+        sendCC(assignment.cc, ccVal, getOutputChannel())
         sendToHud("mod_wheel", ccVal, true, {
-          cc = shiftDef.cc,
+          cc = assignment.cc,
           value = ccVal,
           mode = shiftDef.id,
-          label = shiftDef.label,
+          label = assignment.label,
+          stage = assignment.stage,
           color = shiftDef.color
         })
-        recordEvent(shiftDef.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(shiftDef.cc) .. ")", timestamp)
+        recordEvent(assignment.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(assignment.cc) .. ")", timestamp)
       else
         state.modWheel = ccVal
         state.paramValues.modwheel = ccVal
+        currentParamValues().modwheel = ccVal
         if outputDevice then
-          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = getOutputChannel() })
         end
         sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal, mode = "default", label = "MOD" })
         recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
@@ -734,6 +823,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef then
           state.shiftPressTimes[metadata.note] = timestamp
+          state.heldShiftKeys[metadata.note] = true
           state.activeShiftMode = modeDef.id
           state.shiftControlTweaked = false
           sendShiftModeToHud()
@@ -751,6 +841,10 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
       else
         -- White Key: Transposed In-Scale Performance!
+        if state.setupGuideStep == "kbd_play" then
+          state.setupAcknowledged = true
+          setSetupGuide("hidden")
+        end
         local playPitch = metadata.note
         local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
         if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
@@ -758,11 +852,15 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
         state.heldWhiteKeys[metadata.note] = playPitch
         if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
-        forwardNote("noteOn", {
-          note = playPitch,
-          velocity = metadata.velocity,
-          channel = metadata.channel or config.outputChannel
-        })
+        if noteHandler and noteHandler.noteOn then
+          noteHandler.noteOn(metadata.note, metadata.velocity, metadata.channel, metadata.note)
+        else
+          forwardNote("noteOn", {
+            note = playPitch,
+            velocity = metadata.velocity,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
         state.activeKeys[metadata.note] = metadata.velocity
         sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
           note = metadata.note,
@@ -787,18 +885,17 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           local pressTime = state.shiftPressTimes[metadata.note] or timestamp
           local duration = timestamp - pressTime
           state.shiftPressTimes[metadata.note] = nil
-
-          if duration >= 0.28 or state.shiftControlTweaked then
-            state.activeShiftMode = state.latchedShiftMode
-          else
-            if state.latchedShiftMode == modeDef.id then
-              state.latchedShiftMode = nil
-              state.activeShiftMode = nil
-            else
-              state.latchedShiftMode = modeDef.id
-              state.activeShiftMode = modeDef.id
-            end
+          state.heldShiftKeys[metadata.note] = nil
+          local anotherHeld = next(state.shiftPressTimes) ~= nil
+          if modeDef.id == "envelope" and duration < 0.28 and not state.shiftControlTweaked and not anotherHeld then
+            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
+            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
+            state.latchedShiftMode = "envelope"
+          elseif not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
+            if state.latchedShiftMode == modeDef.id then state.latchedShiftMode = nil
+            else state.latchedShiftMode = modeDef.id end
           end
+          resolveHeldShiftMode()
 
           sendShiftModeToHud()
           state.activeKeys[metadata.note] = nil
@@ -822,11 +919,15 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
         state.heldWhiteKeys[metadata.note] = nil
         if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
-        forwardNote("noteOff", {
-          note = playPitch,
-          velocity = 0,
-          channel = metadata.channel or config.outputChannel
-        })
+        if noteHandler and noteHandler.noteOff then
+          noteHandler.noteOff(metadata.note, metadata.channel)
+        else
+          forwardNote("noteOff", {
+            note = playPitch,
+            velocity = 0,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
         state.activeKeys[metadata.note] = nil
         sendToHud("key_" .. tostring(metadata.note), 0, false, {
           note = metadata.note,
@@ -865,6 +966,10 @@ function KeyStep.connect(targetName)
   end)
   state.connected = true
   state.deviceName = deviceName
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
   recordEvent("Listening for MIDI", nowSeconds())
   print("[KeyStep] Listening on " .. deviceName)
   if hudRef and hudRef.updateConnectionStatus then
@@ -877,16 +982,26 @@ function KeyStep.connect(targetName)
   sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
   sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
   sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
-  sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+  sendToHud("transport", nil, false, { action = "unknown", status = state.transportStatus })
   sendToHud("octave", state.octave, true, { octave = state.octave })
   return true
 end
 
 function KeyStep.disconnect()
+  if noteHandler and noteHandler.disconnect then pcall(noteHandler.disconnect) end
+  for note in pairs(state.activeKeys or {}) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note, disconnected = true })
+  end
+  state.activeKeys = {}
+  state.heldWhiteKeys = {}
   if inputDevice then inputDevice:callback(nil) end
   inputDevice = nil
   state.connected = false
   state.deviceName = nil
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
   clearClockTiming()
   clearNoteTiming()
   recordEvent("MIDI device disconnected", nowSeconds())
@@ -898,6 +1013,37 @@ end
 
 function KeyStep.isConnected()
   return inputDevice ~= nil
+end
+
+function KeyStep.setNoteHandler(handler)
+  noteHandler = handler
+end
+
+function KeyStep.panic()
+  -- Release the exact transposed pitches emitted by the side-channel before
+  -- discarding their ownership records.
+  if not outputDevice then outputDevice = getQwertyOutput() end
+  if outputDevice then
+    for _, pitch in pairs(state.heldWhiteKeys) do
+      outputDevice:sendCommand("noteOff", { note = pitch, velocity = 0, channel = config.outputChannel })
+    end
+    outputDevice:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = getOutputChannel() })
+  end
+  for note in pairs(state.activeKeys) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note })
+  end
+  state.heldWhiteKeys = {}
+  state.shiftPressTimes = {}
+  state.heldShiftKeys = {}
+  state.activeKeys = {}
+  state.activeShiftMode = nil
+  state.latchedShiftMode = nil
+  state.pitchBend = 8192
+  state.sustain = 0
+  state.shiftControlTweaked = false
+  sendShiftModeToHud()
+  sendToHud("pitch_bend", 8192, true, { pitch = 8192 })
+  if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
 end
 
 function KeyStep.analyzeSequenceAndInferKnobs()
@@ -979,6 +1125,7 @@ function KeyStep.getFullState()
     bpm = state.bpm or 120,
     seqArp = state.seqArpMode or "arp",
     playing = state.playing == true,
+    transportStatus = state.transportStatus or "unknown",
     recording = state.recording == true,
     hold = state.hold == true,
     shift = state.shift == true,
@@ -1007,7 +1154,8 @@ function KeyStep.syncToHud()
   sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
   sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
   sendToHud("seq_arp", s.seqArp == "seq" and 1 or 0, true, { mode = s.seqArp })
-  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.playing and "play" or "stop" })
+  sendToHud("setup_guide", 1, s.setupGuideStep ~= "hidden", { step = s.setupGuideStep })
+  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.transportStatus, status = s.transportStatus })
   sendToHud("octave", s.octave, true, { octave = s.octave })
   sendToHud("hold", s.hold and 127 or 0, s.hold, { hold = s.hold })
   sendToHud("shift", s.shift and 1 or 0, s.shift, { shift = s.shift })
@@ -1043,7 +1191,12 @@ function KeyStep.handleGuiAction(actionType, data)
         -- Black key clicked on GUI: toggle latch mode!
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef and isDown then
-          if state.latchedShiftMode == modeDef.id then
+          if modeDef.id == "envelope" then
+            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
+            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
+            state.latchedShiftMode = "envelope"
+            state.activeShiftMode = "envelope"
+          elseif state.latchedShiftMode == modeDef.id then
             state.latchedShiftMode = nil
             state.activeShiftMode = nil
           else
@@ -1091,17 +1244,38 @@ function KeyStep.handleGuiAction(actionType, data)
   elseif actionType == "pitch" then
     local pitchVal = tonumber(data.value) or 8192
     state.pitchBend = pitchVal
-    if outputDevice then
-      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+      state.paramValues[assignment.stage or shiftDef.id] = ccVal
+      sendCC(assignment.cc, ccVal, getOutputChannel())
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     end
-    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
   elseif actionType == "mod" then
     local modVal = tonumber(data.value) or 0
-    state.modWheel = modVal
-    if outputDevice then
-      outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = modVal
+      state.paramValues[assignment.stage or shiftDef.id] = modVal
+      sendCC(assignment.cc, modVal, getOutputChannel())
+      sendToHud("mod_wheel", modVal, true, { cc = assignment.cc, value = modVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    else
+      state.modWheel = modVal
+      currentParamValues().modwheel = modVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = getOutputChannel() })
+      end
+      sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal, label = "MOD" })
     end
-    sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal })
   elseif actionType == "transport" then
     local act = tostring(data.action or "play")
     if act == "play" or act == "play_pause" then

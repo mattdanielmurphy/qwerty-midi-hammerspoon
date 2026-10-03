@@ -17,6 +17,7 @@ local QUANTIZE_FACTORS = {
 local gridReferenceTime = hs.timer.absoluteTime() / 1e9
 local pendingEvents = {} -- [eventId] = { pitches = {}, channel = 0, vel = 100, onFired = false, released = false, timer = ... }
 local activePlayingNotes = {} -- [pitch_ch] = count of held instances
+local panicGeneration = 0
 
 function quantizer.resetGrid()
   gridReferenceTime = hs.timer.absoluteTime() / 1e9
@@ -76,8 +77,9 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
   vel = vel or 100
 
   -- Cancel any previous pending event for this ID
-  if pendingEvents[eventId] and pendingEvents[eventId].timer then
-    pcall(function() pendingEvents[eventId].timer:stop() end)
+  if pendingEvents[eventId] then
+    if pendingEvents[eventId].timer then pcall(function() pendingEvents[eventId].timer:stop() end) end
+    if pendingEvents[eventId].gateTimer then pcall(function() pendingEvents[eventId].gateTimer:stop() end) end
     pendingEvents[eventId] = nil
   end
 
@@ -107,9 +109,11 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
       onFired = false,
       released = false
     }
+    ev.generation = panicGeneration
     pendingEvents[eventId] = ev
 
     ev.timer = hs.timer.doAfter(delay, function()
+      if ev.generation ~= panicGeneration then return end
       ev.timer = nil
       ev.onFired = true
 
@@ -128,7 +132,9 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
         local stepSec = (60.0 / clampedBpm) * factor
         local gateTime = math.max(0.060, stepSec * 0.6) -- 60% of step or min 60ms
 
-        hs.timer.doAfter(gateTime, function()
+        ev.gateTimer = hs.timer.doAfter(gateTime, function()
+          if ev.generation ~= panicGeneration then return end
+          ev.gateTimer = nil
           if ev.onRelease then ev.onRelease(pitches, ch) end
           for _, p in ipairs(pitches) do
             local key = p .. "_" .. ch
@@ -172,9 +178,13 @@ end
 
 --- Panic / clean all pending quantized events
 function quantizer.panic(onReleaseAll)
+  panicGeneration = panicGeneration + 1
   for eventId, ev in pairs(pendingEvents) do
     if ev.timer then
       pcall(function() ev.timer:stop() end)
+    end
+    if ev.gateTimer then
+      pcall(function() ev.gateTimer:stop() end)
     end
     if ev.onFired and onReleaseAll then
       pcall(function() onReleaseAll(ev.pitches, ev.channel) end)

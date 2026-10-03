@@ -54,6 +54,13 @@ _G.activeWatchers.arpeggiator = arpeggiator
 if keystep then
   if keystep.setHud then keystep.setHud(hud) end
   if keystep.setTransposer then keystep.setTransposer(transposer, state) end
+  if keystep.setNoteHandler then
+    keystep.setNoteHandler({
+      noteOn = controls.handleKeyStepNoteOn,
+      noteOff = controls.handleKeyStepNoteOff,
+      disconnect = controls.handleKeyStepDisconnect
+    })
+  end
   _G.activeWatchers.keystep = keystep
   pcall(function() keystep.connect("Arturia KeyStep 32") end)
 end
@@ -311,7 +318,7 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       if isDown then
-        local ok, status = xpcall(function() return controls.handleKeyDown(code, flags) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
+        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
         if not ok then
           print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
         end
@@ -2564,6 +2571,7 @@ local QUANTIZE_FACTORS = {
 local gridReferenceTime = hs.timer.absoluteTime() / 1e9
 local pendingEvents = {} -- [eventId] = { pitches = {}, channel = 0, vel = 100, onFired = false, released = false, timer = ... }
 local activePlayingNotes = {} -- [pitch_ch] = count of held instances
+local panicGeneration = 0
 
 function quantizer.resetGrid()
   gridReferenceTime = hs.timer.absoluteTime() / 1e9
@@ -2623,8 +2631,9 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
   vel = vel or 100
 
   -- Cancel any previous pending event for this ID
-  if pendingEvents[eventId] and pendingEvents[eventId].timer then
-    pcall(function() pendingEvents[eventId].timer:stop() end)
+  if pendingEvents[eventId] then
+    if pendingEvents[eventId].timer then pcall(function() pendingEvents[eventId].timer:stop() end) end
+    if pendingEvents[eventId].gateTimer then pcall(function() pendingEvents[eventId].gateTimer:stop() end) end
     pendingEvents[eventId] = nil
   end
 
@@ -2654,9 +2663,11 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
       onFired = false,
       released = false
     }
+    ev.generation = panicGeneration
     pendingEvents[eventId] = ev
 
     ev.timer = hs.timer.doAfter(delay, function()
+      if ev.generation ~= panicGeneration then return end
       ev.timer = nil
       ev.onFired = true
 
@@ -2675,7 +2686,9 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
         local stepSec = (60.0 / clampedBpm) * factor
         local gateTime = math.max(0.060, stepSec * 0.6) -- 60% of step or min 60ms
 
-        hs.timer.doAfter(gateTime, function()
+        ev.gateTimer = hs.timer.doAfter(gateTime, function()
+          if ev.generation ~= panicGeneration then return end
+          ev.gateTimer = nil
           if ev.onRelease then ev.onRelease(pitches, ch) end
           for _, p in ipairs(pitches) do
             local key = p .. "_" .. ch
@@ -2719,9 +2732,13 @@ end
 
 --- Panic / clean all pending quantized events
 function quantizer.panic(onReleaseAll)
+  panicGeneration = panicGeneration + 1
   for eventId, ev in pairs(pendingEvents) do
     if ev.timer then
       pcall(function() ev.timer:stop() end)
+    end
+    if ev.gateTimer then
+      pcall(function() ev.gateTimer:stop() end)
     end
     if ev.onFired and onReleaseAll then
       pcall(function() onReleaseAll(ev.pitches, ev.channel) end)
@@ -2950,7 +2967,14 @@ local SHIFT_MODES = {
   [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
   [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
   [8]  = { id = "release", label = "RELEASE", cc = 72, default = 40,  color = "#00e676", desc = "Synth Release" },
-  [10] = { id = "volume",  label = "VOLUME",  cc = 7,  default = 100, color = "#ffd700", desc = "Master Volume" },
+  [10] = { id = "envelope", label = "ADSR", cc = 24, default = 64, color = "#ffd700", desc = "Envelope Stage" },
+}
+
+local ENVELOPE_STAGES = {
+  { id = "attack", label = "ATTACK", cc = 24, default = 0 },
+  { id = "decay", label = "DECAY", cc = 25, default = 64 },
+  { id = "sustain", label = "SUSTAIN", cc = 26, default = 100 },
+  { id = "release", label = "RELEASE", cc = 27, default = 40 },
 }
 
 local KeyStep = {}
@@ -2987,6 +3011,7 @@ local monitor = nil
 local monitorRefreshTimer = nil
 local running = false
 local hudRef = nil
+local noteHandler = nil
 
 local ARP_MODES = {
   [1] = "Up",
@@ -3077,6 +3102,7 @@ local state = {
   sustain = 0,
   seqArpMode = loadSetting("qwertyMidi_ks_seqArpMode", "arp"),
   playing = false,
+  transportStatus = "unknown",
   recording = false,
   shift = false,
   hold = false,
@@ -3087,6 +3113,8 @@ local state = {
   latchedShiftMode = nil,
   shiftPressTimes = {},
   shiftControlTweaked = false,
+  heldShiftKeys = {},
+  envelopeStageIdx = loadSetting("qwertyMidi_ks_envelopeStageIdx", 0),
   heldWhiteKeys = {},
   paramValues = {
     cutoff = 100,
@@ -3096,13 +3124,21 @@ local state = {
     volume = 100,
     modwheel = 0,
   },
+  trackParamValues = {},
   transposerEnabled = loadSetting("qwertyMidi_ks_transposerEnabled", true),
+  setupAcknowledged = false,
+  setupGuideStep = "hidden",
 }
 
 local function sendToHud(controlId, value, pressed, extra)
   if hudRef and hudRef.updateKeyStepControl then
     hudRef.updateKeyStepControl(controlId, value, pressed, extra)
   end
+end
+
+local function setSetupGuide(step)
+  state.setupGuideStep = step or "hidden"
+  sendToHud("setup_guide", 1, state.setupGuideStep ~= "hidden", { step = state.setupGuideStep })
 end
 
 local function getActiveShiftModeDef()
@@ -3114,17 +3150,78 @@ local function getActiveShiftModeDef()
   return nil
 end
 
+local function getFocusedTrack()
+  local s = _G.activeWatchers and _G.activeWatchers.state
+  local id = s and tonumber(s.activeTrack)
+  local trk = s and s.tracks and s.tracks[id or -1]
+  return trk, id
+end
+
+local function currentParamValues()
+  local _, trackId = getFocusedTrack()
+  if not trackId then return state.paramValues end
+  if not state.trackParamValues[trackId] then
+    local values = {}
+    for _, def in pairs(SHIFT_MODES) do values[def.id] = def.default end
+    for _, stage in ipairs(ENVELOPE_STAGES) do values[stage.id] = stage.default end
+    values.modwheel = 0
+    state.trackParamValues[trackId] = values
+  end
+  return state.trackParamValues[trackId]
+end
+
+local function effectiveShiftAssignment(modeDef)
+  if not modeDef then
+    local values = currentParamValues()
+    return { cc = 1, label = "MOD", color = "#a0a0ab", value = values.modwheel or 0 }
+  end
+  if modeDef.id == "envelope" then
+    local stage = ENVELOPE_STAGES[state.envelopeStageIdx] or ENVELOPE_STAGES[1]
+    local values = currentParamValues()
+    return { cc = stage.cc, label = stage.label, color = modeDef.color,
+      value = values[stage.id] or state.paramValues[stage.id] or stage.default, stage = stage.id }
+  end
+  local values = currentParamValues()
+  return { cc = modeDef.cc, label = modeDef.label, color = modeDef.color,
+    value = values[modeDef.id] or state.paramValues[modeDef.id] or modeDef.default }
+end
+
+local function getOutputChannel()
+  local trk = getFocusedTrack()
+  return (trk and trk.channel) or config.outputChannel
+end
+
+local function resolveHeldShiftMode()
+  local newestTime, newestMode = -1, nil
+  for note, pressedAt in pairs(state.shiftPressTimes) do
+    if pressedAt >= newestTime then
+      local def = SHIFT_MODES[(tonumber(note) or 0) % 12]
+      if def then newestTime, newestMode = pressedAt, def.id end
+    end
+  end
+  state.activeShiftMode = newestMode or state.latchedShiftMode
+end
+
 local function sendShiftModeToHud()
   local modeDef = getActiveShiftModeDef()
+  local assignment = effectiveShiftAssignment(modeDef)
   local isLatched = (state.latchedShiftMode ~= nil and state.latchedShiftMode == (modeDef and modeDef.id))
   sendToHud("shift_mode", modeDef and 1 or 0, modeDef ~= nil, {
     mode = modeDef and modeDef.id or "default",
     label = modeDef and modeDef.label or "DEFAULT",
-    cc = modeDef and modeDef.cc or 1,
-    value = modeDef and (state.paramValues[modeDef.id] or modeDef.default) or state.modWheel,
+    cc = assignment.cc,
+    value = assignment.value,
     color = modeDef and modeDef.color or "#a0a0ab",
     latched = isLatched,
-    desc = modeDef and modeDef.desc or "Modwheel / Rate"
+    desc = modeDef and (assignment.stage and ("Envelope " .. assignment.stage) or modeDef.desc) or "Mod Wheel"
+  })
+  sendToHud("mod_wheel", assignment.value, true, {
+    cc = assignment.cc, value = assignment.value, mode = modeDef and modeDef.id or "default",
+    label = assignment.label, color = assignment.color, stage = assignment.stage
+  })
+  sendToHud("pitch_assignment", assignment.value, true, {
+    cc = assignment.cc, label = assignment.label, color = assignment.color,
+    mode = modeDef and modeDef.id or "default"
   })
 end
 
@@ -3143,6 +3240,7 @@ local function monitorState()
     bpm = state.bpm,
     connected = state.connected,
     deviceName = state.deviceName,
+    setupGuideStep = state.setupGuideStep or "hidden",
     lastEvent = state.lastEvent,
     eventAge = age,
     clockPulseCount = state.clockPulseCount,
@@ -3205,12 +3303,12 @@ local function getQwertyOutput()
   return nil
 end
 
-local function sendCC(controller, value)
+local function sendCC(controller, value, channel)
   if not outputDevice then return end
   outputDevice:sendCommand("controlChange", {
     controllerNumber = controller,
     controllerValue = value,
-    channel = config.outputChannel,
+    channel = channel or config.outputChannel,
   })
 end
 
@@ -3298,7 +3396,6 @@ local function setBpm(bpm)
     if shiftDef.id == "volume" then
       local volCcVal = rateToVolumeCc(rateVal)
       if _G.activeWatchers and _G.activeWatchers.state then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
       end
     end
@@ -3318,7 +3415,6 @@ local function setBpm(bpm)
     local volChanged = false
     if _G.activeWatchers and _G.activeWatchers.state then
       if _G.activeWatchers.state.topRowVolume ~= volCcVal or _G.activeWatchers.state.bottomRowVolume ~= volCcVal then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
         volChanged = true
       end
@@ -3351,7 +3447,6 @@ local function setRate(rateVal)
     if shiftDef.id == "volume" then
       local volCcVal = rateToVolumeCc(roundedRate)
       if _G.activeWatchers and _G.activeWatchers.state then
-        _G.activeWatchers.state.topRowVolume = volCcVal
         _G.activeWatchers.state.bottomRowVolume = volCcVal
       end
     end
@@ -3369,7 +3464,6 @@ local function setRate(rateVal)
     sendRateCc(roundedRate)
     -- Synchronize Master Volume with QWERTY MIDI engine
     if _G.activeWatchers and _G.activeWatchers.state then
-      _G.activeWatchers.state.topRowVolume = volCcVal
       _G.activeWatchers.state.bottomRowVolume = volCcVal
     end
     if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
@@ -3584,22 +3678,36 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     handleClock(timestamp)
   elseif isStart then
     state.playing = true
+    state.transportStatus = "running"
+    setSetupGuide(state.setupAcknowledged and "hidden" or "kbd_play")
     clearNoteTiming()
     recordEvent("Transport started", timestamp)
-    sendToHud("transport", 1, true, { action = "play" })
+    sendToHud("transport", 1, true, { action = "play", status = "running", source = "start" })
   elseif isStop then
     state.playing = false
+    state.transportStatus = "stopped"
+    setSetupGuide("transport")
     clearClockTiming()
     clearNoteTiming()
     recordEvent("Transport stopped", timestamp)
-    sendToHud("transport", 0, false, { action = "stop" })
-  elseif commandType == "pitchBend" then
+    sendToHud("transport", 0, false, { action = "stop", status = "stopped", source = "stop" })
+  elseif commandType == "pitchWheelChange" then
     local pitchVal = metadata.pitchChange or 8192
     state.pitchBend = pitchVal
-    if outputDevice then
-      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = metadata.channel or config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+      state.paramValues[assignment.stage or shiftDef.id] = ccVal
+      sendCC(assignment.cc, ccVal, getOutputChannel())
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     end
-    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     recordEvent("Pitch bend " .. tostring(pitchVal), timestamp)
   elseif commandType == "controlChange" then
     local ccNum = metadata.controllerNumber
@@ -3608,27 +3716,25 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
       local shiftDef = getActiveShiftModeDef()
       if shiftDef then
         state.shiftControlTweaked = true
-        state.paramValues[shiftDef.id] = ccVal
-        sendCC(shiftDef.cc, ccVal)
-        if shiftDef.id == "volume" then
-          if _G.activeWatchers and _G.activeWatchers.state then
-            _G.activeWatchers.state.topRowVolume = ccVal
-            _G.activeWatchers.state.bottomRowVolume = ccVal
-          end
-        end
+        local assignment = effectiveShiftAssignment(shiftDef)
+        currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+        state.paramValues[assignment.stage or shiftDef.id] = ccVal
+        sendCC(assignment.cc, ccVal, getOutputChannel())
         sendToHud("mod_wheel", ccVal, true, {
-          cc = shiftDef.cc,
+          cc = assignment.cc,
           value = ccVal,
           mode = shiftDef.id,
-          label = shiftDef.label,
+          label = assignment.label,
+          stage = assignment.stage,
           color = shiftDef.color
         })
-        recordEvent(shiftDef.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(shiftDef.cc) .. ")", timestamp)
+        recordEvent(assignment.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(assignment.cc) .. ")", timestamp)
       else
         state.modWheel = ccVal
         state.paramValues.modwheel = ccVal
+        currentParamValues().modwheel = ccVal
         if outputDevice then
-          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = getOutputChannel() })
         end
         sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal, mode = "default", label = "MOD" })
         recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
@@ -3664,6 +3770,7 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef then
           state.shiftPressTimes[metadata.note] = timestamp
+          state.heldShiftKeys[metadata.note] = true
           state.activeShiftMode = modeDef.id
           state.shiftControlTweaked = false
           sendShiftModeToHud()
@@ -3681,6 +3788,10 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
       else
         -- White Key: Transposed In-Scale Performance!
+        if state.setupGuideStep == "kbd_play" then
+          state.setupAcknowledged = true
+          setSetupGuide("hidden")
+        end
         local playPitch = metadata.note
         local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
         if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
@@ -3688,11 +3799,15 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
         state.heldWhiteKeys[metadata.note] = playPitch
         if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
-        forwardNote("noteOn", {
-          note = playPitch,
-          velocity = metadata.velocity,
-          channel = metadata.channel or config.outputChannel
-        })
+        if noteHandler and noteHandler.noteOn then
+          noteHandler.noteOn(metadata.note, metadata.velocity, metadata.channel, metadata.note)
+        else
+          forwardNote("noteOn", {
+            note = playPitch,
+            velocity = metadata.velocity,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
         state.activeKeys[metadata.note] = metadata.velocity
         sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
           note = metadata.note,
@@ -3717,18 +3832,17 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           local pressTime = state.shiftPressTimes[metadata.note] or timestamp
           local duration = timestamp - pressTime
           state.shiftPressTimes[metadata.note] = nil
-
-          if duration >= 0.28 or state.shiftControlTweaked then
-            state.activeShiftMode = state.latchedShiftMode
-          else
-            if state.latchedShiftMode == modeDef.id then
-              state.latchedShiftMode = nil
-              state.activeShiftMode = nil
-            else
-              state.latchedShiftMode = modeDef.id
-              state.activeShiftMode = modeDef.id
-            end
+          state.heldShiftKeys[metadata.note] = nil
+          local anotherHeld = next(state.shiftPressTimes) ~= nil
+          if modeDef.id == "envelope" and duration < 0.28 and not state.shiftControlTweaked and not anotherHeld then
+            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
+            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
+            state.latchedShiftMode = "envelope"
+          elseif not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
+            if state.latchedShiftMode == modeDef.id then state.latchedShiftMode = nil
+            else state.latchedShiftMode = modeDef.id end
           end
+          resolveHeldShiftMode()
 
           sendShiftModeToHud()
           state.activeKeys[metadata.note] = nil
@@ -3752,11 +3866,15 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
         end
         state.heldWhiteKeys[metadata.note] = nil
         if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
-        forwardNote("noteOff", {
-          note = playPitch,
-          velocity = 0,
-          channel = metadata.channel or config.outputChannel
-        })
+        if noteHandler and noteHandler.noteOff then
+          noteHandler.noteOff(metadata.note, metadata.channel)
+        else
+          forwardNote("noteOff", {
+            note = playPitch,
+            velocity = 0,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
         state.activeKeys[metadata.note] = nil
         sendToHud("key_" .. tostring(metadata.note), 0, false, {
           note = metadata.note,
@@ -3795,6 +3913,10 @@ function KeyStep.connect(targetName)
   end)
   state.connected = true
   state.deviceName = deviceName
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
   recordEvent("Listening for MIDI", nowSeconds())
   print("[KeyStep] Listening on " .. deviceName)
   if hudRef and hudRef.updateConnectionStatus then
@@ -3807,16 +3929,26 @@ function KeyStep.connect(targetName)
   sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
   sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
   sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
-  sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+  sendToHud("transport", nil, false, { action = "unknown", status = state.transportStatus })
   sendToHud("octave", state.octave, true, { octave = state.octave })
   return true
 end
 
 function KeyStep.disconnect()
+  if noteHandler and noteHandler.disconnect then pcall(noteHandler.disconnect) end
+  for note in pairs(state.activeKeys or {}) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note, disconnected = true })
+  end
+  state.activeKeys = {}
+  state.heldWhiteKeys = {}
   if inputDevice then inputDevice:callback(nil) end
   inputDevice = nil
   state.connected = false
   state.deviceName = nil
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
   clearClockTiming()
   clearNoteTiming()
   recordEvent("MIDI device disconnected", nowSeconds())
@@ -3828,6 +3960,37 @@ end
 
 function KeyStep.isConnected()
   return inputDevice ~= nil
+end
+
+function KeyStep.setNoteHandler(handler)
+  noteHandler = handler
+end
+
+function KeyStep.panic()
+  -- Release the exact transposed pitches emitted by the side-channel before
+  -- discarding their ownership records.
+  if not outputDevice then outputDevice = getQwertyOutput() end
+  if outputDevice then
+    for _, pitch in pairs(state.heldWhiteKeys) do
+      outputDevice:sendCommand("noteOff", { note = pitch, velocity = 0, channel = config.outputChannel })
+    end
+    outputDevice:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = getOutputChannel() })
+  end
+  for note in pairs(state.activeKeys) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note })
+  end
+  state.heldWhiteKeys = {}
+  state.shiftPressTimes = {}
+  state.heldShiftKeys = {}
+  state.activeKeys = {}
+  state.activeShiftMode = nil
+  state.latchedShiftMode = nil
+  state.pitchBend = 8192
+  state.sustain = 0
+  state.shiftControlTweaked = false
+  sendShiftModeToHud()
+  sendToHud("pitch_bend", 8192, true, { pitch = 8192 })
+  if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
 end
 
 function KeyStep.analyzeSequenceAndInferKnobs()
@@ -3909,6 +4072,7 @@ function KeyStep.getFullState()
     bpm = state.bpm or 120,
     seqArp = state.seqArpMode or "arp",
     playing = state.playing == true,
+    transportStatus = state.transportStatus or "unknown",
     recording = state.recording == true,
     hold = state.hold == true,
     shift = state.shift == true,
@@ -3937,7 +4101,8 @@ function KeyStep.syncToHud()
   sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
   sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
   sendToHud("seq_arp", s.seqArp == "seq" and 1 or 0, true, { mode = s.seqArp })
-  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.playing and "play" or "stop" })
+  sendToHud("setup_guide", 1, s.setupGuideStep ~= "hidden", { step = s.setupGuideStep })
+  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.transportStatus, status = s.transportStatus })
   sendToHud("octave", s.octave, true, { octave = s.octave })
   sendToHud("hold", s.hold and 127 or 0, s.hold, { hold = s.hold })
   sendToHud("shift", s.shift and 1 or 0, s.shift, { shift = s.shift })
@@ -3973,7 +4138,12 @@ function KeyStep.handleGuiAction(actionType, data)
         -- Black key clicked on GUI: toggle latch mode!
         local modeDef = SHIFT_MODES[pitchClass]
         if modeDef and isDown then
-          if state.latchedShiftMode == modeDef.id then
+          if modeDef.id == "envelope" then
+            state.envelopeStageIdx = (state.envelopeStageIdx % #ENVELOPE_STAGES) + 1
+            persistSetting("qwertyMidi_ks_envelopeStageIdx", state.envelopeStageIdx)
+            state.latchedShiftMode = "envelope"
+            state.activeShiftMode = "envelope"
+          elseif state.latchedShiftMode == modeDef.id then
             state.latchedShiftMode = nil
             state.activeShiftMode = nil
           else
@@ -4021,17 +4191,38 @@ function KeyStep.handleGuiAction(actionType, data)
   elseif actionType == "pitch" then
     local pitchVal = tonumber(data.value) or 8192
     state.pitchBend = pitchVal
-    if outputDevice then
-      outputDevice:sendCommand("pitchBend", { pitchChange = pitchVal, channel = config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = ccVal
+      state.paramValues[assignment.stage or shiftDef.id] = ccVal
+      sendCC(assignment.cc, ccVal, getOutputChannel())
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     end
-    sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
   elseif actionType == "mod" then
     local modVal = tonumber(data.value) or 0
-    state.modWheel = modVal
-    if outputDevice then
-      outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = config.outputChannel })
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = effectiveShiftAssignment(shiftDef)
+      state.shiftControlTweaked = true
+      currentParamValues()[assignment.stage or shiftDef.id] = modVal
+      state.paramValues[assignment.stage or shiftDef.id] = modVal
+      sendCC(assignment.cc, modVal, getOutputChannel())
+      sendToHud("mod_wheel", modVal, true, { cc = assignment.cc, value = modVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    else
+      state.modWheel = modVal
+      currentParamValues().modwheel = modVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = getOutputChannel() })
+      end
+      sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal, label = "MOD" })
     end
-    sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal })
   elseif actionType == "transport" then
     local act = tostring(data.action or "play")
     if act == "play" or act == "play_pause" then
@@ -7776,6 +7967,42 @@ local HTML_UI_CONTENT = [[
     box-shadow: 0 0 8px rgba(212, 163, 89, 0.6);
   }
 
+  .ks-setup-guide {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(390px, calc(100% - 32px));
+    box-sizing: border-box;
+    padding: 10px 14px;
+    border: 1px solid rgba(212, 163, 89, 0.72);
+    border-radius: 9px;
+    background: rgba(22, 20, 18, 0.96);
+    color: #f3eee7;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.62);
+    font: 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif;
+    pointer-events: none;
+  }
+  .ks-setup-guide.visible { display: flex; align-items: center; gap: 12px; }
+  .ks-setup-guide-icon {
+    display: grid;
+    grid-template-columns: repeat(2, 12px);
+    gap: 5px;
+    flex: 0 0 auto;
+  }
+  .ks-setup-guide-icon i {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #34312d; border: 1px solid #817768;
+  }
+  .ks-setup-guide[data-step="transport"] .ks-setup-guide-icon i:first-child,
+  .ks-setup-guide[data-step="kbd_play"] .ks-setup-guide-icon i:last-child {
+    background: #42d392; border-color: #a4ffd1; box-shadow: 0 0 8px rgba(66, 211, 146, 0.7);
+  }
+  .ks-setup-guide strong { display: block; color: #ffd38b; margin-bottom: 2px; }
+  .ks-setup-guide span { color: #e0d9d0; }
+
   /* ── Arturia KeyStep 32 Hardware Silhouette & Styles ── */
   #hud-container.keystep-connected,
   #hud-container.nanokey-connected {
@@ -8530,7 +8757,7 @@ local HTML_UI_CONTENT = [[
     background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
     box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
   }
-  .ks-key-b.ks-shift-volume {
+  .ks-key-b.ks-shift-envelope {
     border-color: rgba(255, 215, 0, 0.7) !important;
     background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
     box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
@@ -8752,6 +8979,10 @@ local HTML_UI_CONTENT = [[
 
     <!-- Arturia KeyStep 32 Authentic Hardware View -->
     <div class="keystep-view" id="keystep-view" style="display: none;">
+      <aside class="ks-setup-guide" id="ks-setup-guide" role="status" aria-live="polite" data-step="transport">
+        <span class="ks-setup-guide-icon" aria-hidden="true"><i></i><i></i></span>
+        <span><strong id="ks-setup-guide-title">KeyStep setup · 1 of 2</strong><span id="ks-setup-guide-copy">Press Play/Pause until Play is solid and Tap blinks.</span></span>
+      </aside>
       <!-- LEFT CHEEK: Model branding, Hold/Shift, Oct-/Oct+, Capacitive Pitch & Mod Strips -->
       <div class="ks-left-cheek ks-control-bay">
         <div class="ks-cheek-header">
@@ -8800,7 +9031,7 @@ local HTML_UI_CONTENT = [[
               <span class="ks-strip-arrow">▼</span>
             </div>
             <div class="ks-strip-footer">
-              <span class="ks-strip-name">Pitch</span>
+              <span class="ks-strip-name" id="ks-pitch-name">Pitch</span>
               <span class="ks-strip-val" id="ks-pitch-val">±0</span>
             </div>
           </div>
@@ -8871,7 +9102,7 @@ local HTML_UI_CONTENT = [[
               <span class="ks-trans-sub">Append</span>
             </div>
             <div class="ks-trans-btn-wrap">
-              <button class="ks-btn ks-btn-trans ks-btn-stop active" id="ks-btn-stop" title="Stop">
+              <button class="ks-btn ks-btn-trans ks-btn-stop" id="ks-btn-stop" title="Stop">
                 <span class="ks-btn-led"></span>■
               </button>
               <span class="ks-trans-sub">Clear Last</span>
@@ -8951,21 +9182,21 @@ local HTML_UI_CONTENT = [[
           <div class="ks-black-keys">
             <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="volume" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="envelope" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
 
             <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="volume" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="envelope" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
 
             <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
             <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
             <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
             <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="volume" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="envelope" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">ADSR</span></div>
           </div>
         </div>
       </div>
@@ -11581,6 +11812,22 @@ window.setKeyStepConnected = function(connected) {
     badge.style.display = connected ? 'inline-flex' : 'none';
   }
 };
+window.setKeyStepSetupGuide = function(step) {
+  const card = document.getElementById('ks-setup-guide');
+  const title = document.getElementById('ks-setup-guide-title');
+  const copy = document.getElementById('ks-setup-guide-copy');
+  if (!card || !title || !copy) return;
+  const visible = step === 'transport' || step === 'kbd_play';
+  card.classList.toggle('visible', visible);
+  card.dataset.step = visible ? step : 'transport';
+  if (step === 'kbd_play') {
+    title.textContent = 'KeyStep setup · 2 of 2';
+    copy.textContent = 'Hold Shift and tap Oct+ (Kbd Play) before playing a note.';
+  } else {
+    title.textContent = 'KeyStep setup · 1 of 2';
+    copy.textContent = 'Press Play/Pause until Play is solid and Tap blinks.';
+  }
+};
 window.setNanokeyConnected = window.setKeyStepConnected;
 
 const ARP_MODE_NAMES = ["1: Up", "2: Down", "3: Inc", "4: Exc", "5: Rand", "6: Order", "7: Up x2", "8: Dwn x2"];
@@ -11607,6 +11854,10 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
 
   if (controlId === 'connection') {
     window.setKeyStepConnected(!!pressed);
+    return;
+  }
+  if (controlId === 'setup_guide') {
+    window.setKeyStepSetupGuide(extra.step || 'hidden');
     return;
   }
 
@@ -11654,7 +11905,25 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const norm = (16383 - pitchVal) / 16383; // 0 to 1
     if (thumb) thumb.style.top = (norm * 100).toFixed(1) + '%';
     const stDiff = ((pitchVal - 8192) / 8192 * 2).toFixed(1);
-    if (valEl) valEl.textContent = (pitchVal === 8192 ? '±0' : (stDiff > 0 ? '+' + stDiff : stDiff));
+    if (valEl) valEl.textContent = (extra && extra.assignment)
+      ? `CC${extra.cc}: ${extra.value}`
+      : (pitchVal === 8192 ? '±0' : (stDiff > 0 ? '+' + stDiff : stDiff));
+    const pitchName = document.getElementById('ks-pitch-name');
+    if (pitchName && extra && extra.assignment) {
+      pitchName.textContent = extra.label || 'CC';
+      pitchName.style.color = extra.color || '';
+    }
+    return;
+  }
+
+  if (controlId === 'pitch_assignment') {
+    const pitchName = document.getElementById('ks-pitch-name');
+    const valEl = document.getElementById('ks-pitch-val');
+    if (pitchName) {
+      pitchName.textContent = (extra && extra.mode !== 'default') ? (extra.label || 'CC') : 'Pitch';
+      pitchName.style.color = (extra && extra.mode !== 'default') ? (extra.color || '') : '';
+    }
+    if (valEl) valEl.textContent = (extra && extra.mode !== 'default') ? `CC${extra.cc}: ${value}` : '±0';
     return;
   }
 
@@ -11700,7 +11969,7 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
       if (isActive && shiftTarget === mode) {
         bKey.classList.add(shiftClass);
       } else {
-        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-volume');
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-envelope');
       }
     });
     return;
@@ -11816,12 +12085,14 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
 
   // Transport
   if (controlId === 'transport') {
-    const isPlaying = (value === 1 || extra.action === 'play');
+    const status = extra.status || (extra.action === 'play' ? 'running' : (extra.action === 'stop' ? 'stopped' : 'unknown'));
+    const isPlaying = status === 'running';
     window._ksInternalState.playing = isPlaying;
+    window._ksInternalState.transportStatus = status;
     const btnPlay = document.getElementById('ks-btn-play');
     const btnStop = document.getElementById('ks-btn-stop');
-    if (btnPlay) btnPlay.classList.toggle('active', isPlaying);
-    if (btnStop) btnStop.classList.toggle('active', !isPlaying);
+    if (btnPlay) btnPlay.classList.toggle('active', status === 'running');
+    if (btnStop) btnStop.classList.toggle('active', status === 'stopped');
     return;
   }
 
@@ -11884,10 +12155,17 @@ window.syncFullKeyStepState = function(stateObj) {
   if (stateObj.seqArp !== undefined) {
     window.updateKeyStepState('seq_arp', stateObj.seqArp === 'seq' ? 1 : 0, true, { mode: stateObj.seqArp });
   }
+  if (stateObj.setupGuideStep !== undefined) {
+    window.setKeyStepSetupGuide(stateObj.setupGuideStep);
+  }
   if (stateObj.octave !== undefined) window.updateKeyStepState('octave', stateObj.octave);
   if (stateObj.pitchBend !== undefined) window.updateKeyStepState('pitch_bend', stateObj.pitchBend);
   if (stateObj.modWheel !== undefined) window.updateKeyStepState('mod_wheel', stateObj.modWheel);
-  if (stateObj.playing !== undefined) window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
+  if (stateObj.transportStatus !== undefined) {
+    window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, !!stateObj.playing, { action: stateObj.transportStatus, status: stateObj.transportStatus });
+  } else if (stateObj.playing !== undefined) {
+    window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
+  }
   if (stateObj.hold !== undefined) window.updateKeyStepState('hold', stateObj.hold ? 127 : 0, stateObj.hold);
   if (stateObj.shift !== undefined) window.updateKeyStepState('shift', stateObj.shift ? 1 : 0, stateObj.shift);
   if (stateObj.transposerEnabled !== undefined) {
@@ -14420,6 +14698,14 @@ local function syncTrackAudibility()
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   end
+  -- Track-dependent key styling is owned by the full HUD payload. A spotlight
+  -- update alone leaves the previous track's CSS variables in place.
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
 end
 
 local function selectTrack(id)
@@ -14483,6 +14769,11 @@ local function selectTrack(id)
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   end
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
 end
 
 local function applyTransposeDelta(deltaSteps, spotTitle)
@@ -14924,6 +15215,19 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "panic" then
+    -- Stop producers before sending the MIDI panic sweep so no timer or queued
+    -- quantized note can immediately retrigger after the sweep.
+    if arpeggiator.stopAllLoops then arpeggiator.stopAllLoops() end
+    if quantizer.panic then
+      quantizer.panic(function(pitches, channel)
+        for _, pitch in ipairs(pitches or {}) do
+          midi.sendMidiNote("noteOff", pitch, 0, channel or 0)
+        end
+      end)
+    end
+    local ks = _G.activeWatchers and _G.activeWatchers.keystep
+    if ks and ks.panic then ks.panic() end
+    local midiAvailable = midi.getMidiDevice() ~= nil
     midi.panicAllChannels()
     state.sustainActive = false
     state.sustainKeyDownTime = nil
@@ -14949,12 +15253,15 @@ local function executeControlAction(act, code)
 
     local spot = {
       title = "MIDI PANIC",
-      value = "ALL NOTES OFF",
-      subtext = "All notes silenced",
+      value = midiAvailable and "ALL NOTES OFF" or "STATE CLEARED",
+      subtext = midiAvailable and "Panic sent on all MIDI channels" or "MIDI output unavailable; external silence not confirmed",
       targetId = code and ("key-" .. code) or "header",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+    if hudModule and hudModule.updateWebviewHud then
+      hudModule.updateWebviewHud(nil, nil, true)
+    end
   elseif act == "resetAll" then
     state.octaveShift = 0
     state.topRowOctaveOffset = 0
@@ -15789,7 +16096,7 @@ local function shouldRepeat(act)
   return repeatingActions[act] == true
 end
 
-local function handleKeyDown(code)
+local function handleKeyDown(code, externalNoteKey)
   if code == 50 then -- Backtick
     state.modeSelectHeld = true
     state.modeWasSelectedDuringHold = false
@@ -15797,7 +16104,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  if state.modeSelectHeld then
+  if not externalNoteKey and state.modeSelectHeld then
     -- Mode Selector is Active!
     if code == 0 then -- 'a' key
       state.currentMode = "ArpAdvanced"
@@ -15834,6 +16141,7 @@ local function handleKeyDown(code)
       end
     end
   end
+  if externalNoteKey then actionToExecute = nil end
 
   if actionToExecute and actionToExecute ~= "" and actionToExecute ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = actionToExecute }
@@ -15867,7 +16175,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  local noteKey = config.getNoteKey(code)
+  local noteKey = externalNoteKey or config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
     local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
@@ -15971,7 +16279,7 @@ local function handleKeyDown(code)
         end)
       end
     end
-    hud.updateSingleKeyState(code, true, false)
+    if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end
     if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     return true
   end
@@ -15979,8 +16287,8 @@ local function handleKeyDown(code)
   return true
 end
 
-local function handleKeyUp(code)
-  if code == 50 then -- Backtick released
+local function handleKeyUp(code, externalNoteKey)
+  if not externalNoteKey and code == 50 then -- Backtick released
     stopControlRepeat(code)
     state.modeSelectHeld = false
     if not state.modeWasSelectedDuringHold then
@@ -16057,12 +16365,14 @@ local function handleKeyUp(code)
       end)
     end
     state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
+    if not externalNoteKey then
+      hud.updateSingleKeyState(code, false, false)
+      hud.updateWebviewHud()
+    end
     return true
   end
 
-  local noteKey = config.getNoteKey(code)
+  local noteKey = externalNoteKey or config.getNoteKey(code)
   if noteKey then
     -- Fallback if pressedKeys entry was missing
     local isTop = noteKey.isTop
@@ -16260,6 +16570,24 @@ return {
   executeControlAction = executeControlAction,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,
+  handleKeyStepNoteOn = function(note, velocity, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then return end
+    handleKeyDown(token, { baseNote = note, isTop = false })
+  end,
+  handleKeyStepNoteOff = function(note, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then handleKeyUp(token, { baseNote = note, isTop = false }) end
+  end,
+  handleKeyStepDisconnect = function()
+    local held = {}
+    for code in pairs(state.pressedKeys) do
+      if type(code) == "string" and code:match("^keystep_") then held[#held + 1] = code end
+    end
+    for _, code in ipairs(held) do
+      if state.pressedKeys[code] then handleKeyUp(code, { isTop = false }) end
+    end
+  end,
   stopAllControlRepeats = stopAllControlRepeats
 }
 
@@ -16342,15 +16670,16 @@ local function panicAllChannels()
   if not dev then return end
 
   for ch = 0, 15 do
-    -- Turn off sustain, all sound, all notes, and reset controllers across all channels
+    -- Release sustain before explicit note-offs; send the channel-mode fallback
+    -- after individual releases so synths receive both forms of note cleanup.
     dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
-    -- Send Note Off for all 128 pitches on each channel to ensure synths ignore/bypass CC #64 or CC #123 release held notes
     for note = 0, 127 do
       dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
     end
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
+    dev:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = ch })
   end
 end
 
@@ -16361,7 +16690,6 @@ return {
   sendSustainCC = sendSustainCC,
   panicAllChannels = panicAllChannels
 }
-
 
 end
 

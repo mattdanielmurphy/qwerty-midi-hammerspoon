@@ -51,6 +51,12 @@ test("clears stale timing on transport stop and guards paused streams", () => {
   expect(source).toContain("keyStepController = KeyStep");
 });
 
+test("keeps transport unknown after startup until an explicit transport message arrives", () => {
+  expect(source).toContain('transportStatus = "unknown"');
+  expect(source).toContain('transportStatus = "stopped"');
+  expect(source).not.toContain('source = "clock-confirmed"');
+});
+
 test("starts a native live monitor and coalesces high-rate clock rendering", () => {
   expect(source).toContain("if options.showMonitor ~= false then");
   expect(source).toContain("function KeyStep.toggleMonitor()");
@@ -108,8 +114,8 @@ test("maps Rate knob to CC 107 for Logic learn while synchronizing internal engi
   expect(source).toContain("rateCc = 107");
   expect(source).toContain("maxVolumeCc = 127");
   expect(source).toContain("sendRateCc(rateVal)");
-  expect(source).toContain("state.topRowVolume = volCcVal");
   expect(source).toContain("state.bottomRowVolume = volCcVal");
+  expect(source).not.toContain("_G.activeWatchers.state.topRowVolume = volCcVal");
 
   // Verify volume scaling spans full 0..127 MIDI range without 100 CC cap
   const rateToVolumeCc = (rateVal, maxV = 127, minV = 0) => {
@@ -119,6 +125,19 @@ test("maps Rate knob to CC 107 for Logic learn while synchronizing internal engi
   expect(rateToVolumeCc(0)).toBe(0);
   expect(rateToVolumeCc(64)).toBe(64);
   expect(rateToVolumeCc(127)).toBe(127);
+});
+
+test("setup guide advances only on inbound transport and resets on stop or disconnect", () => {
+  expect(source).toContain('setSetupGuide(state.setupAcknowledged and "hidden" or "kbd_play")');
+  expect(source).toContain('setSetupGuide("transport")');
+  expect(source).toContain('setSetupGuide("hidden")');
+  expect(source).toContain('function KeyStep.setNoteHandler(handler)');
+  expect(source).toContain('state.setupGuideStep == "kbd_play"');
+  expect(source).toContain('function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)');
+  expect(source).toContain('elseif isStart then');
+  expect(source).toContain('elseif isStop then');
+  expect(source).toContain('setupGuideStep = state.setupGuideStep or "hidden"');
+  expect(source).toContain('sendToHud("setup_guide", 1, s.setupGuideStep ~= "hidden", { step = s.setupGuideStep })');
 });
 
 test("provides black-key modal shift mapping across Cutoff, Reverb, Delay, Release, and Volume", () => {
@@ -209,5 +228,3 @@ test("multi-pulse sliding span resolves smooth continuous BPM at high tempo unde
     expect(derivedTempos[i]).toBeGreaterThan(derivedTempos[i - 1] + 15);
   }
 });
-
-

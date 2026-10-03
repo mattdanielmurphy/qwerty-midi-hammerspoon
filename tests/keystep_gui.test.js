@@ -2,6 +2,12 @@ import { expect, test } from 'bun:test';
 
 const source = await Bun.file(new URL('../src/web/index.html', import.meta.url)).text();
 
+test('unknown transport state lights neither transport button', () => {
+  expect(source).toContain('class="ks-btn ks-btn-trans ks-btn-stop" id="ks-btn-stop"');
+  expect(source).toContain("status === 'stopped'");
+  expect(source).toContain("status === 'running'");
+});
+
 test('KeyStep 32 hardware silhouette and controls exist in WebKit HUD', () => {
   // Master container and badge
   expect(source).toContain('id="keystep-badge"');
@@ -109,4 +115,3 @@ test('KeyStep modal shift keybed, scale lock badge, and shift status pill are wi
   expect(source).toContain("postMidi({ type: 'keystepTransposerToggle' })");
   expect(source).toContain("postMidi({ type: 'keystepShiftMode', mode: 'clear' })");
 });
-

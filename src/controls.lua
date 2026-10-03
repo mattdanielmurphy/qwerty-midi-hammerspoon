@@ -329,6 +329,14 @@ local function syncTrackAudibility()
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   end
+  -- Track-dependent key styling is owned by the full HUD payload. A spotlight
+  -- update alone leaves the previous track's CSS variables in place.
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
 end
 
 local function selectTrack(id)
@@ -392,6 +400,11 @@ local function selectTrack(id)
   if hudModule and hudModule.fastUpdateArp then
     hudModule.fastUpdateArp()
   end
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
 end
 
 local function applyTransposeDelta(deltaSteps, spotTitle)
@@ -833,6 +846,19 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "panic" then
+    -- Stop producers before sending the MIDI panic sweep so no timer or queued
+    -- quantized note can immediately retrigger after the sweep.
+    if arpeggiator.stopAllLoops then arpeggiator.stopAllLoops() end
+    if quantizer.panic then
+      quantizer.panic(function(pitches, channel)
+        for _, pitch in ipairs(pitches or {}) do
+          midi.sendMidiNote("noteOff", pitch, 0, channel or 0)
+        end
+      end)
+    end
+    local ks = _G.activeWatchers and _G.activeWatchers.keystep
+    if ks and ks.panic then ks.panic() end
+    local midiAvailable = midi.getMidiDevice() ~= nil
     midi.panicAllChannels()
     state.sustainActive = false
     state.sustainKeyDownTime = nil
@@ -858,12 +884,15 @@ local function executeControlAction(act, code)
 
     local spot = {
       title = "MIDI PANIC",
-      value = "ALL NOTES OFF",
-      subtext = "All notes silenced",
+      value = midiAvailable and "ALL NOTES OFF" or "STATE CLEARED",
+      subtext = midiAvailable and "Panic sent on all MIDI channels" or "MIDI output unavailable; external silence not confirmed",
       targetId = code and ("key-" .. code) or "header",
       color = "#d4a359"
     }
     hud.updateWebviewHud(spot)
+    if hudModule and hudModule.updateWebviewHud then
+      hudModule.updateWebviewHud(nil, nil, true)
+    end
   elseif act == "resetAll" then
     state.octaveShift = 0
     state.topRowOctaveOffset = 0
@@ -1698,7 +1727,7 @@ local function shouldRepeat(act)
   return repeatingActions[act] == true
 end
 
-local function handleKeyDown(code)
+local function handleKeyDown(code, externalNoteKey)
   if code == 50 then -- Backtick
     state.modeSelectHeld = true
     state.modeWasSelectedDuringHold = false
@@ -1706,7 +1735,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  if state.modeSelectHeld then
+  if not externalNoteKey and state.modeSelectHeld then
     -- Mode Selector is Active!
     if code == 0 then -- 'a' key
       state.currentMode = "ArpAdvanced"
@@ -1743,6 +1772,7 @@ local function handleKeyDown(code)
       end
     end
   end
+  if externalNoteKey then actionToExecute = nil end
 
   if actionToExecute and actionToExecute ~= "" and actionToExecute ~= "none" then
     state.pressedKeys[code] = { isControl = true, action = actionToExecute }
@@ -1776,7 +1806,7 @@ local function handleKeyDown(code)
     return true
   end
 
-  local noteKey = config.getNoteKey(code)
+  local noteKey = externalNoteKey or config.getNoteKey(code)
   if noteKey then
     local isTop = noteKey.isTop
     local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
@@ -1880,7 +1910,7 @@ local function handleKeyDown(code)
         end)
       end
     end
-    hud.updateSingleKeyState(code, true, false)
+    if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end
     if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
     return true
   end
@@ -1888,8 +1918,8 @@ local function handleKeyDown(code)
   return true
 end
 
-local function handleKeyUp(code)
-  if code == 50 then -- Backtick released
+local function handleKeyUp(code, externalNoteKey)
+  if not externalNoteKey and code == 50 then -- Backtick released
     stopControlRepeat(code)
     state.modeSelectHeld = false
     if not state.modeWasSelectedDuringHold then
@@ -1966,12 +1996,14 @@ local function handleKeyUp(code)
       end)
     end
     state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
-    hud.updateWebviewHud()
+    if not externalNoteKey then
+      hud.updateSingleKeyState(code, false, false)
+      hud.updateWebviewHud()
+    end
     return true
   end
 
-  local noteKey = config.getNoteKey(code)
+  local noteKey = externalNoteKey or config.getNoteKey(code)
   if noteKey then
     -- Fallback if pressedKeys entry was missing
     local isTop = noteKey.isTop
@@ -2169,5 +2201,23 @@ return {
   executeControlAction = executeControlAction,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,
+  handleKeyStepNoteOn = function(note, velocity, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then return end
+    handleKeyDown(token, { baseNote = note, isTop = false })
+  end,
+  handleKeyStepNoteOff = function(note, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then handleKeyUp(token, { baseNote = note, isTop = false }) end
+  end,
+  handleKeyStepDisconnect = function()
+    local held = {}
+    for code in pairs(state.pressedKeys) do
+      if type(code) == "string" and code:match("^keystep_") then held[#held + 1] = code end
+    end
+    for _, code in ipairs(held) do
+      if state.pressedKeys[code] then handleKeyUp(code, { isTop = false }) end
+    end
+  end,
   stopAllControlRepeats = stopAllControlRepeats
 }

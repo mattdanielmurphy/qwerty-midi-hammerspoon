@@ -59,5 +59,34 @@ Capture one observation at each boundary, in order:
 ## Safety invariants
 
 - A handled key-down must retain enough information to release the same note on key-up even if focus, modifiers, mode, or connection changes.
+
+---
+
+# QWERTY MIDI Controller Fixes
+
+## Architecture
+
+- Keep selected track and active function state authoritative. MIDI routing and HUD labels, values, and colors derive from that state.
+- Keep controller state and assignment resolution in `src/controls.lua` and `src/config.lua`, MIDI delivery in `src/midi.lua`, and presentation in `src/hud.lua` / `src/web/index.html`.
+- Use a two-control ADSR workflow: the A♯/B♭ black key selects Attack, Decay, Sustain, Release in sequence; the Mod strip edits the selected stage. Preserve four independent values. Use configurable CC mappings, defaulting to 24–27.
+- Keep Pitch as 14-bit pitch bend by default and route it to the active function assignment while a black key is held. Keep the dedicated Rate/Vol route; remove the Mod-strip Volume assignment.
+
+## Implementation
+
+1. Trace track focus/row selection, black-key holds and latches, Mod/Pitch IPC, note ownership, and panic callers. Preserve existing uncommitted KeyStep changes.
+2. Add per-track controller values and envelope values; represent simultaneously held function keys independently and restore the next held assignment on release.
+3. On assignment or track changes, refresh the HUD from the newly active control's stored value and selected track color without emitting a MIDI value.
+4. Route Mod CC and Pitch Bend on the focused track's MIDI channel. Recenter Pitch Bend on release.
+5. Coordinate panic: stop arpeggiator/quantizer producers, clear held and sustained note ownership, stop timers, release notes, reset sustain, and send CC 123/120 across channels.
+6. Update the web HUD and bundled outputs from source; record architectural decisions and implementation details in project context and logs.
+
+## Acceptance
+
+- Track-dependent controls use the selected track's color and recalled per-track values.
+- Mod assignment changes show the target's stored value immediately and do not send CC until adjusted.
+- Pitch sends 14-bit bend by default, follows active function assignments, and recenters; ADSR stages are independently editable through stage selection plus Mod strip.
+- Releasing one of multiple held black keys reveals the remaining held function.
+- Panic clears producers and held-note registries as well as MIDI channel state.
+- Hardware MIDI-monitor verification is unavailable unless a connected monitor/device is present; report that limitation explicitly.
 - Do not hide recurring callback errors with a broad `pcall`.
 - On failure, release only notes owned by the keyboard path; preserve intentional latched/background behavior.

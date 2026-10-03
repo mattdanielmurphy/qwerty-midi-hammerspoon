@@ -74,15 +74,16 @@ local function panicAllChannels()
   if not dev then return end
 
   for ch = 0, 15 do
-    -- Turn off sustain, all sound, all notes, and reset controllers across all channels
+    -- Release sustain before explicit note-offs; send the channel-mode fallback
+    -- after individual releases so synths receive both forms of note cleanup.
     dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
-    -- Send Note Off for all 128 pitches on each channel to ensure synths ignore/bypass CC #64 or CC #123 release held notes
     for note = 0, 127 do
       dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
     end
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
+    dev:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = ch })
   end
 end
 
@@ -93,4 +94,3 @@ return {
   sendSustainCC = sendSustainCC,
   panicAllChannels = panicAllChannels
 }
-
