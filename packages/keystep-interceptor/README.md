@@ -6,8 +6,9 @@ ordinary MIDI CCs while its sequencer is playing:
 - Marker notes C8 through G8 (108–115) at velocity 1 map to mode positions
   1–8 and emit CC 102.
 - MIDI timing clock is averaged over 24 pulses and converted to BPM, emitting
-  CC 104. By default the rounded BPM is used directly and constrained to the
-  seven-bit MIDI range.
+  one dedicated CC 107 value over the full seven-bit range. This is intended
+  for Logic Controller Assignments Learn and does not directly alter CC 7
+  channel volume or Arturia's CC 17 Macro 2.
 - The gap between sequence notes is compared with the measured quarter-note
   duration and quantized to straight or triplet divisions, emitting CC 103.
 

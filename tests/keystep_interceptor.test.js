@@ -23,9 +23,9 @@ test("accepts Arturia KeyStep product-name suffixes such as KeyStep 32", () => {
   expect(source).toContain('lowered:match("^arturia keystep")');
 });
 
-test("derives BPM from a moving average of 24 PPQN clock pulses", () => {
+test("derives BPM from median of PPQN clock pulses rejecting host timestamp jitter", () => {
   expect(source).toContain("local CLOCK_PULSES_PER_QUARTER = 24");
-  expect(source).toContain("60 / elapsed");
+  expect(source).toContain("instantBpm = 60 / (CLOCK_PULSES_PER_QUARTER * medianInterval)");
 });
 
 test("quantizes straight and triplet note intervals and emits dedicated CCs", () => {
@@ -33,7 +33,6 @@ test("quantizes straight and triplet note intervals and emits dedicated CCs", ()
     expect(source).toContain(`label = "${label}"`);
   }
   expect(source).toContain("sendCC(103, division.ccValue)");
-  expect(source).toContain("sendCC(104, config.rateCcValue(roundedBpm))");
 });
 
 test("detects time division by counting 24-PPQN clock pulses between sequence notes", () => {
@@ -62,10 +61,12 @@ test("starts a native live monitor and coalesces high-rate clock rendering", () 
   expect(monitorHtml).toContain("Last note received");
 });
 
-test("swallows only marker notes and forwards played notes to the QWERTY output", () => {
-  expect(source).toContain("forwardNote(\"noteOn\", metadata)");
-  expect(source).toContain("if not MODE_NOTES[metadata.note] then forwardNote(\"noteOff\", metadata) end");
+test("swallows marker notes and modal black keys, while forwarding white notes through scale transposer", () => {
+  expect(source).toContain("forwardNote(\"noteOn\", {");
+  expect(source).toContain("forwardNote(\"noteOff\", {");
   expect(source).toContain("getQwertyOutput()");
+  expect(source).toContain("WHITE_KEY_INDEX");
+  expect(source).toContain("SHIFT_MODES");
 });
 
 test("maps 30..240 BPM linearly to 0..127 Rate CC with ~137 BPM at halfway", () => {
@@ -91,20 +92,17 @@ test("maps 30..240 BPM linearly to 0..127 Rate CC with ~137 BPM at halfway", () 
 
 test("tracks BPM using adaptive sliding-window clock pulses with rapid slew rate", () => {
   expect(source).toContain("local CLOCK_HISTORY_MAX = 24");
-  expect(source).toContain("local TARGET_WINDOW_SECONDS = 0.20");
-  expect(source).toContain("local MIN_WINDOW_PULSES = 4");
-  expect(source).toContain("local MAX_WINDOW_PULSES = 16");
+  expect(source).toContain("CLOCK_MEDIAN_WINDOW_SECONDS = 0.20");
+  expect(source).toContain("MIN_CLOCK_MEDIAN_INTERVALS = 7");
   expect(source).toContain("diff > 8.0");
   expect(source).toContain("alpha = 0.85");
   expect(source).toContain("state.smoothBpm");
 });
 
-test("maps Rate knob to Master Volume (Arturia CC #17 and standard CC #7) with 0dB unity gain cap", () => {
-  expect(source).toContain("rateCc = 17");
-  expect(source).toContain("rateStandardCc = 7");
+test("maps Rate knob to CC 107 for Logic learn while synchronizing internal engine volume", () => {
+  expect(source).toContain("rateCc = 107");
   expect(source).toContain("maxVolumeCc = 100");
-  expect(source).toContain("sendCC(config.rateCc, volCcVal)");
-  expect(source).toContain("sendCC(config.rateStandardCc, volCcVal)");
+  expect(source).toContain("sendRateCc(rateVal)");
   expect(source).toContain("state.topRowVolume = volCcVal");
   expect(source).toContain("state.bottomRowVolume = volCcVal");
 
@@ -116,6 +114,16 @@ test("maps Rate knob to Master Volume (Arturia CC #17 and standard CC #7) with 0
   expect(rateToVolumeCc(0)).toBe(0);
   expect(rateToVolumeCc(64)).toBe(50);
   expect(rateToVolumeCc(127)).toBe(100);
+});
+
+test("provides black-key modal shift mapping across Cutoff, Reverb, Delay, Release, and Volume", () => {
+  expect(source).toContain('[1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74');
+  expect(source).toContain('[3]  = { id = "reverb",  label = "REVERB",  cc = 91');
+  expect(source).toContain('[6]  = { id = "delay",   label = "DELAY",   cc = 92');
+  expect(source).toContain('[8]  = { id = "release", label = "RELEASE", cc = 72');
+  expect(source).toContain('[10] = { id = "volume",  label = "VOLUME",  cc = 7');
+  expect(source).toContain("getActiveShiftModeDef");
+  expect(source).toContain("sendShiftModeToHud");
 });
 
 test("maps 8-position stepped knobs (Mode and Time Div) across safe unreserved CCs", () => {

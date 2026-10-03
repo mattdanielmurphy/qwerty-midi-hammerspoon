@@ -1338,7 +1338,9 @@ local function createMidiWebview()
            body.type == "keystepMode" or
            body.type == "keystepDivision" or
            body.type == "keystepSeqArp" or
-           body.type == "keystepRate" then
+           body.type == "keystepRate" or
+           body.type == "keystepShiftMode" or
+           body.type == "keystepTransposerToggle" then
       local actionName = body.type:gsub("^keystep", ""):lower()
       if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
         _G.activeWatchers.keystep.handleGuiAction(actionName, body)

@@ -36,6 +36,7 @@ _G.activeWatchers.arpeggiator = arpeggiator
 
 if keystep then
   if keystep.setHud then keystep.setHud(hud) end
+  if keystep.setTransposer then keystep.setTransposer(transposer, state) end
   _G.activeWatchers.keystep = keystep
   pcall(function() keystep.connect("Arturia KeyStep 32") end)
 end

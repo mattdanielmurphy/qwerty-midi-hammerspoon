@@ -53,6 +53,7 @@ _G.activeWatchers.arpeggiator = arpeggiator
 
 if keystep then
   if keystep.setHud then keystep.setHud(hud) end
+  if keystep.setTransposer then keystep.setTransposer(transposer, state) end
   _G.activeWatchers.keystep = keystep
   pcall(function() keystep.connect("Arturia KeyStep 32") end)
 end
@@ -2765,6 +2766,22 @@ __modules["keystep"] = function()
 local hsMidi = require("hs.midi")
 local Monitor = __require("keystep_ui")
 
+local transposer = nil
+pcall(function() transposer = __require("transposer") end)
+
+local WHITE_KEY_INDEX = {
+  [0] = 0, [1] = -1, [2] = 1, [3] = -1, [4] = 2, [5] = 3,
+  [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
+}
+
+local SHIFT_MODES = {
+  [1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74, default = 100, color = "#00e5ff", desc = "Filter Cutoff" },
+  [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
+  [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
+  [8]  = { id = "release", label = "RELEASE", cc = 72, default = 40,  color = "#00e676", desc = "Synth Release" },
+  [10] = { id = "volume",  label = "VOLUME",  cc = 7,  default = 100, color = "#ffd700", desc = "Master Volume" },
+}
+
 local KeyStep = {}
 
 local CLOCK_PULSES_PER_QUARTER = 24
@@ -2841,12 +2858,10 @@ local config = {
   -- Marker notes are channel-agnostic because direct and sequenced notes
   -- share the KeyStep User Channel.
   outputChannel = 0,
-  -- Rate knob controls Master Volume:
-  -- Arturia plugins map CC 17 to Output Level / Gain / Macro 2 by default.
-  -- Standard MIDI maps CC 7 to Channel/Master Volume.
-  rateCc = 17,            -- Arturia Macro 2 / Volume CC
-  rateStandardCc = 7,     -- Standard MIDI Volume CC
-  maxVolumeCc = 100,      -- Cap at 100 (0dB unity gain in Arturia) to prevent fried clipping boost
+  -- Emit one dedicated CC for Logic Controller Assignments Learn.
+  -- Avoid CC 7 and Arturia's CC 17 so the knob does not change instrument volume directly.
+  rateCc = 107,
+  maxVolumeCc = 100,      -- Keep the separate QWERTY row-volume sync below unity gain
   minVolumeCc = 0,
   -- 8-position stepped knobs mapped to safe unreserved continuous CCs (105, 106)
   modeCc = 105,
@@ -2897,12 +2912,49 @@ local state = {
   octave = 0,
   activeKeys = {},
   sequenceHistory = {},
+  activeShiftMode = nil,
+  latchedShiftMode = nil,
+  shiftPressTimes = {},
+  shiftControlTweaked = false,
+  heldWhiteKeys = {},
+  paramValues = {
+    cutoff = 100,
+    reverb = 20,
+    delay = 0,
+    release = 40,
+    volume = 100,
+    modwheel = 0,
+  },
+  transposerEnabled = loadSetting("qwertyMidi_ks_transposerEnabled", true),
 }
 
 local function sendToHud(controlId, value, pressed, extra)
   if hudRef and hudRef.updateKeyStepControl then
     hudRef.updateKeyStepControl(controlId, value, pressed, extra)
   end
+end
+
+local function getActiveShiftModeDef()
+  local modeId = state.activeShiftMode or state.latchedShiftMode
+  if not modeId then return nil end
+  for _, m in pairs(SHIFT_MODES) do
+    if m.id == modeId then return m end
+  end
+  return nil
+end
+
+local function sendShiftModeToHud()
+  local modeDef = getActiveShiftModeDef()
+  local isLatched = (state.latchedShiftMode ~= nil and state.latchedShiftMode == (modeDef and modeDef.id))
+  sendToHud("shift_mode", modeDef and 1 or 0, modeDef ~= nil, {
+    mode = modeDef and modeDef.id or "default",
+    label = modeDef and modeDef.label or "DEFAULT",
+    cc = modeDef and modeDef.cc or 1,
+    value = modeDef and (state.paramValues[modeDef.id] or modeDef.default) or state.modWheel,
+    color = modeDef and modeDef.color or "#a0a0ab",
+    latched = isLatched,
+    desc = modeDef and modeDef.desc or "Modwheel / Rate"
+  })
 end
 
 local function nowSeconds()
@@ -2991,6 +3043,17 @@ local function sendCC(controller, value)
   })
 end
 
+local lastRateCcValue = nil
+local RATE_CC_DEADBAND = 2
+local function sendRateCc(value)
+  if not outputDevice or not config.rateCc then return end
+  if lastRateCcValue ~= nil and math.abs(value - lastRateCcValue) <= RATE_CC_DEADBAND then
+    return
+  end
+  sendCC(config.rateCc, value)
+  lastRateCcValue = value
+end
+
 local function forwardNote(commandType, metadata)
   if not outputDevice then return end
   outputDevice:sendCommand(commandType, {
@@ -3055,23 +3118,44 @@ local function setBpm(bpm)
   local rateVal = config.rateCcValue(roundedBpm)
   state.rate = rateVal
   persistSetting("qwertyMidi_ks_rate", rateVal)
-  local volCcVal = rateToVolumeCc(rateVal)
-  -- Rate knob controls Master Volume: emit Arturia Macro 2 (CC 17) and standard MIDI Volume (CC 7)
-  if config.rateCc then sendCC(config.rateCc, volCcVal) end
-  if config.rateStandardCc then sendCC(config.rateStandardCc, volCcVal) end
-  sendCC(104, config.rateCcValue(roundedBpm))
-  -- Synchronize Master Volume with QWERTY MIDI engine
-  if _G.activeWatchers and _G.activeWatchers.state then
-    _G.activeWatchers.state.topRowVolume = volCcVal
-    _G.activeWatchers.state.bottomRowVolume = volCcVal
-  end
-  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
-    _G.activeWatchers.hud.updateWebviewHud()
+
+  local shiftDef = getActiveShiftModeDef()
+  if shiftDef then
+    state.shiftControlTweaked = true
+    state.paramValues[shiftDef.id] = rateVal
+    sendCC(shiftDef.cc, rateVal)
+    if shiftDef.id == "volume" then
+      local volCcVal = rateToVolumeCc(rateVal)
+      if _G.activeWatchers and _G.activeWatchers.state then
+        _G.activeWatchers.state.topRowVolume = volCcVal
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
+      end
+    end
+    sendToHud("rate", rateVal, true, {
+      rate = rateVal,
+      bpm = roundedBpm,
+      cc = shiftDef.cc,
+      ccValue = rateVal,
+      mode = shiftDef.id,
+      label = shiftDef.label
+    })
+    sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, cc = shiftDef.cc, ccValue = rateVal })
+  else
+    local volCcVal = rateToVolumeCc(rateVal)
+    sendRateCc(rateVal)
+    -- Synchronize Master Volume with QWERTY MIDI engine
+    if _G.activeWatchers and _G.activeWatchers.state then
+      _G.activeWatchers.state.topRowVolume = volCcVal
+      _G.activeWatchers.state.bottomRowVolume = volCcVal
+    end
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud()
+    end
+    sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = rateVal })
+    sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = rateVal })
   end
   publishChange(false)
   updateMonitor()
-  sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
-  sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
 end
 
 local function setRate(rateVal)
@@ -3083,23 +3167,44 @@ local function setRate(rateVal)
   state.bpm = bpm
   state.smoothBpm = bpm
   persistSetting("qwertyMidi_ks_bpm", bpm)
-  local volCcVal = rateToVolumeCc(roundedRate)
-  -- Rate knob controls Master Volume: emit Arturia Macro 2 (CC 17) and standard MIDI Volume (CC 7)
-  if config.rateCc then sendCC(config.rateCc, volCcVal) end
-  if config.rateStandardCc then sendCC(config.rateStandardCc, volCcVal) end
-  sendCC(104, roundedRate)
-  -- Synchronize Master Volume with QWERTY MIDI engine
-  if _G.activeWatchers and _G.activeWatchers.state then
-    _G.activeWatchers.state.topRowVolume = volCcVal
-    _G.activeWatchers.state.bottomRowVolume = volCcVal
-  end
-  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
-    _G.activeWatchers.hud.updateWebviewHud()
+
+  local shiftDef = getActiveShiftModeDef()
+  if shiftDef then
+    state.shiftControlTweaked = true
+    state.paramValues[shiftDef.id] = roundedRate
+    sendCC(shiftDef.cc, roundedRate)
+    if shiftDef.id == "volume" then
+      local volCcVal = rateToVolumeCc(roundedRate)
+      if _G.activeWatchers and _G.activeWatchers.state then
+        _G.activeWatchers.state.topRowVolume = volCcVal
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
+      end
+    end
+    sendToHud("rate", roundedRate, true, {
+      rate = roundedRate,
+      bpm = bpm,
+      cc = shiftDef.cc,
+      ccValue = roundedRate,
+      mode = shiftDef.id,
+      label = shiftDef.label
+    })
+    sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, cc = shiftDef.cc, ccValue = roundedRate })
+  else
+    local volCcVal = rateToVolumeCc(roundedRate)
+    sendRateCc(roundedRate)
+    -- Synchronize Master Volume with QWERTY MIDI engine
+    if _G.activeWatchers and _G.activeWatchers.state then
+      _G.activeWatchers.state.topRowVolume = volCcVal
+      _G.activeWatchers.state.bottomRowVolume = volCcVal
+    end
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud()
+    end
+    sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = roundedRate })
+    sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = roundedRate })
   end
   publishChange()
   updateMonitor()
-  sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
-  sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 17, ccValue = volCcVal })
 end
 
 local function nearestDivision(ratio)
@@ -3129,9 +3234,17 @@ local function nearestDivisionByPulses(pulses)
 end
 
 local CLOCK_HISTORY_MAX = 24
-local TARGET_WINDOW_SECONDS = 0.20
 local MIN_WINDOW_PULSES = 4
-local MAX_WINDOW_PULSES = 16
+local MIN_CLOCK_MEDIAN_INTERVALS = 7
+local CLOCK_MEDIAN_WINDOW_SECONDS = 0.20
+
+local function median(values)
+  if #values == 0 then return nil end
+  table.sort(values)
+  local middle = math.floor((#values + 1) / 2)
+  if #values % 2 == 1 then return values[middle] end
+  return (values[middle] + values[middle + 1]) / 2
+end
 
 local function handleClock(timestamp)
   state.clockPulseCount = state.clockPulseCount + 1
@@ -3155,18 +3268,26 @@ local function handleClock(timestamp)
   state.clockHistory = history
 
   local count = #history
-  if count >= MIN_WINDOW_PULSES then
-    -- Adaptive sliding window: span at least TARGET_WINDOW_SECONDS (200ms) or up to MAX_WINDOW_PULSES
-    local k = MIN_WINDOW_PULSES - 1
-    while k < (count - 1) and k < MAX_WINDOW_PULSES and (timestamp - history[count - k]) < TARGET_WINDOW_SECONDS do
-      k = k + 1
+  local expectedBpm = state.smoothBpm or state.bpm or 120
+  local expectedPulseInterval = 60 / (CLOCK_PULSES_PER_QUARTER * expectedBpm)
+  local medianIntervals = math.max(
+    MIN_CLOCK_MEDIAN_INTERVALS,
+    math.min(CLOCK_HISTORY_MAX - 1, math.ceil(CLOCK_MEDIAN_WINDOW_SECONDS / expectedPulseInterval))
+  )
+  if count >= medianIntervals + 1 then
+    -- Median pulse spacing over at least 200ms rejects host timestamp jitter.
+    -- The interval count adapts to tempo so slow clocks do not add excess lag.
+    local intervals = {}
+    local first = count - medianIntervals
+    for i = first, count - 1 do
+      local pulseInterval = history[i + 1] - history[i]
+      if pulseInterval > 0 and pulseInterval <= CLOCK_RESET_SECONDS then
+        table.insert(intervals, pulseInterval)
+      end
     end
-
-    local elapsed = timestamp - history[count - k]
-    if elapsed > 0.03 then
-      -- 24 PPQN: instant BPM derived from sliding window of k pulses over elapsed seconds.
-      -- If k == CLOCK_PULSES_PER_QUARTER (24 pulses), this evaluates directly to 60 / elapsed.
-      local instantBpm = (60 * k) / (CLOCK_PULSES_PER_QUARTER * elapsed)
+    local medianInterval = median(intervals)
+    if medianInterval then
+      local instantBpm = 60 / (CLOCK_PULSES_PER_QUARTER * medianInterval)
 
       -- Valid KeyStep BPM range: 30 to 240
       if instantBpm >= 25 and instantBpm <= 255 then
@@ -3297,12 +3418,34 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
     local ccNum = metadata.controllerNumber
     local ccVal = metadata.controllerValue or 0
     if ccNum == 1 then
-      state.modWheel = ccVal
-      if outputDevice then
-        outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      local shiftDef = getActiveShiftModeDef()
+      if shiftDef then
+        state.shiftControlTweaked = true
+        state.paramValues[shiftDef.id] = ccVal
+        sendCC(shiftDef.cc, ccVal)
+        if shiftDef.id == "volume" then
+          if _G.activeWatchers and _G.activeWatchers.state then
+            _G.activeWatchers.state.topRowVolume = ccVal
+            _G.activeWatchers.state.bottomRowVolume = ccVal
+          end
+        end
+        sendToHud("mod_wheel", ccVal, true, {
+          cc = shiftDef.cc,
+          value = ccVal,
+          mode = shiftDef.id,
+          label = shiftDef.label,
+          color = shiftDef.color
+        })
+        recordEvent(shiftDef.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(shiftDef.cc) .. ")", timestamp)
+      else
+        state.modWheel = ccVal
+        state.paramValues.modwheel = ccVal
+        if outputDevice then
+          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+        end
+        sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal, mode = "default", label = "MOD" })
+        recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
       end
-      sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal })
-      recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
     elseif ccNum == 64 then
       state.sustain = ccVal
       if outputDevice then
@@ -3342,23 +3485,112 @@ function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
           if div then setDivision(div) end
         end
       end
-      forwardNote("noteOn", metadata)
-      state.activeKeys[metadata.note] = metadata.velocity
-      sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
-        note = metadata.note,
-        velocity = metadata.velocity,
-        channel = metadata.channel
-      })
+
+      local pitchClass = metadata.note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
+
+      if not isWhiteKey then
+        -- Black Key: Modal Shift Trigger!
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef then
+          state.shiftPressTimes[metadata.note] = timestamp
+          state.activeShiftMode = modeDef.id
+          state.shiftControlTweaked = false
+          sendShiftModeToHud()
+          state.activeKeys[metadata.note] = metadata.velocity
+          sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
+            note = metadata.note,
+            velocity = metadata.velocity,
+            channel = metadata.channel,
+            isBlack = true,
+            mode = modeDef.id,
+            label = modeDef.label,
+            color = modeDef.color
+          })
+          recordEvent("Shift " .. modeDef.label .. " (held)", timestamp)
+        end
+      else
+        -- White Key: Transposed In-Scale Performance!
+        local playPitch = metadata.note
+        local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+        if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+          playPitch = transposerRef.getTransposedPitch(metadata.note, false)
+        end
+        state.heldWhiteKeys[metadata.note] = playPitch
+        forwardNote("noteOn", {
+          note = playPitch,
+          velocity = metadata.velocity,
+          channel = metadata.channel or config.outputChannel
+        })
+        state.activeKeys[metadata.note] = metadata.velocity
+        sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
+          note = metadata.note,
+          playedPitch = playPitch,
+          velocity = metadata.velocity,
+          channel = metadata.channel,
+          isBlack = false
+        })
+      end
     end
   elseif commandType == "noteOff" or (commandType == "noteOn" and (metadata.velocity or 0) == 0) then
-    -- Marker note-offs must be swallowed too, so they cannot affect Logic.
-    if not MODE_NOTES[metadata.note] then forwardNote("noteOff", metadata) end
     if not MODE_NOTES[metadata.note] then
-      state.activeKeys[metadata.note] = nil
-      sendToHud("key_" .. tostring(metadata.note), 0, false, {
-        note = metadata.note,
-        channel = metadata.channel
-      })
+      local pitchClass = metadata.note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
+
+      if not isWhiteKey then
+        -- Black Key: Modal Shift Release or Latch Toggle
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef then
+          local pressTime = state.shiftPressTimes[metadata.note] or timestamp
+          local duration = timestamp - pressTime
+          state.shiftPressTimes[metadata.note] = nil
+
+          if duration >= 0.28 or state.shiftControlTweaked then
+            state.activeShiftMode = state.latchedShiftMode
+          else
+            if state.latchedShiftMode == modeDef.id then
+              state.latchedShiftMode = nil
+              state.activeShiftMode = nil
+            else
+              state.latchedShiftMode = modeDef.id
+              state.activeShiftMode = modeDef.id
+            end
+          end
+
+          sendShiftModeToHud()
+          state.activeKeys[metadata.note] = nil
+          sendToHud("key_" .. tostring(metadata.note), 0, false, {
+            note = metadata.note,
+            channel = metadata.channel,
+            isBlack = true
+          })
+          recordEvent("Shift " .. modeDef.label .. " (released)", timestamp)
+        end
+      else
+        -- White Key: Note-Off for exact transposed pitch
+        local playPitch = state.heldWhiteKeys[metadata.note]
+        if not playPitch then
+          local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+          if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+            playPitch = transposerRef.getTransposedPitch(metadata.note, false)
+          else
+            playPitch = metadata.note
+          end
+        end
+        state.heldWhiteKeys[metadata.note] = nil
+        forwardNote("noteOff", {
+          note = playPitch,
+          velocity = 0,
+          channel = metadata.channel or config.outputChannel
+        })
+        state.activeKeys[metadata.note] = nil
+        sendToHud("key_" .. tostring(metadata.note), 0, false, {
+          note = metadata.note,
+          playedPitch = playPitch,
+          channel = metadata.channel,
+          isBlack = false
+        })
+      end
     end
   end
 end
@@ -3487,6 +3719,7 @@ function KeyStep.getFullState()
       break
     end
   end
+  local activeDef = getActiveShiftModeDef()
   return {
     connected = state.connected,
     deviceName = state.deviceName,
@@ -3504,9 +3737,14 @@ function KeyStep.getFullState()
     octave = state.octave or 0,
     pitchBend = state.pitchBend or 8192,
     modWheel = state.modWheel or 0,
-    rateCc = config.rateCc or 7,
+    rateCc = config.rateCc or 107,
     modeCc = config.modeCc or 16,
     divCc = config.divCc or 17,
+    activeShiftMode = state.activeShiftMode,
+    latchedShiftMode = state.latchedShiftMode,
+    shiftModeDef = activeDef,
+    transposerEnabled = state.transposerEnabled ~= false,
+    paramValues = state.paramValues,
   }
 end
 
@@ -3518,8 +3756,8 @@ function KeyStep.syncToHud()
   sendToHud("connection", s.connected and 1 or 0, s.connected, { deviceName = s.deviceName })
   sendToHud("mode", s.mode, true, { mode = s.mode, modeName = s.modeName, cc = config.modeCc, ccValue = math.floor(((s.mode - 1) / 7) * 127 + 0.5) })
   sendToHud("division", s.divIdx, true, { division = s.division, cc = config.divCc, ccValue = math.floor(((s.divIdx - 1) / 7) * 127 + 0.5) })
-  sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 7, ccValue = s.rate })
-  sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 7, ccValue = s.rate })
+  sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
+  sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
   sendToHud("seq_arp", s.seqArp == "seq" and 1 or 0, true, { mode = s.seqArp })
   sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.playing and "play" or "stop" })
   sendToHud("octave", s.octave, true, { octave = s.octave })
@@ -3527,6 +3765,8 @@ function KeyStep.syncToHud()
   sendToHud("shift", s.shift and 1 or 0, s.shift, { shift = s.shift })
   sendToHud("pitch_bend", s.pitchBend, true, { pitch = s.pitchBend })
   sendToHud("mod_wheel", s.modWheel, true, { cc = 1, value = s.modWheel })
+  sendToHud("transposer_enabled", s.transposerEnabled and 1 or 0, s.transposerEnabled, {})
+  sendShiftModeToHud()
 end
 
 function KeyStep.setHud(hudInstance)
@@ -3548,11 +3788,58 @@ function KeyStep.handleGuiAction(actionType, data)
     local vel = tonumber(data.velocity) or 100
     local ch = tonumber(data.channel) or config.outputChannel or 0
     if note then
-      if outputDevice then
-        outputDevice:sendCommand(isDown and "noteOn" or "noteOff", { note = note, velocity = isDown and vel or 0, channel = ch })
+      local pitchClass = note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
+
+      if not isWhiteKey then
+        -- Black key clicked on GUI: toggle latch mode!
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef and isDown then
+          if state.latchedShiftMode == modeDef.id then
+            state.latchedShiftMode = nil
+            state.activeShiftMode = nil
+          else
+            state.latchedShiftMode = modeDef.id
+            state.activeShiftMode = modeDef.id
+          end
+          sendShiftModeToHud()
+        end
+        sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, isBlack = true, mode = modeDef and modeDef.id })
+      else
+        -- White key clicked on GUI: play transposed!
+        local playPitch = note
+        local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+        if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+          playPitch = transposerRef.getTransposedPitch(note, false)
+        end
+        if outputDevice then
+          outputDevice:sendCommand(isDown and "noteOn" or "noteOff", { note = playPitch, velocity = isDown and vel or 0, channel = ch })
+        end
+        sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, playedPitch = playPitch, velocity = vel, channel = ch, isBlack = false })
       end
-      sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, velocity = vel, channel = ch })
     end
+  elseif actionType == "shift_mode" or actionType == "shiftmode" then
+    local targetMode = data.mode
+    if targetMode == "toggle" or targetMode == "latch" then
+      local mId = data.modeId
+      if state.latchedShiftMode == mId then
+        state.latchedShiftMode = nil
+        state.activeShiftMode = nil
+      else
+        state.latchedShiftMode = mId
+        state.activeShiftMode = mId
+      end
+    elseif targetMode == "clear" or targetMode == "default" then
+      state.latchedShiftMode = nil
+      state.activeShiftMode = nil
+    else
+      state.activeShiftMode = targetMode
+    end
+    sendShiftModeToHud()
+  elseif actionType == "transposer_toggle" or actionType == "transposertoggle" then
+    state.transposerEnabled = not (state.transposerEnabled ~= false)
+    persistSetting("qwertyMidi_ks_transposerEnabled", state.transposerEnabled)
+    sendToHud("transposer_enabled", state.transposerEnabled and 1 or 0, state.transposerEnabled, {})
   elseif actionType == "pitch" then
     local pitchVal = tonumber(data.value) or 8192
     state.pitchBend = pitchVal
@@ -3699,6 +3986,18 @@ KeyStep.rateToVolumeCc = rateToVolumeCc
 KeyStep.getFullState = KeyStep.getFullState
 KeyStep.syncToHud = KeyStep.syncToHud
 KeyStep.analyzeSequenceAndInferKnobs = KeyStep.analyzeSequenceAndInferKnobs
+KeyStep.SHIFT_MODES = SHIFT_MODES
+KeyStep.WHITE_KEY_INDEX = WHITE_KEY_INDEX
+KeyStep.getActiveShiftModeDef = getActiveShiftModeDef
+KeyStep.setTransposer = function(tRef, stateRef)
+  transposer = tRef
+  if stateRef then state.sharedEngineState = stateRef end
+end
+KeyStep.setTransposerEnabled = function(enabled)
+  state.transposerEnabled = (enabled == true)
+  persistSetting("qwertyMidi_ks_transposerEnabled", state.transposerEnabled)
+  sendToHud("transposer_enabled", state.transposerEnabled and 1 or 0, state.transposerEnabled, {})
+end
 
 return KeyStep
 
@@ -5141,7 +5440,9 @@ local function createMidiWebview()
            body.type == "keystepMode" or
            body.type == "keystepDivision" or
            body.type == "keystepSeqArp" or
-           body.type == "keystepRate" then
+           body.type == "keystepRate" or
+           body.type == "keystepShiftMode" or
+           body.type == "keystepTransposerToggle" then
       local actionName = body.type:gsub("^keystep", ""):lower()
       if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
         _G.activeWatchers.keystep.handleGuiAction(actionName, body)
@@ -7862,6 +8163,88 @@ local HTML_UI_CONTENT = [[
   .keystep-view.scale-guide-active .ks-key-out-of-scale {
     opacity: 0.65;
   }
+
+  /* KeyStep Modal Shift & Performance Styling */
+  .ks-cheek-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .ks-shift-status-pill {
+    font-size: 8px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+  }
+  .ks-shift-status-pill.active {
+    font-weight: 900;
+    box-shadow: 0 0 10px currentColor;
+  }
+  .ks-key-sub {
+    font-size: 5.5px;
+    font-weight: 800;
+    color: #64748b;
+    pointer-events: none;
+    line-height: 1;
+    margin-top: 1px;
+    letter-spacing: 0.2px;
+  }
+  .ks-key-b:hover .ks-key-sub {
+    color: #94a3b8;
+  }
+  .ks-key-b.ks-shift-cutoff {
+    border-color: rgba(0, 229, 255, 0.7) !important;
+    background: linear-gradient(180deg, #083344 0%, #0e7490 60%, #00e5ff 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-reverb {
+    border-color: rgba(255, 145, 0, 0.7) !important;
+    background: linear-gradient(180deg, #451a03 0%, #c2410c 60%, #ff9100 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 145, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-delay {
+    border-color: rgba(213, 0, 249, 0.7) !important;
+    background: linear-gradient(180deg, #3b0764 0%, #a21caf 60%, #d500f9 100%) !important;
+    box-shadow: 0 0 12px rgba(213, 0, 249, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-release {
+    border-color: rgba(0, 230, 118, 0.7) !important;
+    background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-volume {
+    border-color: rgba(255, 215, 0, 0.7) !important;
+    background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-scale-lock-badge {
+    font-size: 7.5px;
+    font-weight: 800;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 3px;
+    padding: 1px 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+    margin-right: 6px;
+  }
+  .ks-scale-lock-badge:hover {
+    background: rgba(56, 189, 248, 0.25);
+  }
+  .ks-scale-lock-badge.off {
+    color: #64748b;
+    border-color: rgba(100, 116, 139, 0.3);
+    background: transparent;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -7991,8 +8374,11 @@ local HTML_UI_CONTENT = [[
       <!-- LEFT CHEEK: Model branding, Hold/Shift, Oct-/Oct+, Capacitive Pitch & Mod Strips -->
       <div class="ks-left-cheek ks-control-bay">
         <div class="ks-cheek-header">
-          <span class="ks-brand-title">KEYSTEP</span>
-          <span class="ks-brand-sub">KeyStep 32 · CONTROLLER & SEQUENCER</span>
+          <div class="ks-cheek-header-top">
+            <span class="ks-brand-title">KEYSTEP</span>
+            <div class="ks-shift-status-pill" id="ks-shift-status-pill" title="Active Black-Key Control Target">MOD · CC1</div>
+          </div>
+          <span class="ks-brand-sub">KeyStep 32 · MODAL SYNTH MATRIX</span>
         </div>
 
         <!-- Row 1: Hold (Chord) & Shift -->
@@ -8044,7 +8430,7 @@ local HTML_UI_CONTENT = [[
               <span class="ks-strip-arrow">▼</span>
             </div>
             <div class="ks-strip-footer">
-              <span class="ks-strip-name">Mod</span>
+              <span class="ks-strip-name" id="ks-mod-name">Mod</span>
               <span class="ks-strip-val" id="ks-mod-val">0</span>
             </div>
           </div>
@@ -8080,11 +8466,11 @@ local HTML_UI_CONTENT = [[
               <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
             </div>
 
-            <!-- Knob 3: Rate / Master Volume (CC 17 & CC 7) -->
-            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #17 & CC #7 (0-100% Unity Gain)">
+            <!-- Knob 3: Rate / Logic Learn (single CC 107) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Logic Controller Learn CC #107">
               <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
               <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
-              <span class="ks-knob-title">Rate / Vol</span>
+              <span class="ks-knob-title">Rate / CC107</span>
               <span class="ks-knob-val" id="ks-knob-val-rate">Vol 50% (120 BPM)</span>
             </div>
           </div>
@@ -8125,7 +8511,10 @@ local HTML_UI_CONTENT = [[
               <div class="ks-status-dot" id="ks-status-dot" title="KeyStep 32 Connected"></div>
             </div>
             <span class="ks-arturia-slogan">YOUR EXPERIENCE · YOUR SOUND</span>
-            <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+            <div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 2px;">
+              <div class="ks-scale-lock-badge" id="ks-scale-lock-badge" title="KeyStep White-Key Harmonic Transposer Lock (Click to toggle)">SCALE LOCK: ON</div>
+              <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+            </div>
           </div>
         </div>
 
@@ -8179,23 +8568,23 @@ local HTML_UI_CONTENT = [[
 
           <!-- 13 Black Keys -->
           <div class="ks-black-keys">
-            <div class="ks-key-b" id="ks-key-42" data-note="42" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-44" data-note="44" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="volume" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
 
-            <div class="ks-key-b" id="ks-key-49" data-note="49" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
-            <div class="ks-key-b" id="ks-key-51" data-note="51" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+            <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
+            <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
-            <div class="ks-key-b" id="ks-key-54" data-note="54" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-56" data-note="56" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="volume" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
 
-            <div class="ks-key-b" id="ks-key-61" data-note="61" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
-            <div class="ks-key-b" id="ks-key-63" data-note="63" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+            <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
+            <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
-            <div class="ks-key-b" id="ks-key-66" data-note="66" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-68" data-note="68" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="volume" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
           </div>
         </div>
       </div>
@@ -10879,6 +11268,66 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
+  // Modal Shift Mode
+  if (controlId === 'shift_mode') {
+    const mode = (extra && extra.mode) || 'default';
+    const label = (extra && extra.label) || 'DEFAULT';
+    const isLatched = !!(extra && extra.latched);
+    const color = (extra && extra.color) || '#94a3b8';
+    const isActive = mode !== 'default';
+
+    window._ksInternalState.shiftMode = mode;
+    window._ksInternalState.shiftLatched = isLatched;
+
+    const pill = document.getElementById('ks-shift-status-pill');
+    if (pill) {
+      if (!isActive) {
+        pill.textContent = 'MOD · CC1';
+        pill.className = 'ks-shift-status-pill';
+        pill.style.color = '#94a3b8';
+        pill.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        pill.style.background = 'rgba(255, 255, 255, 0.08)';
+        pill.style.boxShadow = 'none';
+      } else {
+        pill.textContent = (isLatched ? '🔒 LATCH: ' : 'HOLD: ') + label;
+        pill.className = 'ks-shift-status-pill active';
+        pill.style.color = color;
+        pill.style.borderColor = color;
+        pill.style.background = 'rgba(0, 0, 0, 0.5)';
+        pill.style.boxShadow = `0 0 10px ${color}`;
+      }
+    }
+
+    const modNameEl = document.getElementById('ks-mod-name');
+    if (modNameEl) {
+      modNameEl.textContent = isActive ? label : 'Mod';
+      modNameEl.style.color = isActive ? color : '';
+    }
+
+    document.querySelectorAll('.ks-key-b').forEach(bKey => {
+      const shiftTarget = bKey.dataset.shift;
+      const shiftClass = 'ks-shift-' + shiftTarget;
+      if (isActive && shiftTarget === mode) {
+        bKey.classList.add(shiftClass);
+      } else {
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-volume');
+      }
+    });
+    return;
+  }
+
+  // White-Key Harmonic Transposer Lock
+  if (controlId === 'transposer_enabled') {
+    const isLocked = (value === 1 || value === true || pressed === true);
+    window._ksInternalState.transposerEnabled = isLocked;
+    const lockBadge = document.getElementById('ks-scale-lock-badge');
+    if (lockBadge) {
+      lockBadge.textContent = isLocked ? 'SCALE LOCK: ON' : 'SCALE LOCK: OFF';
+      lockBadge.classList.toggle('off', !isLocked);
+    }
+    return;
+  }
+
   // Modulation Wheel (CC 1)
   if (controlId === 'mod_wheel') {
     const modVal = value !== null && value !== undefined ? value : 0;
@@ -10888,6 +11337,13 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const pct = (modVal / 127 * 100).toFixed(1);
     if (fill) fill.style.height = pct + '%';
     if (valEl) valEl.textContent = modVal;
+    if (extra && extra.label) {
+      const modNameEl = document.getElementById('ks-mod-name');
+      if (modNameEl) {
+        modNameEl.textContent = extra.label;
+        if (extra.color) modNameEl.style.color = extra.color;
+      }
+    }
     return;
   }
 
@@ -11044,6 +11500,19 @@ window.syncFullKeyStepState = function(stateObj) {
   if (stateObj.playing !== undefined) window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
   if (stateObj.hold !== undefined) window.updateKeyStepState('hold', stateObj.hold ? 127 : 0, stateObj.hold);
   if (stateObj.shift !== undefined) window.updateKeyStepState('shift', stateObj.shift ? 1 : 0, stateObj.shift);
+  if (stateObj.transposerEnabled !== undefined) {
+    window.updateKeyStepState('transposer_enabled', stateObj.transposerEnabled ? 1 : 0, stateObj.transposerEnabled);
+  }
+  if (stateObj.shiftModeDef !== undefined || stateObj.activeShiftMode !== undefined || stateObj.latchedShiftMode !== undefined) {
+    const def = stateObj.shiftModeDef;
+    const isLatched = !!stateObj.latchedShiftMode;
+    window.updateKeyStepState('shift_mode', def ? 1 : 0, def !== null, {
+      mode: def ? def.id : 'default',
+      label: def ? def.label : 'DEFAULT',
+      color: def ? def.color : '#94a3b8',
+      latched: isLatched
+    });
+  }
   if (stateObj.connected !== undefined) window.setKeyStepConnected(stateObj.connected);
 };
 
@@ -11150,6 +11619,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const btnOctUp = document.getElementById('ks-btn-oct-up');
   if (btnOctUp) btnOctUp.addEventListener('click', () => postMidi({ type: 'keystepOctave', dir: 1 }));
+
+  const scaleLockBadge = document.getElementById('ks-scale-lock-badge');
+  if (scaleLockBadge) {
+    scaleLockBadge.addEventListener('click', () => {
+      postMidi({ type: 'keystepTransposerToggle' });
+    });
+  }
+
+  const shiftStatusPill = document.getElementById('ks-shift-status-pill');
+  if (shiftStatusPill) {
+    shiftStatusPill.addEventListener('click', () => {
+      postMidi({ type: 'keystepShiftMode', mode: 'clear' });
+    });
+  }
 
   // 5. Knobs and Switch
   const switchSeqArp = document.getElementById('ks-switch-seq-arp');

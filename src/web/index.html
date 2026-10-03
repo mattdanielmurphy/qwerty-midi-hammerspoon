@@ -2400,6 +2400,88 @@
   .keystep-view.scale-guide-active .ks-key-out-of-scale {
     opacity: 0.65;
   }
+
+  /* KeyStep Modal Shift & Performance Styling */
+  .ks-cheek-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 2px;
+  }
+  .ks-shift-status-pill {
+    font-size: 8px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+  }
+  .ks-shift-status-pill.active {
+    font-weight: 900;
+    box-shadow: 0 0 10px currentColor;
+  }
+  .ks-key-sub {
+    font-size: 5.5px;
+    font-weight: 800;
+    color: #64748b;
+    pointer-events: none;
+    line-height: 1;
+    margin-top: 1px;
+    letter-spacing: 0.2px;
+  }
+  .ks-key-b:hover .ks-key-sub {
+    color: #94a3b8;
+  }
+  .ks-key-b.ks-shift-cutoff {
+    border-color: rgba(0, 229, 255, 0.7) !important;
+    background: linear-gradient(180deg, #083344 0%, #0e7490 60%, #00e5ff 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-reverb {
+    border-color: rgba(255, 145, 0, 0.7) !important;
+    background: linear-gradient(180deg, #451a03 0%, #c2410c 60%, #ff9100 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 145, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-delay {
+    border-color: rgba(213, 0, 249, 0.7) !important;
+    background: linear-gradient(180deg, #3b0764 0%, #a21caf 60%, #d500f9 100%) !important;
+    box-shadow: 0 0 12px rgba(213, 0, 249, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-release {
+    border-color: rgba(0, 230, 118, 0.7) !important;
+    background: linear-gradient(180deg, #022c22 0%, #047857 60%, #00e676 100%) !important;
+    box-shadow: 0 0 12px rgba(0, 230, 118, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-key-b.ks-shift-volume {
+    border-color: rgba(255, 215, 0, 0.7) !important;
+    background: linear-gradient(180deg, #422006 0%, #b45309 60%, #ffd700 100%) !important;
+    box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), inset 0 1px 1px #ffffff !important;
+  }
+  .ks-scale-lock-badge {
+    font-size: 7.5px;
+    font-weight: 800;
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 3px;
+    padding: 1px 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+    margin-right: 6px;
+  }
+  .ks-scale-lock-badge:hover {
+    background: rgba(56, 189, 248, 0.25);
+  }
+  .ks-scale-lock-badge.off {
+    color: #64748b;
+    border-color: rgba(100, 116, 139, 0.3);
+    background: transparent;
+  }
 </style>
 </head>
 <body style="--mod-intensity: 0;">
@@ -2529,8 +2611,11 @@
       <!-- LEFT CHEEK: Model branding, Hold/Shift, Oct-/Oct+, Capacitive Pitch & Mod Strips -->
       <div class="ks-left-cheek ks-control-bay">
         <div class="ks-cheek-header">
-          <span class="ks-brand-title">KEYSTEP</span>
-          <span class="ks-brand-sub">KeyStep 32 · CONTROLLER & SEQUENCER</span>
+          <div class="ks-cheek-header-top">
+            <span class="ks-brand-title">KEYSTEP</span>
+            <div class="ks-shift-status-pill" id="ks-shift-status-pill" title="Active Black-Key Control Target">MOD · CC1</div>
+          </div>
+          <span class="ks-brand-sub">KeyStep 32 · MODAL SYNTH MATRIX</span>
         </div>
 
         <!-- Row 1: Hold (Chord) & Shift -->
@@ -2582,7 +2667,7 @@
               <span class="ks-strip-arrow">▼</span>
             </div>
             <div class="ks-strip-footer">
-              <span class="ks-strip-name">Mod</span>
+              <span class="ks-strip-name" id="ks-mod-name">Mod</span>
               <span class="ks-strip-val" id="ks-mod-val">0</span>
             </div>
           </div>
@@ -2618,11 +2703,11 @@
               <span class="ks-knob-val" id="ks-knob-val-div">1/16</span>
             </div>
 
-            <!-- Knob 3: Rate / Master Volume (CC 17 & CC 7) -->
-            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Master Volume CC #17 & CC #7 (0-100% Unity Gain)">
+            <!-- Knob 3: Rate / Logic Learn (single CC 107) -->
+            <div class="ks-knob-unit" id="ks-knob-rate-unit" title="Rate / Logic Controller Learn CC #107">
               <div class="ks-rate-led" id="ks-rate-led" title="Tempo Pulse"></div>
               <div class="ks-knob-dial" id="ks-knob-rate"><div class="ks-knob-notch"></div></div>
-              <span class="ks-knob-title">Rate / Vol</span>
+              <span class="ks-knob-title">Rate / CC107</span>
               <span class="ks-knob-val" id="ks-knob-val-rate">Vol 50% (120 BPM)</span>
             </div>
           </div>
@@ -2663,7 +2748,10 @@
               <div class="ks-status-dot" id="ks-status-dot" title="KeyStep 32 Connected"></div>
             </div>
             <span class="ks-arturia-slogan">YOUR EXPERIENCE · YOUR SOUND</span>
-            <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+            <div style="display: flex; align-items: center; justify-content: flex-end; margin-top: 2px;">
+              <div class="ks-scale-lock-badge" id="ks-scale-lock-badge" title="KeyStep White-Key Harmonic Transposer Lock (Click to toggle)">SCALE LOCK: ON</div>
+              <div class="ks-oct-badge" id="ks-oct-val">OCT 0</div>
+            </div>
           </div>
         </div>
 
@@ -2717,23 +2805,23 @@
 
           <!-- 13 Black Keys -->
           <div class="ks-black-keys">
-            <div class="ks-key-b" id="ks-key-42" data-note="42" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-44" data-note="44" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-46" data-note="46" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-42" data-note="42" data-shift="delay" style="left: calc((1 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-44" data-note="44" data-shift="release" style="left: calc((2 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-46" data-note="46" data-shift="volume" style="left: calc((3 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
 
-            <div class="ks-key-b" id="ks-key-49" data-note="49" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
-            <div class="ks-key-b" id="ks-key-51" data-note="51" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+            <div class="ks-key-b" id="ks-key-49" data-note="49" data-shift="cutoff" style="left: calc((5 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
+            <div class="ks-key-b" id="ks-key-51" data-note="51" data-shift="reverb" style="left: calc((6 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
-            <div class="ks-key-b" id="ks-key-54" data-note="54" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-56" data-note="56" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-58" data-note="58" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-54" data-note="54" data-shift="delay" style="left: calc((8 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-56" data-note="56" data-shift="release" style="left: calc((9 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-58" data-note="58" data-shift="volume" style="left: calc((10 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
 
-            <div class="ks-key-b" id="ks-key-61" data-note="61" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span></div>
-            <div class="ks-key-b" id="ks-key-63" data-note="63" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span></div>
+            <div class="ks-key-b" id="ks-key-61" data-note="61" data-shift="cutoff" style="left: calc((12 * 100% / 19) - 1.7%);"><span class="ks-key-name">C#</span><span class="ks-key-sub">CUT</span></div>
+            <div class="ks-key-b" id="ks-key-63" data-note="63" data-shift="reverb" style="left: calc((13 * 100% / 19) - 1.7%);"><span class="ks-key-name">D#</span><span class="ks-key-sub">REV</span></div>
 
-            <div class="ks-key-b" id="ks-key-66" data-note="66" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span></div>
-            <div class="ks-key-b" id="ks-key-68" data-note="68" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span></div>
-            <div class="ks-key-b" id="ks-key-70" data-note="70" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span></div>
+            <div class="ks-key-b" id="ks-key-66" data-note="66" data-shift="delay" style="left: calc((15 * 100% / 19) - 1.7%);"><span class="ks-key-name">F#</span><span class="ks-key-sub">DLY</span></div>
+            <div class="ks-key-b" id="ks-key-68" data-note="68" data-shift="release" style="left: calc((16 * 100% / 19) - 1.7%);"><span class="ks-key-name">G#</span><span class="ks-key-sub">REL</span></div>
+            <div class="ks-key-b" id="ks-key-70" data-note="70" data-shift="volume" style="left: calc((17 * 100% / 19) - 1.7%);"><span class="ks-key-name">A#</span><span class="ks-key-sub">VOL</span></div>
           </div>
         </div>
       </div>
@@ -5417,6 +5505,66 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     return;
   }
 
+  // Modal Shift Mode
+  if (controlId === 'shift_mode') {
+    const mode = (extra && extra.mode) || 'default';
+    const label = (extra && extra.label) || 'DEFAULT';
+    const isLatched = !!(extra && extra.latched);
+    const color = (extra && extra.color) || '#94a3b8';
+    const isActive = mode !== 'default';
+
+    window._ksInternalState.shiftMode = mode;
+    window._ksInternalState.shiftLatched = isLatched;
+
+    const pill = document.getElementById('ks-shift-status-pill');
+    if (pill) {
+      if (!isActive) {
+        pill.textContent = 'MOD · CC1';
+        pill.className = 'ks-shift-status-pill';
+        pill.style.color = '#94a3b8';
+        pill.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+        pill.style.background = 'rgba(255, 255, 255, 0.08)';
+        pill.style.boxShadow = 'none';
+      } else {
+        pill.textContent = (isLatched ? '🔒 LATCH: ' : 'HOLD: ') + label;
+        pill.className = 'ks-shift-status-pill active';
+        pill.style.color = color;
+        pill.style.borderColor = color;
+        pill.style.background = 'rgba(0, 0, 0, 0.5)';
+        pill.style.boxShadow = `0 0 10px ${color}`;
+      }
+    }
+
+    const modNameEl = document.getElementById('ks-mod-name');
+    if (modNameEl) {
+      modNameEl.textContent = isActive ? label : 'Mod';
+      modNameEl.style.color = isActive ? color : '';
+    }
+
+    document.querySelectorAll('.ks-key-b').forEach(bKey => {
+      const shiftTarget = bKey.dataset.shift;
+      const shiftClass = 'ks-shift-' + shiftTarget;
+      if (isActive && shiftTarget === mode) {
+        bKey.classList.add(shiftClass);
+      } else {
+        bKey.classList.remove('ks-shift-cutoff', 'ks-shift-reverb', 'ks-shift-delay', 'ks-shift-release', 'ks-shift-volume');
+      }
+    });
+    return;
+  }
+
+  // White-Key Harmonic Transposer Lock
+  if (controlId === 'transposer_enabled') {
+    const isLocked = (value === 1 || value === true || pressed === true);
+    window._ksInternalState.transposerEnabled = isLocked;
+    const lockBadge = document.getElementById('ks-scale-lock-badge');
+    if (lockBadge) {
+      lockBadge.textContent = isLocked ? 'SCALE LOCK: ON' : 'SCALE LOCK: OFF';
+      lockBadge.classList.toggle('off', !isLocked);
+    }
+    return;
+  }
+
   // Modulation Wheel (CC 1)
   if (controlId === 'mod_wheel') {
     const modVal = value !== null && value !== undefined ? value : 0;
@@ -5426,6 +5574,13 @@ window.updateKeyStepState = function(controlId, value, pressed, extra) {
     const pct = (modVal / 127 * 100).toFixed(1);
     if (fill) fill.style.height = pct + '%';
     if (valEl) valEl.textContent = modVal;
+    if (extra && extra.label) {
+      const modNameEl = document.getElementById('ks-mod-name');
+      if (modNameEl) {
+        modNameEl.textContent = extra.label;
+        if (extra.color) modNameEl.style.color = extra.color;
+      }
+    }
     return;
   }
 
@@ -5582,6 +5737,19 @@ window.syncFullKeyStepState = function(stateObj) {
   if (stateObj.playing !== undefined) window.updateKeyStepState('transport', stateObj.playing ? 1 : 0, stateObj.playing, { action: stateObj.playing ? 'play' : 'stop' });
   if (stateObj.hold !== undefined) window.updateKeyStepState('hold', stateObj.hold ? 127 : 0, stateObj.hold);
   if (stateObj.shift !== undefined) window.updateKeyStepState('shift', stateObj.shift ? 1 : 0, stateObj.shift);
+  if (stateObj.transposerEnabled !== undefined) {
+    window.updateKeyStepState('transposer_enabled', stateObj.transposerEnabled ? 1 : 0, stateObj.transposerEnabled);
+  }
+  if (stateObj.shiftModeDef !== undefined || stateObj.activeShiftMode !== undefined || stateObj.latchedShiftMode !== undefined) {
+    const def = stateObj.shiftModeDef;
+    const isLatched = !!stateObj.latchedShiftMode;
+    window.updateKeyStepState('shift_mode', def ? 1 : 0, def !== null, {
+      mode: def ? def.id : 'default',
+      label: def ? def.label : 'DEFAULT',
+      color: def ? def.color : '#94a3b8',
+      latched: isLatched
+    });
+  }
   if (stateObj.connected !== undefined) window.setKeyStepConnected(stateObj.connected);
 };
 
@@ -5688,6 +5856,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const btnOctUp = document.getElementById('ks-btn-oct-up');
   if (btnOctUp) btnOctUp.addEventListener('click', () => postMidi({ type: 'keystepOctave', dir: 1 }));
+
+  const scaleLockBadge = document.getElementById('ks-scale-lock-badge');
+  if (scaleLockBadge) {
+    scaleLockBadge.addEventListener('click', () => {
+      postMidi({ type: 'keystepTransposerToggle' });
+    });
+  }
+
+  const shiftStatusPill = document.getElementById('ks-shift-status-pill');
+  if (shiftStatusPill) {
+    shiftStatusPill.addEventListener('click', () => {
+      postMidi({ type: 'keystepShiftMode', mode: 'clear' });
+    });
+  }
 
   // 5. Knobs and Switch
   const switchSeqArp = document.getElementById('ks-switch-seq-arp');
