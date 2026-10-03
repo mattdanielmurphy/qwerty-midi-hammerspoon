@@ -294,7 +294,7 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       if isDown then
-        local ok, status = xpcall(function() return controls.handleKeyDown(code, flags) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
+        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
         if not ok then
           print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
         end
