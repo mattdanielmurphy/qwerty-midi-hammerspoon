@@ -83,6 +83,30 @@ function _G.closeMidiHud(reason)
   end
 end
 
+function _G.openMidiHud(reason)
+  if state.midiActive and hud.isMidiWebviewHealthy() then return end
+  _G.toggleMidiMode(true)
+end
+
+-- The HUD toggle intentionally lives outside midiKeyTap. It is an explicit,
+-- visible global hotkey and never performs WebKit work inside an event-tap
+-- callback. The QWERTY tap remains independently fail-open.
+if _G.activeWatchers.midiHudToggleHotkey then
+  _G.activeWatchers.midiHudToggleHotkey:delete()
+end
+_G.activeWatchers.midiHudToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
+  if _G.activeWatchers.midiHudTogglePending then return end
+  _G.activeWatchers.midiHudTogglePending = true
+  hs.timer.doAfter(0.05, function()
+    _G.activeWatchers.midiHudTogglePending = false
+    if state.midiActive and hud.isMidiWebviewHealthy() then
+      _G.closeMidiHud("Cmd-Shift-M")
+    else
+      _G.openMidiHud("Cmd-Shift-M")
+    end
+  end)
+end)
+
 if controls and controls.selectTrack then
   controls.selectTrack(state.activeTrack or 1)
 end
@@ -11210,7 +11234,7 @@ local HTML_UI_CONTENT = [[
       const closeMenu = document.createElement('div');
       closeMenu.id = 'hud-close-context-menu';
       closeMenu.setAttribute('role', 'menu');
-      closeMenu.innerHTML = '<button type="button" role="menuitem" title="Close MIDI HUD">Close MIDI HUD</button>';
+      closeMenu.innerHTML = '<button type="button" role="menuitem" title="Close MIDI HUD (Command-Shift-M)">Close MIDI HUD <span aria-hidden="true">⌘⇧M</span></button>';
       container.appendChild(closeMenu);
       closeMenu.querySelector('button').addEventListener('click', (e) => {
         e.preventDefault();

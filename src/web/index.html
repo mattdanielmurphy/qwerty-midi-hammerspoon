@@ -4561,7 +4561,7 @@
       const closeMenu = document.createElement('div');
       closeMenu.id = 'hud-close-context-menu';
       closeMenu.setAttribute('role', 'menu');
-      closeMenu.innerHTML = '<button type="button" role="menuitem" title="Close MIDI HUD">Close MIDI HUD</button>';
+      closeMenu.innerHTML = '<button type="button" role="menuitem" title="Close MIDI HUD (Command-Shift-M)">Close MIDI HUD <span aria-hidden="true">⌘⇧M</span></button>';
       container.appendChild(closeMenu);
       closeMenu.querySelector('button').addEventListener('click', (e) => {
         e.preventDefault();

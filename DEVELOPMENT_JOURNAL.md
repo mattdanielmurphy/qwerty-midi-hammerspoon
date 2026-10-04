@@ -1,7 +1,8 @@
 ## 2026-10-03
-- **HUD Close Safety and Context Menu:** Removed the crashing `Cmd+Shift+M`
-  bindings from QWERTY MIDI and Studio Suite. The chassis-only right-click
-  **Close MIDI HUD** action now disarms keyboard/scroll capture before hiding
+- **HUD Close Safety and Context Menu:** Replaced the crashing in-event-tap
+  `Cmd+Shift+M` path with one visible, project-owned Hammerspoon hotkey; the
+  Studio Suite conflict remains removed. The chassis-only right-click **Close
+  MIDI HUD** action and shortcut disarm keyboard/scroll capture before hiding
   WebKit; missing, hidden, unresponsive, or erroring HUDs fail open, and the
   watchdog never restarts failed taps. Automatic reloads stay disarmed.
 - **Visible Smart Sustain Off & Shortcut Contract:** Added the visible `Smart Sus · 2× Off` Tab label and behavior: tap to damp, double-tap to switch the selected track’s Smart/Classic Sustain fully off, retain hold-to-damp. `Ctrl+Tab` now explicitly reads `Pass Through`, returns to macOS, and cannot panic/reset; retired previously registered global toggle/reload hotkeys and Cmd+, interception on reload. Added a shortcut-visibility regression suite, regenerated bundled artifacts, passed 69 Bun tests and `luac -p`, reloaded Hammerspoon, and verified `midiActive`, event tap, and webview are live with Secure Input off. Log: [2026-10-03_19-00_sustain_off_and_shortcut_contract.md](agent-logs/2026-10-03_19-00_sustain_off_and_shortcut_contract.md)

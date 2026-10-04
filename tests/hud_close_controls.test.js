@@ -4,9 +4,14 @@ const init = await Bun.file(new URL("../src/init.lua", import.meta.url)).text();
 const hud = await Bun.file(new URL("../src/hud.lua", import.meta.url)).text();
 const html = await Bun.file(new URL("../src/web/index.html", import.meta.url)).text();
 
-test("Cmd-Shift-M is passed through until a crash-safe shortcut path exists", () => {
+test("Cmd-Shift-M uses the dedicated hotkey rather than midiKeyTap", () => {
   expect(init).not.toContain("code == 46 and flags.cmd and flags.shift");
   expect(init).not.toContain("consumedCommandShortcutKeyUps");
+  expect(init).toContain('hs.hotkey.bind({ "cmd", "shift" }, "M"');
+  expect(init).toContain("midiHudToggleHotkey");
+  expect(init).toContain('hs.timer.doAfter(0.05, function()');
+  expect(init).toContain('_G.closeMidiHud("Cmd-Shift-M")');
+  expect(init).toContain('_G.openMidiHud("Cmd-Shift-M")');
   expect(hud).toContain("local function hideMidiWebview()");
   expect(hud).toContain("wv:hide()");
   expect(hud).toContain("hideMidiWebview = hideMidiWebview");
@@ -17,7 +22,7 @@ test("Cmd-Shift-M is passed through until a crash-safe shortcut path exists", ()
 test("the HUD chassis has an explicit right-click Close action while inputs keep native menus", () => {
   expect(html).toContain("hud-close-context-menu");
   expect(html).toContain("Close MIDI HUD");
-  expect(html).not.toContain("⌘⇧M");
+  expect(html).toContain("⌘⇧M");
   expect(html).toContain("window.callHammerspoon('closeMidiHud')");
   expect(html).toContain("e.target.closest('input, textarea, select, [contenteditable=\"true\"]')");
   expect(hud).toContain('body.type == "closeMidiHud"');

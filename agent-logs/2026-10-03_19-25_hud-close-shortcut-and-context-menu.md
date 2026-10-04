@@ -2,8 +2,8 @@
 
 ## Outcome
 
-- `Cmd+Shift+M` has been deliberately removed after it was reported to crash
-  the live controller. The Studio Suite's separate binding was also removed.
+- `Cmd+Shift+M` is restored as one project-owned `hs.hotkey` binding, outside
+  `midiKeyTap`; the Studio Suite's conflicting binding remains removed.
 - Added a chassis-only right-click menu with **Close MIDI HUD** and a visible
   action. Text inputs, textareas, selects, and editable content retain WebKit's
   native context menus.
@@ -27,5 +27,7 @@
 - `luac -p qwerty_midi.lua src/*.lua`: passed.
 - Live Hammerspoon trace reached `domReady` and heartbeat pings after the
   bundle. Browser-side contextmenu dispatch reported `close-menu-visible=true`.
-- The safety patch was bundled and parsed while Hammerspoon remained stopped.
-  Live activation is intentionally deferred so ordinary typing remains safe.
+- The safety patch was bundled and parsed, then Hammerspoon loaded the sole
+  `⌘⇧M` binding. A live synthetic hotkey test closed the HUD (`active=false`,
+  `visible=false`) and reopened it (`active=true`, `visible=true`,
+  `healthy=true`) without a process crash.

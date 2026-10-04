@@ -35,8 +35,10 @@ test("Control+Tab is explicitly visible as pass-through and can never reset or p
   expect(initSource).toContain("return false");
 });
 
-test("no invisible global controller shortcuts remain", () => {
-  expect(initSource).not.toContain("hs.hotkey.bind");
+test("the only global controller shortcut is visibly documented", () => {
+  expect(initSource).toContain('hs.hotkey.bind({ "cmd", "shift" }, "M"');
+  expect(initSource).toContain("midiHudToggleHotkey");
+  expect(htmlSource).toContain("⌘⇧M");
   expect(initSource).toContain('retiredHotkey]:delete()');
   expect(initSource).not.toContain("Handle Cmd-, for QWERTY MIDI settings");
   expect(configSource).toContain('shiftAction = "arpLatchToggle", shiftName = "Latch"');
