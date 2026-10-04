@@ -24,6 +24,28 @@ local function setActiveArpRate(rateIdx)
   return nil, state.arpRateIdx
 end
 
+local function getActiveArpDirectionIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpDirectionIdx) or state.arpDirectionIdx or 1
+end
+
+local function setActiveArpDirection(dirIdx, targetTrackIdx)
+  if arpeggiator.setTrackArpDirection then
+    return arpeggiator.setTrackArpDirection(dirIdx, targetTrackIdx or state.activeTrack or 1)
+  end
+
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local normalizedDirIdx = math.max(1, math.min(#state.ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    trk.arpDirectionIdx = normalizedDirIdx
+    hs.settings.set("qwertyMidi_track" .. trkId .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  hs.settings.set("qwertyMidi_arpDirectionIdx", normalizedDirIdx)
+  return trk, normalizedDirIdx
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
 
 -- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
@@ -429,6 +451,7 @@ local function selectTrack(id)
   state.arpEnabled = trk.arpEnabled == true
   state.arpLatchActive = trk.arpLatchActive == true
   state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
+  state.arpDirectionIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
   state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
   state.chordModeActive = trk.chordModeActive == true
   if trk.chordIdx then state.chordIdx = trk.chordIdx end
@@ -1303,23 +1326,29 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpDirDown" then
-    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = ((currentDir - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
     local spot = {
-      title = "ARP DIRECTION",
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
       value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
       targetId = "arp-dir-select",
-      color = "#d4a359"
+      color = (trk and trk.color) or "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpDirUp" then
-    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = (currentDir % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
     local spot = {
-      title = "ARP DIRECTION",
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
       value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
       targetId = "arp-dir-select",
-      color = "#d4a359"
+      color = (trk and trk.color) or "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateDown" then
@@ -1403,8 +1432,8 @@ local function executeControlAction(act, code)
         title = "ATTACK (TRK " .. trkId .. ")",
         value = math.floor((trk.attack / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "header",
-        color = "#00e676"
+        targetId = "key-25",
+        color = trk.color or "#00e676"
       }
       hud.updateWebviewHud(spot)
     end
@@ -1421,8 +1450,8 @@ local function executeControlAction(act, code)
         title = "ATTACK (TRK " .. trkId .. ")",
         value = math.floor((trk.attack / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "header",
-        color = "#00e676"
+        targetId = "key-29",
+        color = trk.color or "#00e676"
       }
       hud.updateWebviewHud(spot)
     end
@@ -1441,8 +1470,8 @@ local function executeControlAction(act, code)
         title = "DECAY & TAIL (TRK " .. trkId .. ")",
         value = math.floor((trk.decay / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "header",
-        color = "#ffd700"
+        targetId = "key-25",
+        color = trk.color or "#ffd700"
       }
       hud.updateWebviewHud(spot)
     end
@@ -1461,8 +1490,8 @@ local function executeControlAction(act, code)
         title = "DECAY & TAIL (TRK " .. trkId .. ")",
         value = math.floor((trk.decay / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "header",
-        color = "#ffd700"
+        targetId = "key-29",
+        color = trk.color or "#ffd700"
       }
       hud.updateWebviewHud(spot)
     end
@@ -1616,7 +1645,7 @@ local function executeControlAction(act, code)
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
-    local nextId = (state.activeTrack == 1) and 2 or 1
+    local nextId = (state.bottomRowTrack == 1) and 2 or 1
     selectTrack(nextId)
   elseif act == "botTrackLock" then
     local trkId = state.activeTrack or 1
@@ -1626,7 +1655,7 @@ local function executeControlAction(act, code)
       hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
     end
   elseif act == "topTrackToggle" then
-    local nextId = (state.activeTrack == 3) and 4 or 3
+    local nextId = (state.topRowTrack == 3) and 4 or 3
     selectTrack(nextId)
   elseif act == "topTrackLock" then
     local trkId = state.activeTrack or 3
@@ -1725,23 +1754,29 @@ local function executeControlAction(act, code)
 
   -- Arp Direction Presets (Key 5)
   elseif act == "arpDirRandom" then
-    state.arpDirectionIdx = 7
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(7)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirConverge" then
-    state.arpDirectionIdx = 5
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(5)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirDiverge" then
-    state.arpDirectionIdx = 6
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(6)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirUpDown" then
-    state.arpDirectionIdx = 3
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(3)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirDownUp" then
-    state.arpDirectionIdx = 4
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(4)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirReset" then
-    state.arpDirectionIdx = 1
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "UP", subtext = "Default Upward", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(1)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP", subtext = "Default Upward", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
 
   -- Arp Rate Presets (Key 6)
   elseif act == "arpRateTriplet" then
@@ -2402,6 +2437,8 @@ end
 return {
   selectTrack = selectTrack,
   executeControlAction = executeControlAction,
+  setActiveArpDirection = setActiveArpDirection,
+  getActiveArpDirectionIdx = getActiveArpDirectionIdx,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,
   handleKeyStepNoteOn = function(note, velocity, channel)

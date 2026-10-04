@@ -1225,6 +1225,23 @@ local function setTrackArpRate(rateIdx, targetTrackIdx)
   return trk, normalizedRateIdx
 end
 
+local function setTrackArpDirection(dirIdx, targetTrackIdx)
+  local normalizedDirIdx = math.max(1, math.min(#ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    return nil, normalizedDirIdx
+  end
+
+  trk.arpDirectionIdx = normalizedDirIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  return trk, normalizedDirIdx
+end
+
 local function applyGatePercentChange()
   if state.arpTimer then
     local gateRatio = (state.arpGatePercent or 80.0) / 100.0
@@ -2047,6 +2064,7 @@ return {
   formatBpm = formatBpm,
   applyBpmChange = applyBpmChange,
   setTrackArpRate = setTrackArpRate,
+  setTrackArpDirection = setTrackArpDirection,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,
@@ -2561,6 +2579,7 @@ end
 __modules["quantizer"] = function()
 -- packages/music-engine/quantizer.lua
 -- Real-time input quantization engine for MIDI keys, pads, and chords.
+-- Features legato sustaining during grid anticipation delays to eliminate awkward silent gaps.
 
 local quantizer = {}
 
@@ -2578,6 +2597,7 @@ local QUANTIZE_FACTORS = {
 local gridReferenceTime = hs.timer.absoluteTime() / 1e9
 local pendingEvents = {} -- [eventId] = { pitches = {}, channel = 0, vel = 100, onFired = false, released = false, timer = ... }
 local activePlayingNotes = {} -- [pitch_ch] = count of held instances
+local soundingNotes = {} -- [eventId] = { eventId = ..., pitches = ..., channel = ..., onRelease = ..., keyReleased = ..., graceTimer = ..., heldForPending = ... }
 local panicGeneration = 0
 
 function quantizer.resetGrid()
@@ -2623,6 +2643,8 @@ function quantizer.calculateDelay(bpm, mode)
 end
 
 --- Schedule or immediately execute a Note On / Chord event through quantization.
+-- When delayed by quantization, sustains currently sounding or just-released notes on the channel
+-- until the new note sounds on the grid, producing a seamless legato transition without silent gaps.
 -- @param eventId string unique identifier (e.g. "pad_1" or "key_48")
 -- @param pitches table list of MIDI note numbers e.g. {48, 52, 55}
 -- @param vel number velocity (1..127)
@@ -2648,12 +2670,44 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
 
   if delay <= 0 then
     -- Immediate playback (No quantization or landed on grid)
+    -- Release any notes on this channel that were waiting in release grace
+    for sId, sEntry in pairs(soundingNotes) do
+      if sEntry.channel == ch and sId ~= eventId then
+        if sEntry.graceTimer then
+          pcall(function() sEntry.graceTimer:stop() end)
+          sEntry.graceTimer = nil
+        end
+        if sEntry.keyReleased and sEntry.onRelease then
+          sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          for _, p in ipairs(sEntry.pitches) do
+            local key = p .. "_" .. sEntry.channel
+            if activePlayingNotes[key] then activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1) end
+          end
+          soundingNotes[sId] = nil
+          pendingEvents[sId] = nil
+        end
+      end
+    end
+
     pendingEvents[eventId] = {
+      eventId = eventId,
       pitches = pitches,
       channel = ch,
       vel = vel,
       onFired = true,
-      released = false
+      released = false,
+      bpm = bpm,
+      mode = mode
+    }
+    soundingNotes[eventId] = {
+      eventId = eventId,
+      pitches = pitches,
+      channel = ch,
+      bpm = bpm,
+      quantMode = mode,
+      onRelease = nil,
+      keyReleased = false,
+      generation = panicGeneration
     }
     for _, p in ipairs(pitches) do
       local key = p .. "_" .. ch
@@ -2662,15 +2716,30 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
     if onTrigger then onTrigger(pitches, vel, ch) end
     return 0
   else
-    -- Quantized schedule
+    -- Quantized schedule: note is delayed to the grid.
+    -- LEGATO SUSTAIN: Any currently sounding note on this channel (whether still physically held
+    -- or just released in grace) must be sustained until this new note sounds on the grid!
+    for sId, sEntry in pairs(soundingNotes) do
+      if sEntry.channel == ch and sId ~= eventId then
+        if sEntry.graceTimer then
+          pcall(function() sEntry.graceTimer:stop() end)
+          sEntry.graceTimer = nil
+        end
+        sEntry.heldForPending = eventId
+      end
+    end
+
     local ev = {
+      eventId = eventId,
       pitches = pitches,
       channel = ch,
       vel = vel,
       onFired = false,
-      released = false
+      released = false,
+      bpm = bpm,
+      mode = mode,
+      generation = panicGeneration
     }
-    ev.generation = panicGeneration
     pendingEvents[eventId] = ev
 
     ev.timer = hs.timer.doAfter(delay, function()
@@ -2678,6 +2747,32 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
       ev.timer = nil
       ev.onFired = true
 
+      -- Collect all notes that were sustained on this channel for this event
+      local notesToRelease = {}
+      for sId, sEntry in pairs(soundingNotes) do
+        if sEntry.heldForPending == eventId then
+          table.insert(notesToRelease, sEntry)
+          sEntry.heldForPending = nil
+        end
+      end
+
+      -- If any sustained note shares pitch(es) with the new note, release the shared pitch
+      -- before triggering the new note so the synth voice re-attacks cleanly.
+      local newPitchSet = {}
+      for _, p in ipairs(pitches) do newPitchSet[p] = true end
+
+      for _, sEntry in ipairs(notesToRelease) do
+        local hasShared = false
+        for _, p in ipairs(sEntry.pitches) do
+          if newPitchSet[p] then hasShared = true; break end
+        end
+        if hasShared and sEntry.onRelease then
+          sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          sEntry.releasedDone = true
+        end
+      end
+
+      -- Sound the new note on the grid tick!
       for _, p in ipairs(pitches) do
         local key = p .. "_" .. ch
         activePlayingNotes[key] = (activePlayingNotes[key] or 0) + 1
@@ -2685,7 +2780,36 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
 
       if onTrigger then onTrigger(pitches, vel, ch) end
 
-      -- If the user already released the key/pad before the grid arrived (staccato tap),
+      -- Release the remaining sustained notes whose pitches are different (seamless legato transition)
+      for _, sEntry in ipairs(notesToRelease) do
+        if not sEntry.releasedDone then
+          if sEntry.onRelease then
+            sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          end
+        end
+        for _, p in ipairs(sEntry.pitches) do
+          local key = p .. "_" .. sEntry.channel
+          if activePlayingNotes[key] then
+            activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+          end
+        end
+        soundingNotes[sEntry.eventId] = nil
+        pendingEvents[sEntry.eventId] = nil
+      end
+
+      -- Register this new note as actively sounding
+      soundingNotes[eventId] = {
+        eventId = eventId,
+        pitches = pitches,
+        channel = ch,
+        bpm = bpm,
+        quantMode = mode,
+        onRelease = ev.onRelease,
+        keyReleased = ev.released,
+        generation = panicGeneration
+      }
+
+      -- If the user already released this key/pad before the grid arrived (staccato tap),
       -- hold for minimum musical gate duration, then trigger release.
       if ev.released then
         local factor = QUANTIZE_FACTORS[mode] or 1.0
@@ -2703,6 +2827,7 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
               activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
             end
           end
+          soundingNotes[eventId] = nil
           pendingEvents[eventId] = nil
         end)
       end
@@ -2713,27 +2838,95 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
 end
 
 --- Handle Note Off for a quantized event.
+-- If the note is held for a pending quantized note, defers Note-Off until the new note triggers.
+-- If no pending note is yet scheduled, provides a musical grace period so a subsequent note press
+-- can sustain it seamlessly without gaps.
 -- @param eventId string unique identifier
 -- @param onRelease function(pitches, ch) callback executed to send noteOff
 function quantizer.queueNoteOff(eventId, onRelease)
   local ev = pendingEvents[eventId]
-  if not ev then return end
+  local snd = soundingNotes[eventId]
 
-  ev.released = true
-  ev.onRelease = onRelease
+  if ev and not ev.onFired then
+    -- Note hasn't fired yet! When timer fires, the staccato gate logic in queueNoteOn will release it.
+    ev.released = true
+    ev.onRelease = onRelease
+    return
+  end
 
-  if ev.onFired then
-    -- Note has already fired on the grid, release it immediately
-    if onRelease then onRelease(ev.pitches, ev.channel) end
-    for _, p in ipairs(ev.pitches) do
-      local key = p .. "_" .. ev.channel
-      if activePlayingNotes[key] then
-        activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+  if snd then
+    snd.keyReleased = true
+    snd.onRelease = onRelease
+
+    -- If this sounding note is already bound to sustain for a pending event, do not turn it off now!
+    if snd.heldForPending and pendingEvents[snd.heldForPending] then
+      return
+    end
+
+    -- Check if there is already a pending event scheduled on this channel
+    local pendingOnChannel = nil
+    for pId, pEv in pairs(pendingEvents) do
+      if pEv.channel == snd.channel and not pEv.onFired then
+        pendingOnChannel = pId
+        break
       end
     end
-    pendingEvents[eventId] = nil
+
+    if pendingOnChannel then
+      snd.heldForPending = pendingOnChannel
+      return
+    end
+
+    -- No pending event yet on this channel. Check if quantize mode is active:
+    local isQuantized = (snd.quantMode and snd.quantMode ~= "Off" and snd.quantMode ~= "None")
+    if isQuantized then
+      -- Start a release grace timer. If a new note is pressed on this channel within this window,
+      -- this note is sustained until the new note fires on the grid!
+      local factor = QUANTIZE_FACTORS[snd.quantMode] or 1.0
+      local clampedBpm = math.max(20.0, math.min(999.0, snd.bpm or 120.0))
+      local stepSec = (60.0 / clampedBpm) * factor
+      local graceDuration = math.min(0.120, math.max(0.050, stepSec * 0.75))
+
+      local gen = panicGeneration
+      snd.graceTimer = hs.timer.doAfter(graceDuration, function()
+        if gen ~= panicGeneration then return end
+        snd.graceTimer = nil
+        if snd.onRelease then
+          snd.onRelease(snd.pitches, snd.channel)
+        end
+        for _, p in ipairs(snd.pitches) do
+          local key = p .. "_" .. snd.channel
+          if activePlayingNotes[key] then
+            activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+          end
+        end
+        soundingNotes[eventId] = nil
+        pendingEvents[eventId] = nil
+      end)
+    else
+      -- Quantization is Off: release immediately
+      if onRelease then onRelease(snd.pitches, snd.channel) end
+      for _, p in ipairs(snd.pitches) do
+        local key = p .. "_" .. snd.channel
+        if activePlayingNotes[key] then
+          activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+        end
+      end
+      soundingNotes[eventId] = nil
+      pendingEvents[eventId] = nil
+    end
   else
-    -- Note hasn't fired yet! When timer fires, the staccato gate logic in queueNoteOn will release it.
+    -- Fallback if not tracked in soundingNotes
+    if onRelease and ev then
+      onRelease(ev.pitches, ev.channel)
+      for _, p in ipairs(ev.pitches) do
+        local key = p .. "_" .. ev.channel
+        if activePlayingNotes[key] then
+          activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+        end
+      end
+      pendingEvents[eventId] = nil
+    end
   end
 end
 
@@ -2751,7 +2944,18 @@ function quantizer.panic(onReleaseAll)
       pcall(function() onReleaseAll(ev.pitches, ev.channel) end)
     end
   end
+  for eventId, snd in pairs(soundingNotes) do
+    if snd.graceTimer then
+      pcall(function() snd.graceTimer:stop() end)
+    end
+    if snd.onRelease then
+      pcall(function() snd.onRelease(snd.pitches, snd.channel) end)
+    elseif onReleaseAll then
+      pcall(function() onReleaseAll(snd.pitches, snd.channel) end)
+    end
+  end
   pendingEvents = {}
+  soundingNotes = {}
   activePlayingNotes = {}
 end
 
@@ -5417,6 +5621,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       return activeTrkId
     end
 
+    -- Per-track Attack & Decay controls (9: 25, 0: 29)
+    if cNum == 25 or cNum == 29 then
+      return activeTrkId
+    end
+
     return nil
   end
 
@@ -5585,7 +5794,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpEnabled = state.arpEnabled,
     modeName = modeName,
     arpLatchActive = state.arpLatchActive,
-    arpDirectionIdx = state.arpDirectionIdx,
+    arpDirectionIdx = (activeTrk and activeTrk.arpDirectionIdx) or state.arpDirectionIdx or 1,
     arpRateIdx = (activeTrk and activeTrk.arpRateIdx) or state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
     inputQuantizeMode = state.inputQuantizeMode or "Off",
@@ -5781,13 +5990,23 @@ local function createMidiWebview()
     elseif body.type == "toggleArpPower" then
       arpeggiator.toggleArpPower()
     elseif body.type == "setArpDirection" and body.directionIdx ~= nil then
-      state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+      if controlsModule and controlsModule.setActiveArpDirection then
+        controlsModule.setActiveArpDirection(body.directionIdx, state.activeTrack or 1)
+      else
+        state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+        local trk = state.tracks and state.tracks[state.activeTrack or 1]
+        if trk then
+          trk.arpDirectionIdx = state.arpDirectionIdx
+          hs.settings.set("qwertyMidi_track" .. (state.activeTrack or 1) .. "ArpDirectionIdx", state.arpDirectionIdx)
+        end
+      end
+      local trk = state.tracks and state.tracks[state.activeTrack or 1]
       local spot = {
-        title = "ARP DIRECTION",
+        title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
         value = ARP_DIRECTIONS[state.arpDirectionIdx],
-        subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+        subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. (state.arpEnabled and " • Active Pattern" or " • Arp Disabled"),
         targetId = "arp-dir-select",
-        color = "#d4a359"
+        color = (trk and trk.color) or "#d4a359"
       }
       updateWebviewHud(spot)
     elseif body.type == "setArpQuantize" and body.value ~= nil then
@@ -6027,6 +6246,8 @@ local function createMidiWebview()
       if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
         _G.activeWatchers.keystep.handleGuiAction(actionName, body)
       end
+    elseif controlsModule and controlsModule.executeControlAction and type(body.type) == "string" then
+      controlsModule.executeControlAction(body.type)
     end
     config.saveSettings()
   end)
@@ -14205,7 +14426,7 @@ local state = {
       decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -14217,7 +14438,7 @@ local state = {
       decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -14229,7 +14450,7 @@ local state = {
       decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -14241,7 +14462,7 @@ local state = {
       decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
       sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = 1, arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
@@ -14297,6 +14518,7 @@ local function saveSettings()
         hs.settings.set("qwertyMidi_track" .. i .. "OctaveOffset", trk.octaveOffset or 0)
         hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
         hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
+        hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
       end
     end
     local botTrk = state.tracks[state.bottomRowTrack or 1]
@@ -15098,6 +15320,28 @@ local function setActiveArpRate(rateIdx)
   return nil, state.arpRateIdx
 end
 
+local function getActiveArpDirectionIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpDirectionIdx) or state.arpDirectionIdx or 1
+end
+
+local function setActiveArpDirection(dirIdx, targetTrackIdx)
+  if arpeggiator.setTrackArpDirection then
+    return arpeggiator.setTrackArpDirection(dirIdx, targetTrackIdx or state.activeTrack or 1)
+  end
+
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local normalizedDirIdx = math.max(1, math.min(#state.ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    trk.arpDirectionIdx = normalizedDirIdx
+    hs.settings.set("qwertyMidi_track" .. trkId .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  hs.settings.set("qwertyMidi_arpDirectionIdx", normalizedDirIdx)
+  return trk, normalizedDirIdx
+end
+
 _G.activeWatchers = _G.activeWatchers or {}
 
 -- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
@@ -15503,6 +15747,7 @@ local function selectTrack(id)
   state.arpEnabled = trk.arpEnabled == true
   state.arpLatchActive = trk.arpLatchActive == true
   state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
+  state.arpDirectionIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
   state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
   state.chordModeActive = trk.chordModeActive == true
   if trk.chordIdx then state.chordIdx = trk.chordIdx end
@@ -16377,23 +16622,29 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpDirDown" then
-    state.arpDirectionIdx = ((state.arpDirectionIdx - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = ((currentDir - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
     local spot = {
-      title = "ARP DIRECTION",
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
       value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
       targetId = "arp-dir-select",
-      color = "#d4a359"
+      color = (trk and trk.color) or "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpDirUp" then
-    state.arpDirectionIdx = (state.arpDirectionIdx % #state.ARP_DIRECTIONS) + 1
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = (currentDir % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
     local spot = {
-      title = "ARP DIRECTION",
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
       value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
       targetId = "arp-dir-select",
-      color = "#d4a359"
+      color = (trk and trk.color) or "#d4a359"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpRateDown" then
@@ -16477,8 +16728,8 @@ local function executeControlAction(act, code)
         title = "ATTACK (TRK " .. trkId .. ")",
         value = math.floor((trk.attack / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "header",
-        color = "#00e676"
+        targetId = "key-25",
+        color = trk.color or "#00e676"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16495,8 +16746,8 @@ local function executeControlAction(act, code)
         title = "ATTACK (TRK " .. trkId .. ")",
         value = math.floor((trk.attack / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "header",
-        color = "#00e676"
+        targetId = "key-29",
+        color = trk.color or "#00e676"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16515,8 +16766,8 @@ local function executeControlAction(act, code)
         title = "DECAY & TAIL (TRK " .. trkId .. ")",
         value = math.floor((trk.decay / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "header",
-        color = "#ffd700"
+        targetId = "key-25",
+        color = trk.color or "#ffd700"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16535,8 +16786,8 @@ local function executeControlAction(act, code)
         title = "DECAY & TAIL (TRK " .. trkId .. ")",
         value = math.floor((trk.decay / 127) * 100) .. "%",
         subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "header",
-        color = "#ffd700"
+        targetId = "key-29",
+        color = trk.color or "#ffd700"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16690,7 +16941,7 @@ local function executeControlAction(act, code)
 
   -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
   elseif act == "botTrackToggle" then
-    local nextId = (state.activeTrack == 1) and 2 or 1
+    local nextId = (state.bottomRowTrack == 1) and 2 or 1
     selectTrack(nextId)
   elseif act == "botTrackLock" then
     local trkId = state.activeTrack or 1
@@ -16700,7 +16951,7 @@ local function executeControlAction(act, code)
       hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
     end
   elseif act == "topTrackToggle" then
-    local nextId = (state.activeTrack == 3) and 4 or 3
+    local nextId = (state.topRowTrack == 3) and 4 or 3
     selectTrack(nextId)
   elseif act == "topTrackLock" then
     local trkId = state.activeTrack or 3
@@ -16799,23 +17050,29 @@ local function executeControlAction(act, code)
 
   -- Arp Direction Presets (Key 5)
   elseif act == "arpDirRandom" then
-    state.arpDirectionIdx = 7
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(7)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirConverge" then
-    state.arpDirectionIdx = 5
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(5)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirDiverge" then
-    state.arpDirectionIdx = 6
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(6)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirUpDown" then
-    state.arpDirectionIdx = 3
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(3)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirDownUp" then
-    state.arpDirectionIdx = 4
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(4)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
   elseif act == "arpDirReset" then
-    state.arpDirectionIdx = 1
-    hud.updateWebviewHud({ title = "ARP DIRECTION", value = "UP", subtext = "Default Upward", targetId = "key-23", color = "#64d8f0" })
+    setActiveArpDirection(1)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP", subtext = "Default Upward", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
 
   -- Arp Rate Presets (Key 6)
   elseif act == "arpRateTriplet" then
@@ -17476,6 +17733,8 @@ end
 return {
   selectTrack = selectTrack,
   executeControlAction = executeControlAction,
+  setActiveArpDirection = setActiveArpDirection,
+  getActiveArpDirectionIdx = getActiveArpDirectionIdx,
   handleKeyDown = handleKeyDown,
   handleKeyUp = handleKeyUp,
   handleKeyStepNoteOn = function(note, velocity, channel)

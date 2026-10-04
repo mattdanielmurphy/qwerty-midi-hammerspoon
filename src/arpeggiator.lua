@@ -783,6 +783,23 @@ local function setTrackArpRate(rateIdx, targetTrackIdx)
   return trk, normalizedRateIdx
 end
 
+local function setTrackArpDirection(dirIdx, targetTrackIdx)
+  local normalizedDirIdx = math.max(1, math.min(#ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    return nil, normalizedDirIdx
+  end
+
+  trk.arpDirectionIdx = normalizedDirIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  return trk, normalizedDirIdx
+end
+
 local function applyGatePercentChange()
   if state.arpTimer then
     local gateRatio = (state.arpGatePercent or 80.0) / 100.0
@@ -1605,6 +1622,7 @@ return {
   formatBpm = formatBpm,
   applyBpmChange = applyBpmChange,
   setTrackArpRate = setTrackArpRate,
+  setTrackArpDirection = setTrackArpDirection,
   applyGatePercentChange = applyGatePercentChange,
   updateLatchedArpNotes = updateLatchedArpNotes,
   updateLatchedArpChordNotes = updateLatchedArpChordNotes,

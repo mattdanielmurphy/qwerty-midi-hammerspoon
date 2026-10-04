@@ -936,6 +936,11 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       return activeTrkId
     end
 
+    -- Per-track Attack & Decay controls (9: 25, 0: 29)
+    if cNum == 25 or cNum == 29 then
+      return activeTrkId
+    end
+
     return nil
   end
 
@@ -1104,7 +1109,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     arpEnabled = state.arpEnabled,
     modeName = modeName,
     arpLatchActive = state.arpLatchActive,
-    arpDirectionIdx = state.arpDirectionIdx,
+    arpDirectionIdx = (activeTrk and activeTrk.arpDirectionIdx) or state.arpDirectionIdx or 1,
     arpRateIdx = (activeTrk and activeTrk.arpRateIdx) or state.arpRateIdx,
     arpQuantizeMode = state.arpQuantizeMode or "None",
     inputQuantizeMode = state.inputQuantizeMode or "Off",
@@ -1300,13 +1305,23 @@ local function createMidiWebview()
     elseif body.type == "toggleArpPower" then
       arpeggiator.toggleArpPower()
     elseif body.type == "setArpDirection" and body.directionIdx ~= nil then
-      state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+      if controlsModule and controlsModule.setActiveArpDirection then
+        controlsModule.setActiveArpDirection(body.directionIdx, state.activeTrack or 1)
+      else
+        state.arpDirectionIdx = math.max(1, math.min(#ARP_DIRECTIONS, body.directionIdx))
+        local trk = state.tracks and state.tracks[state.activeTrack or 1]
+        if trk then
+          trk.arpDirectionIdx = state.arpDirectionIdx
+          hs.settings.set("qwertyMidi_track" .. (state.activeTrack or 1) .. "ArpDirectionIdx", state.arpDirectionIdx)
+        end
+      end
+      local trk = state.tracks and state.tracks[state.activeTrack or 1]
       local spot = {
-        title = "ARP DIRECTION",
+        title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
         value = ARP_DIRECTIONS[state.arpDirectionIdx],
-        subtext = state.arpEnabled and "Active Pattern" or "Arp Disabled",
+        subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. (state.arpEnabled and " • Active Pattern" or " • Arp Disabled"),
         targetId = "arp-dir-select",
-        color = "#d4a359"
+        color = (trk and trk.color) or "#d4a359"
       }
       updateWebviewHud(spot)
     elseif body.type == "setArpQuantize" and body.value ~= nil then
@@ -1546,6 +1561,8 @@ local function createMidiWebview()
       if _G.activeWatchers.keystep and _G.activeWatchers.keystep.handleGuiAction then
         _G.activeWatchers.keystep.handleGuiAction(actionName, body)
       end
+    elseif controlsModule and controlsModule.executeControlAction and type(body.type) == "string" then
+      controlsModule.executeControlAction(body.type)
     end
     config.saveSettings()
   end)
