@@ -18428,16 +18428,21 @@ function logic_names.scanLogicTracks()
     return nil, "Logic Pro not running"
   end
 
-  local ax = hs.axuielement.applicationElement(app)
-  if not ax then
-    return nil, "Accessibility unavailable for Logic Pro"
+  local tw = nil
+  local focusedWin = app:focusedWindow()
+  if focusedWin and string.find(tostring(focusedWin:title()), "Tracks") then
+    tw = hs.axuielement.windowElement(focusedWin)
   end
 
-  local tw = nil
-  for _, w in ipairs(ax.AXWindows or {}) do
-    if string.find(tostring(w.AXTitle), "Tracks") then
-      tw = w
-      break
+  if not tw then
+    local ax = hs.axuielement.applicationElement(app)
+    if ax then
+      for _, w in ipairs(ax.AXWindows or {}) do
+        if string.find(tostring(w.AXTitle), "Tracks") then
+          tw = w
+          break
+        end
+      end
     end
   end
 
@@ -18445,21 +18450,32 @@ function logic_names.scanLogicTracks()
     return nil, "Tracks window not found"
   end
 
+  -- Fast direct path test: root/8/2/1/2/1/1
   local headerGroup = nil
-  local function findHeader(el, depth)
-    if depth > 8 then return nil end
-    local desc = el.AXDescription
-    if desc and string.find(desc, "Tracks header") then
-      return el
+  local path = { 8, 2, 1, 2, 1, 1 }
+  local h = tw
+  for _, idx in ipairs(path) do
+    local ch = h and h.AXChildren
+    h = ch and ch[idx]
+  end
+  if h and h.AXDescription and string.find(h.AXDescription, "Tracks header") then
+    headerGroup = h
+  else
+    local function findHeader(el, depth)
+      if depth > 8 then return nil end
+      local desc = el.AXDescription
+      if desc and string.find(desc, "Tracks header") then
+        return el
+      end
+      for _, c in ipairs(el.AXChildren or {}) do
+        local res = findHeader(c, depth + 1)
+        if res then return res end
+      end
+      return nil
     end
-    for _, c in ipairs(el.AXChildren or {}) do
-      local res = findHeader(c, depth + 1)
-      if res then return res end
-    end
-    return nil
+    headerGroup = findHeader(tw, 0)
   end
 
-  headerGroup = findHeader(tw, 0)
   if not headerGroup then
     return nil, "Tracks header not found"
   end
@@ -18487,7 +18503,6 @@ function logic_names.updateTrackNames(force)
   isPolling = false
 
   if not ok or not res then
-    -- Logic is not running or window is closed; do not overwrite names if transient
     return false
   end
 
@@ -18513,8 +18528,8 @@ function logic_names.updateTrackNames(force)
   end
 
   if (changed or force) and _G.activeWatchers and _G.activeWatchers.hud then
-    if _G.activeWatchers.hud.renderHud then
-      _G.activeWatchers.hud.renderHud()
+    if _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud(nil, nil, true)
     end
   end
 
