@@ -48,6 +48,27 @@ local hudUpdateScheduled = false
 local lastFrameScale = nil
 local _savedNormalHeight = nil
 local updateWebviewHud = nil
+local createMidiWebview = nil
+
+local function hideMidiWebview()
+  local wv = _G.activeWatchers and _G.activeWatchers.midiWebview
+  if not wv then return false end
+  state.textInputActive = false
+  _G.activeWatchers.isHoveringScrollable = false
+  wv:hide()
+  hudLog("MIDI HUD intentionally hidden")
+  return true
+end
+
+local function showMidiWebview()
+  local wv = _G.activeWatchers and _G.activeWatchers.midiWebview
+  if wv then
+    wv:show()
+    updateWebviewHud()
+    return wv
+  end
+  return createMidiWebview()
+end
 
 state.activeSurface = state.activeSurface or hs.settings.get("qwertyMidi_activeSurface") or "qwerty"
 
@@ -1205,7 +1226,7 @@ updateWebviewHud = function(spotlightInfo, activeArpPitch, forceImmediate)
   end
 end
 
-local function createMidiWebview()
+createMidiWebview = function()
   hudLog("createMidiWebview")
   webviewGeneration = webviewGeneration + 1
   lastHeartbeat = os.time()
@@ -1258,6 +1279,8 @@ local function createMidiWebview()
       if controlsModule then controlsModule.handleKeyDown(body.code) end
     elseif body.type == "keyUp" and body.code then
       if controlsModule then controlsModule.handleKeyUp(body.code) end
+    elseif body.type == "closeMidiHud" then
+      hideMidiWebview()
     elseif body.type == "trkMute" and body.trackId then
       local tId = math.floor(tonumber(body.trackId) or 0)
       if controlsModule and controlsModule.executeControlAction and tId >= 1 and tId <= 4 then
@@ -1795,6 +1818,8 @@ return {
   updateSingleKeyState = updateSingleKeyState,
   updateChordDisplay = updateChordDisplay,
   updateWebviewHud = updateWebviewHud,
+  hideMidiWebview = hideMidiWebview,
+  showMidiWebview = showMidiWebview,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,
   getLastHeartbeat = function() return lastHeartbeat end,

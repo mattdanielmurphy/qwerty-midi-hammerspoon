@@ -1813,6 +1813,32 @@ local HTML_UI_CONTENT = [[
   #key-context-menu .ctx-item.danger:hover {
     background: rgba(200, 80, 70, 0.3);
   }
+  #hud-close-context-menu {
+    position: absolute;
+    z-index: 10000;
+    display: none;
+    min-width: 164px;
+    padding: 4px;
+    border: 1px solid rgba(212, 163, 89, 0.55);
+    border-radius: 6px;
+    background: rgba(28, 25, 22, 0.98);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.7);
+  }
+  #hud-close-context-menu button {
+    width: 100%;
+    border: 0;
+    border-radius: 3px;
+    padding: 7px 10px;
+    color: #ffb5a9;
+    background: transparent;
+    font: 600 11px/1 Inter, sans-serif;
+    text-align: left;
+    cursor: pointer;
+  }
+  #hud-close-context-menu button:hover {
+    color: #fff;
+    background: rgba(200, 80, 70, 0.3);
+  }
 
   /* ── Surface Switcher ── */
   .surface-switcher {
@@ -3474,6 +3500,29 @@ local HTML_UI_CONTENT = [[
     if (menu) menu.style.display = 'none';
   }
 
+  function hideHudCloseContextMenu() {
+    const menu = document.getElementById('hud-close-context-menu');
+    if (menu) menu.style.display = 'none';
+  }
+
+  function showHudCloseContextMenu(e) {
+    const container = document.getElementById('hud-container');
+    const menu = document.getElementById('hud-close-context-menu');
+    if (!container || !menu) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const cr = container.getBoundingClientRect();
+    let x = e.clientX - cr.left;
+    let y = e.clientY - cr.top;
+    const mw = 164;
+    const mh = 36;
+    x = Math.max(8, Math.min(x, cr.width - mw - 8));
+    y = Math.max(8, Math.min(y, cr.height - mh - 8));
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.style.display = 'block';
+  }
+
   // ===== CALL HAMMERSPOON HELPER =====
   window.callHammerspoon = function(action, data) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.midiControllerUC) {
@@ -4510,6 +4559,18 @@ local HTML_UI_CONTENT = [[
 
     const container = document.getElementById('hud-container');
     if (container) {
+      const closeMenu = document.createElement('div');
+      closeMenu.id = 'hud-close-context-menu';
+      closeMenu.setAttribute('role', 'menu');
+      closeMenu.innerHTML = '<button type="button" role="menuitem" title="Close MIDI HUD (Command-Shift-M)">Close MIDI HUD <span aria-hidden="true">⌘⇧M</span></button>';
+      container.appendChild(closeMenu);
+      closeMenu.querySelector('button').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hideHudCloseContextMenu();
+        window.callHammerspoon('closeMidiHud');
+      });
+
       container.addEventListener('mousedown', (e) => {
         if (isEditMode && (e.target.closest('.drawer-panel') || e.target.closest('.key-pad') || e.target.closest('[draggable="true"]') || e.target.closest('.preset-modal-overlay'))) return;
 
@@ -4545,7 +4606,9 @@ local HTML_UI_CONTENT = [[
       });
     }
 
-    // Context menu on key pads
+    // Edit-mode key menus keep their existing behavior. Everywhere else on
+    // the HUD chassis offers the explicit Close action, while text controls
+    // retain the browser's native context menu.
     container && container.addEventListener('contextmenu', (e) => {
       const keyPad = e.target.closest('.key-pad:not(.dummy-pad)');
       if (keyPad && isEditMode) {
@@ -4558,6 +4621,8 @@ local HTML_UI_CONTENT = [[
         }
       } else {
         hideContextMenu();
+        if (e.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+        showHudCloseContextMenu(e);
       }
     });
 
@@ -4576,11 +4641,15 @@ local HTML_UI_CONTENT = [[
         e.preventDefault();
       } else if (!e.target.closest('#key-context-menu')) {
         hideContextMenu();
+        if (!e.target.closest('#hud-close-context-menu')) hideHudCloseContextMenu();
       }
     });
 
     // Global keydown for Delete/Backspace to revert selected keys
     window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hideHudCloseContextMenu();
+      }
       if (!isEditMode) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedKeys.size > 0 && !e.target.closest('input, textarea')) {

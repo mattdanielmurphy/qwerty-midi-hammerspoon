@@ -68,11 +68,9 @@ function _G.toggleMidiMode(newState)
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
-    profileLog("Before createMidiWebview")
-    local h = hud.createMidiWebview()
-    profileLog("After createMidiWebview, before show")
-    h:show()
-    profileLog("After show")
+    profileLog("Before showMidiWebview")
+    hud.showMidiWebview()
+    profileLog("After showMidiWebview")
     if keystep and keystep.connect and not keystep.isConnected() then
       pcall(function() keystep.connect("Arturia KeyStep 32") end)
     end
@@ -229,14 +227,40 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
 
   local ok, result = xpcall(function()
 
+      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
+      local flags = event:getFlags()
+      state.consumedCommandShortcutKeyUps = state.consumedCommandShortcutKeyUps or {}
+
+      -- Cmd-Shift-M is the one explicitly supported HUD-window shortcut. Track
+      -- its key-up because users can release Command before M; that later
+      -- key-up must never leak into the performance mapping.
+      if not isDown and state.consumedCommandShortcutKeyUps[code] then
+        state.consumedCommandShortcutKeyUps[code] = nil
+        return true
+      end
+      if isDown and code == 46 and flags.cmd and flags.shift and not flags.alt and not flags.ctrl and not flags.capslock then
+        state.consumedCommandShortcutKeyUps[code] = true
+        local isRepeat = event:getProperty(hs.eventtap.event.properties.keyboardEventAutorepeat) == 1
+        if not isRepeat then
+          -- Hiding a WebKit window and persisting settings can re-enter the
+          -- app run loop. Never do either directly from the event-tap callback.
+          hs.timer.doAfter(0, function()
+            local closeOk, closeErr = pcall(hud.hideMidiWebview)
+            if not closeOk then
+              print("QWERTY MIDI: Cmd-Shift-M close failed: " .. tostring(closeErr))
+            end
+          end)
+        end
+        return true
+      end
+
       -- Exception: Let text input fields receive keystrokes natively
       if state.textInputActive then
         return false
       end
 
       -- Exception: Let Delete/Backspace work in the webview's edit mode
-      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
       if code == 51 or code == 117 then -- Delete (51) or Forward Delete (117)
         if event:getType() == hs.eventtap.event.types.keyDown then
           return false
@@ -253,11 +277,8 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
         end
       end
 
-      local flags = event:getFlags()
-
       -- Controller shortcuts must be represented by a visible key in the HUD.
       -- Leave Command shortcuts to macOS and Control+Tab to app navigation.
-      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
       if (flags.cmd or flags.ctrl) and code == 48 then
         return false
       end
@@ -267,8 +288,6 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
           return false
         end
         if flags.cmd or flags.ctrl then return false end
-        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-        local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
         if isDown then
           return arpeggiator.handleBpmInput(code, flags)
         end
@@ -298,9 +317,6 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       if event:getType() == hs.eventtap.event.types.flagsChanged then
         return false
       end
-
-      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       if isDown then
         local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
