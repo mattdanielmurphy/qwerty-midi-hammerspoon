@@ -33,6 +33,39 @@ _G.activeWatchers.state = state
 _G.activeWatchers.controls = controls
 _G.activeWatchers.arpeggiator = arpeggiator
 
+local function disarmMidiInput(reason)
+  state.midiActive = false
+  hs.settings.set("qwertyMidi_wasOpen", false)
+  if _G.activeWatchers.midiKeyTap then _G.activeWatchers.midiKeyTap:stop() end
+  if _G.activeWatchers.midiScrollTap then _G.activeWatchers.midiScrollTap:stop() end
+  state.pressedKeys = {}
+  state.bpmInputMode = false
+  print("QWERTY MIDI: keyboard interception disabled — " .. tostring(reason))
+end
+
+-- A broken HUD must never leave a live event tap consuming ordinary keyboard
+-- input. Event-callback callers defer teardown so the current event can pass.
+local function failOpenMidiInput(reason)
+  if _G.activeWatchers.midiInputFailOpenScheduled then return end
+  _G.activeWatchers.midiInputFailOpenScheduled = true
+  print("QWERTY MIDI: disabling keyboard interception — " .. tostring(reason))
+  hs.timer.doAfter(0, function()
+    disarmMidiInput(reason)
+    _G.activeWatchers.midiInputFailOpenScheduled = false
+    hs.alert.show("QWERTY MIDI input disabled after an error", 3)
+  end)
+end
+
+-- This is the only project-owned HUD close path. It removes QWERTY capture
+-- before touching WebKit, while retaining external hardware connections.
+function _G.closeMidiHud(reason)
+  disarmMidiInput(reason or "HUD closed")
+  local ok, err = pcall(hud.hideMidiWebview)
+  if not ok then
+    print("QWERTY MIDI: HUD close error: " .. tostring(err))
+  end
+end
+
 if controls and controls.selectTrack then
   controls.selectTrack(state.activeTrack or 1)
 end
@@ -104,7 +137,7 @@ function _G.toggleMidiMode(newState)
 end
 
 _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(event)
-  if not state.midiActive then return false end
+  if not state.midiActive or not hud.isMidiWebviewHealthy() then return false end
 
   local ok, result = xpcall(function()
     local deltaY = event:getProperty(hs.eventtap.event.properties.scrollWheelEventDeltaAxis1) or 0
@@ -209,8 +242,12 @@ _G.activeWatchers.midiScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scro
   return result
 end)
 
+if _G.activeWatchers.midiKeyTap then _G.activeWatchers.midiKeyTap:stop() end
+if _G.activeWatchers.midiScrollTap then _G.activeWatchers.midiScrollTap:stop() end
+
 _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown, hs.eventtap.event.types.keyUp, hs.eventtap.event.types.flagsChanged }, function(event)
   if not state.midiActive then return false end
+  if not hud.isMidiWebviewHealthy() then return false end
 
   local function errorHandler(err)
     print("QWERTY MIDI: CRITICAL EVENTTAP ERROR: " .. tostring(err))
@@ -222,38 +259,15 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
         if code then state.pressedKeys[code] = nil end
       end
     end)
+    failOpenMidiInput("event tap error")
     return false -- allow event to pass to OS so we don't lock the keyboard
   end
 
   local ok, result = xpcall(function()
 
       local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
       local flags = event:getFlags()
-      state.consumedCommandShortcutKeyUps = state.consumedCommandShortcutKeyUps or {}
-
-      -- Cmd-Shift-M is the one explicitly supported HUD-window shortcut. Track
-      -- its key-up because users can release Command before M; that later
-      -- key-up must never leak into the performance mapping.
-      if not isDown and state.consumedCommandShortcutKeyUps[code] then
-        state.consumedCommandShortcutKeyUps[code] = nil
-        return true
-      end
-      if isDown and code == 46 and flags.cmd and flags.shift and not flags.alt and not flags.ctrl and not flags.capslock then
-        state.consumedCommandShortcutKeyUps[code] = true
-        local isRepeat = event:getProperty(hs.eventtap.event.properties.keyboardEventAutorepeat) == 1
-        if not isRepeat then
-          -- Hiding a WebKit window and persisting settings can re-enter the
-          -- app run loop. Never do either directly from the event-tap callback.
-          hs.timer.doAfter(0, function()
-            local closeOk, closeErr = pcall(hud.hideMidiWebview)
-            if not closeOk then
-              print("QWERTY MIDI: Cmd-Shift-M close failed: " .. tostring(closeErr))
-            end
-          end)
-        end
-        return true
-      end
+      local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
       -- Exception: Let text input fields receive keystrokes natively
       if state.textInputActive then
@@ -319,15 +333,27 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       end
 
       if isDown then
-        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err) print('QWERTY MIDI: handleKeyDown error: '..tostring(err)); print(debug.traceback()); return true end)
+        local ok, status = xpcall(function() return controls.handleKeyDown(code) end, function(err)
+          print('QWERTY MIDI: handleKeyDown error: '..tostring(err))
+          print(debug.traceback())
+          failOpenMidiInput("key-down handler error")
+          return err
+        end)
         if not ok then
           print("QWERTY MIDI: handleKeyDown error: " .. tostring(status))
+          return false
         end
         return true
       else
-        local ok, status = xpcall(function() return controls.handleKeyUp(code) end, function(err) print('QWERTY MIDI: handleKeyUp error: '..tostring(err)); print(debug.traceback()); return true end)
+        local ok, status = xpcall(function() return controls.handleKeyUp(code) end, function(err)
+          print('QWERTY MIDI: handleKeyUp error: '..tostring(err))
+          print(debug.traceback())
+          failOpenMidiInput("key-up handler error")
+          return err
+        end)
         if not ok then
           print("QWERTY MIDI: handleKeyUp error: " .. tostring(status))
+          return false
         end
         return true
       end
@@ -335,23 +361,25 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
   end, errorHandler)
 
   if not ok then
+    failOpenMidiInput("event tap error")
     return false
   end
   return result
 end)
 
--- Watchdog timer: if the key eventtap stops silently (e.g. uncaught pcall error), restart it
--- Also checks webview liveness via JS ping/pong — if no response for 5s, web process is dead
+-- Watchdog fails open. A controller with a dead UI must release the physical
+-- keyboard instead of silently restarting and continuing to consume it.
+if _G.activeWatchers.keyTapWatchdog then _G.activeWatchers.keyTapWatchdog:stop() end
 local lastRefreshClickTime = 0
 _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   if state.midiActive then
     if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
-      print("QWERTY MIDI: Watchdog detected dead keyTap, restarting...")
-      _G.activeWatchers.midiKeyTap:start()
+      failOpenMidiInput("keyboard event tap stopped")
+      return
     end
     if _G.activeWatchers.midiScrollTap and not _G.activeWatchers.midiScrollTap:isEnabled() then
-      print("QWERTY MIDI: Watchdog detected dead scrollTap, restarting...")
-      _G.activeWatchers.midiScrollTap:start()
+      failOpenMidiInput("scroll event tap stopped")
+      return
     end
 
     if keystep and keystep.checkConnection then
@@ -365,15 +393,11 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
     if _G.activeWatchers.midiWebview and lastSeen > 0 then
       local elapsed = os.time() - lastSeen
       if elapsed >= 5 then
-        local msg = "QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — executing webview hard respawn"
+        local msg = "QWERTY MIDI: Watchdog detected unresponsive webview (no heartbeat/pong for " .. elapsed .. "s) — disabling input"
         local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
         if f then f:write(os.date("%H:%M:%S") .. " [WATCHDOG]: " .. msg .. "\n"); f:close() end
         
-        pcall(function()
-          local h = hud.reloadMidiWebview()
-          if h then h:show() end
-          hs.alert.show("UI Auto-Recovered by Watchdog", 2.0)
-        end)
+        failOpenMidiInput("HUD webview stopped responding")
       end
     end
   end
@@ -418,12 +442,7 @@ local M = {
   toggleMidiMode = _G.toggleMidiMode,
   toggleSettingsWindow = settings_ui.toggleSettingsWindow,
   start = function(isAutoReload)
-    if isAutoReload then
-      local wasOpen = hs.settings.get("qwertyMidi_wasOpen")
-      if wasOpen then
-        _G.toggleMidiMode(true)
-      end
-    else
+    if not isAutoReload then
       _G.toggleMidiMode(true)
     end
   end,

@@ -2,14 +2,16 @@
 
 ## Outcome
 
-- Implemented `Cmd+Shift+M` in the active MIDI event tap. It hides only the
-  `MIDI Controller HUD`, consumes the matching key-up, and leaves controller
-  mode, MIDI routing, held arp state, and background clocks active.
+- `Cmd+Shift+M` has been deliberately removed after it was reported to crash
+  the live controller. The Studio Suite's separate binding was also removed.
 - Added a chassis-only right-click menu with **Close MIDI HUD** and a visible
-  `⌘⇧M` hint. Text inputs, textareas, selects, and editable content retain
-  WebKit's native context menus.
-- HUD visibility is deliberately non-persistent. A reload always opens the
-  HUD, preventing a previously closed HUD from looking like a failed app launch.
+  action. Text inputs, textareas, selects, and editable content retain WebKit's
+  native context menus.
+- HUD visibility is deliberately non-persistent. Automatic reloads remain
+  disarmed, preventing a failed or closed HUD from silently reclaiming keys.
+- Keyboard and scroll taps now fail open: a close action, callback error,
+  stopped tap, missing/invisible HUD, or expired heartbeat disables capture;
+  the watchdog no longer restarts a failed tap. Automatic reloads stay disarmed.
 
 ## Files
 
@@ -25,6 +27,5 @@
 - `luac -p qwerty_midi.lua src/*.lua`: passed.
 - Live Hammerspoon trace reached `domReady` and heartbeat pings after the
   bundle. Browser-side contextmenu dispatch reported `close-menu-visible=true`.
-- After a reload, the native `MIDI Controller HUD` window was visible and its
-  DOM reached `domReady`; the Hammerspoon process remained alive after the
-  shortcut probe. No matching macOS crash report was created.
+- The safety patch was bundled and parsed while Hammerspoon remained stopped.
+  Live activation is intentionally deferred so ordinary typing remains safe.

@@ -60,6 +60,14 @@ local function hideMidiWebview()
   return true
 end
 
+local function isMidiWebviewHealthy()
+  local wv = _G.activeWatchers and _G.activeWatchers.midiWebview
+  if not wv or not _G.activeWatchers.domIsReady then return false end
+  local visibleOk, visible = pcall(function() return wv:isVisible() end)
+  if not visibleOk or not visible then return false end
+  return (os.time() - lastHeartbeat) < 5
+end
+
 local function showMidiWebview()
   local wv = _G.activeWatchers and _G.activeWatchers.midiWebview
   if wv then
@@ -1280,7 +1288,11 @@ createMidiWebview = function()
     elseif body.type == "keyUp" and body.code then
       if controlsModule then controlsModule.handleKeyUp(body.code) end
     elseif body.type == "closeMidiHud" then
-      hideMidiWebview()
+      if _G.closeMidiHud then
+        _G.closeMidiHud("HUD close menu")
+      else
+        hideMidiWebview()
+      end
     elseif body.type == "trkMute" and body.trackId then
       local tId = math.floor(tonumber(body.trackId) or 0)
       if controlsModule and controlsModule.executeControlAction and tId >= 1 and tId <= 4 then
@@ -1820,6 +1832,7 @@ return {
   updateWebviewHud = updateWebviewHud,
   hideMidiWebview = hideMidiWebview,
   showMidiWebview = showMidiWebview,
+  isMidiWebviewHealthy = isMidiWebviewHealthy,
   createMidiWebview = createMidiWebview,
   reloadMidiWebview = reloadMidiWebview,
   getLastHeartbeat = function() return lastHeartbeat end,

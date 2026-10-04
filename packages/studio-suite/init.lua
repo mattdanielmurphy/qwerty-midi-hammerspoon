@@ -36,10 +36,12 @@ function _G.toggleStudioSuite(newState)
   end
 end
 
--- 4. Hotkeys
-_G.activeWatchers.studioSuiteToggle = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
-  _G.toggleStudioSuite()
-end)
+-- Cmd-Shift-M is intentionally unbound. It previously shadowed the MIDI HUD
+-- close experiment and could survive a partial reload as a global interceptor.
+if _G.activeWatchers.studioSuiteToggle then
+  _G.activeWatchers.studioSuiteToggle:delete()
+  _G.activeWatchers.studioSuiteToggle = nil
+end
 
 local M = {
   id = "studio_suite",
