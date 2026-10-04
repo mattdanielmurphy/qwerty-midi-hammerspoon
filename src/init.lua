@@ -33,6 +33,9 @@ _G.activeWatchers.state = state
 _G.activeWatchers.controls = controls
 _G.activeWatchers.arpeggiator = arpeggiator
 
+if controls and controls.selectTrack then
+  controls.selectTrack(state.activeTrack or 1)
+end
 
 if keystep then
   if keystep.setHud then keystep.setHud(hud) end
@@ -59,6 +62,9 @@ function _G.toggleMidiMode(newState)
   hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
 
   if state.midiActive then
+    if controls and controls.selectTrack then
+      controls.selectTrack(state.activeTrack or 1)
+    end
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()

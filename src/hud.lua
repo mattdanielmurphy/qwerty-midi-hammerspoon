@@ -917,23 +917,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     if cNum == 20 or (ksConnected and cNum == 8) then return 3 end
     if cNum == 21 or (ksConnected and cNum == 9) then return 4 end
 
-    -- Top-row controls: 5 (23: TopVol -), 6 (22: TopVol +)
-    if cNum == 23 or cNum == 22 then
-      return topTrkId
-    end
-
-    -- Bottom-row controls: 7 (26: BotVol -), 8 (28: BotVol +)
-    if cNum == 26 or cNum == 28 then
-      return botTrkId
-    end
-    -- Lower row when KeyStep connected (B:11, N:45, M:46, ,:43, .:47, /:44)
-    if ksConnected and (cNum == 11 or cNum == 45 or cNum == 46 or cNum == 43 or cNum == 47 or cNum == 44) then
-      return botTrkId
-    end
-
-    -- Home row per-track controls (0: Arp, 48: Tab/Sustain, 39: '/Chord)
-    if cNum == 0 or cNum == 48 or cNum == 39 then
-      return activeTrkId
+    -- Global exceptions affecting ALL tracks: Transpose +/-, Root +/-, Scale/Mode +/-
+    if cNum == 38 or cNum == 40 or cNum == 4 or cNum == 37 or cNum == 5 or cNum == 41 or cNum == 1 then
+      return nil
     end
 
     -- Per-track Attack & Decay controls (9: 25, 0: 29)
@@ -941,18 +927,21 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       return activeTrkId
     end
 
-    return nil
+    -- EVERYTHING ELSE changes to the selected track
+    return activeTrkId
   end
 
   for codeStr, kUpd in pairs(keyUpdates) do
-    local cNum = tonumber(codeStr)
-    local assignedId = resolveAssignedTrackId(cNum)
-    if assignedId and state.tracks and state.tracks[assignedId] then
-      local t = state.tracks[assignedId]
-      kUpd.assignedTrackId = assignedId
-      kUpd.assignedTrackColor = t.color
-      kUpd.assignedTrackRgb = t.rgb
-      kUpd.isPerTrack = true
+    if kUpd.isControl then
+      local cNum = tonumber(codeStr)
+      local assignedId = resolveAssignedTrackId(cNum)
+      if assignedId and state.tracks and state.tracks[assignedId] then
+        local t = state.tracks[assignedId]
+        kUpd.assignedTrackId = assignedId
+        kUpd.assignedTrackColor = t.color
+        kUpd.assignedTrackRgb = t.rgb
+        kUpd.isPerTrack = true
+      end
     end
   end
 

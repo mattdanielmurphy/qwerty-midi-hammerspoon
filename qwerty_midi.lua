@@ -50,6 +50,9 @@ _G.activeWatchers.state = state
 _G.activeWatchers.controls = controls
 _G.activeWatchers.arpeggiator = arpeggiator
 
+if controls and controls.selectTrack then
+  controls.selectTrack(state.activeTrack or 1)
+end
 
 if keystep then
   if keystep.setHud then keystep.setHud(hud) end
@@ -76,6 +79,9 @@ function _G.toggleMidiMode(newState)
   hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
 
   if state.midiActive then
+    if controls and controls.selectTrack then
+      controls.selectTrack(state.activeTrack or 1)
+    end
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
@@ -5602,23 +5608,9 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     if cNum == 20 or (ksConnected and cNum == 8) then return 3 end
     if cNum == 21 or (ksConnected and cNum == 9) then return 4 end
 
-    -- Top-row controls: 5 (23: TopVol -), 6 (22: TopVol +)
-    if cNum == 23 or cNum == 22 then
-      return topTrkId
-    end
-
-    -- Bottom-row controls: 7 (26: BotVol -), 8 (28: BotVol +)
-    if cNum == 26 or cNum == 28 then
-      return botTrkId
-    end
-    -- Lower row when KeyStep connected (B:11, N:45, M:46, ,:43, .:47, /:44)
-    if ksConnected and (cNum == 11 or cNum == 45 or cNum == 46 or cNum == 43 or cNum == 47 or cNum == 44) then
-      return botTrkId
-    end
-
-    -- Home row per-track controls (0: Arp, 48: Tab/Sustain, 39: '/Chord)
-    if cNum == 0 or cNum == 48 or cNum == 39 then
-      return activeTrkId
+    -- Global exceptions affecting ALL tracks: Transpose +/-, Root +/-, Scale/Mode +/-
+    if cNum == 38 or cNum == 40 or cNum == 4 or cNum == 37 or cNum == 5 or cNum == 41 or cNum == 1 then
+      return nil
     end
 
     -- Per-track Attack & Decay controls (9: 25, 0: 29)
@@ -5626,18 +5618,21 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       return activeTrkId
     end
 
-    return nil
+    -- EVERYTHING ELSE changes to the selected track
+    return activeTrkId
   end
 
   for codeStr, kUpd in pairs(keyUpdates) do
-    local cNum = tonumber(codeStr)
-    local assignedId = resolveAssignedTrackId(cNum)
-    if assignedId and state.tracks and state.tracks[assignedId] then
-      local t = state.tracks[assignedId]
-      kUpd.assignedTrackId = assignedId
-      kUpd.assignedTrackColor = t.color
-      kUpd.assignedTrackRgb = t.rgb
-      kUpd.isPerTrack = true
+    if kUpd.isControl then
+      local cNum = tonumber(codeStr)
+      local assignedId = resolveAssignedTrackId(cNum)
+      if assignedId and state.tracks and state.tracks[assignedId] then
+        local t = state.tracks[assignedId]
+        kUpd.assignedTrackId = assignedId
+        kUpd.assignedTrackColor = t.color
+        kUpd.assignedTrackRgb = t.rgb
+        kUpd.isPerTrack = true
+      end
     end
   end
 
@@ -7707,45 +7702,46 @@ local HTML_UI_CONTENT = [[
   #key-48.ctrl-sus,
   .key-pad.ctrl-sus,
   .key-pad.ctrl-sustain {
-    background: #141417 !important;
-    border-color: rgba(212, 163, 89, 0.22) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.08) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
     box-shadow: none !important;
   }
   #key-48:not(.latch-active):not(.latch-mode-active) .key-note,
   #key-48.ctrl-sus .key-note,
   .key-pad.ctrl-sus .key-note,
   .key-pad.ctrl-sustain .key-note {
-    color: #8a7a58 !important;
-    font-weight: 500 !important;
-    text-shadow: none !important;
+    color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    font-weight: 600 !important;
+    opacity: 0.85;
+    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
   #key-48:not(.latch-active):not(.latch-mode-active) .key-code,
   #key-48.ctrl-sus .key-code,
   .key-pad.ctrl-sus .key-code,
   .key-pad.ctrl-sustain .key-code {
-    color: #63636e !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7) !important;
   }
 
-  #key-48.latch-active {
-    background: rgba(255, 215, 0, 0.22) !important;
-    border-color: #ffd700 !important;
-    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5), inset 0 0 6px rgba(255, 215, 0, 0.2) !important;
+  #key-48.latch-active,
+  #key-48.latch-mode-active,
+  #key-48.sustain-active {
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.32) !important;
+    border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    box-shadow: 0 0 14px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7), inset 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
-  #key-48.latch-active .key-note {
-    color: #ffd700 !important;
+  #key-48.latch-active .key-note,
+  #key-48.latch-mode-active .key-note,
+  #key-48.sustain-active .key-note {
+    color: #ffffff !important;
     font-weight: 700 !important;
-    text-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+    text-shadow: 0 0 10px var(--assigned-track-color, var(--active-track-color, #00e5ff)), 0 0 18px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
-
-  #key-48.latch-mode-active {
-    background: rgba(255, 145, 0, 0.22) !important;
-    border-color: #ff9100 !important;
-    box-shadow: 0 0 12px rgba(255, 145, 0, 0.55), inset 0 0 6px rgba(255, 145, 0, 0.25) !important;
-  }
-  #key-48.latch-mode-active .key-note {
-    color: #ff9100 !important;
-    font-weight: 700 !important;
-    text-shadow: 0 0 6px rgba(255, 145, 0, 0.6);
+  #key-48.latch-active .key-code,
+  #key-48.latch-mode-active .key-code,
+  #key-48.sustain-active .key-code {
+    color: #ffffff !important;
+    opacity: 0.95;
+    text-shadow: 0 0 6px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Track Status Mode Tags: SUS and CHD */
@@ -7773,14 +7769,14 @@ local HTML_UI_CONTENT = [[
   }
   .trk-tag-sus.active {
     display: inline-block;
-    background: rgba(255, 215, 0, 0.25);
-    color: #ffd700;
-    border: 1px solid rgba(255, 215, 0, 0.5);
+    background: rgba(var(--trk-rgb, 0, 229, 255), 0.25);
+    color: var(--trk-color, #00e5ff);
+    border: 1px solid rgba(var(--trk-rgb, 0, 229, 255), 0.5);
   }
   .trk-tag-sus.classic.active {
-    background: rgba(255, 145, 0, 0.25);
-    color: #ff9100;
-    border: 1px solid rgba(255, 145, 0, 0.5);
+    background: rgba(var(--trk-rgb, 0, 229, 255), 0.35);
+    color: #ffffff;
+    border: 1px solid var(--trk-color, #00e5ff);
   }
   .trk-tag-chd.active {
     display: inline-block;
@@ -9277,31 +9273,39 @@ local HTML_UI_CONTENT = [[
 
   /* Per-Track Control Keys: ALWAYS use assigned track's color */
   .key-pad.per-track-ctrl {
-    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
-    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.1) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.65) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.16) !important;
   }
   .key-pad.per-track-ctrl .key-note {
     color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
-    font-weight: 700;
-    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.5);
+    font-weight: 700 !important;
+    text-shadow: 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
   }
   .key-pad.per-track-ctrl .key-code {
-    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.85) !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.9) !important;
   }
   .key-pad.per-track-ctrl.latch-active,
   .key-pad.per-track-ctrl.latch-mode-active,
   .key-pad.per-track-ctrl.sustain-active,
   .key-pad.per-track-ctrl.active-toggle {
-    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.28) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
     border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
-    box-shadow: 0 0 12px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6), inset 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
+    box-shadow: 0 0 14px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7), inset 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
   .key-pad.per-track-ctrl.latch-active .key-note,
   .key-pad.per-track-ctrl.latch-mode-active .key-note,
   .key-pad.per-track-ctrl.sustain-active .key-note,
   .key-pad.per-track-ctrl.active-toggle .key-note {
     color: #ffffff !important;
-    text-shadow: 0 0 8px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    text-shadow: 0 0 10px var(--assigned-track-color, var(--active-track-color, #00e5ff)), 0 0 18px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active .key-code,
+  .key-pad.per-track-ctrl.latch-mode-active .key-code,
+  .key-pad.per-track-ctrl.sustain-active .key-code,
+  .key-pad.per-track-ctrl.active-toggle .key-code {
+    color: #ffffff !important;
+    opacity: 0.95;
+    text-shadow: 0 0 6px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Header Controls Bound to Active Track */
@@ -14425,7 +14429,7 @@ local state = {
       attack = getSetting("track1Attack", 0),
       decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -14437,7 +14441,7 @@ local state = {
       attack = getSetting("track2Attack", 0),
       decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -14449,7 +14453,7 @@ local state = {
       attack = getSetting("track3Attack", 0),
       decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -14461,15 +14465,15 @@ local state = {
       attack = getSetting("track4Attack", 0),
       decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
   },
-  bottomRowTrack = 1,
-  topRowTrack = 3,
-  activeTrack = 1,
+  bottomRowTrack = getSetting("bottomRowTrack", (getSetting("activeTrack", 1) <= 2 and getSetting("activeTrack", 1) or 1)),
+  topRowTrack = getSetting("topRowTrack", (getSetting("activeTrack", 1) > 2 and getSetting("activeTrack", 1) or 3)),
+  activeTrack = getSetting("activeTrack", 1),
 
   ccStates = {
     [1] = 0,
@@ -14519,6 +14523,7 @@ local function saveSettings()
         hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
         hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
         hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
+        hs.settings.set("qwertyMidi_track" .. i .. "SustainMode", trk.sustainMode or "smart")
       end
     end
     local botTrk = state.tracks[state.bottomRowTrack or 1]
@@ -14533,6 +14538,9 @@ local function saveSettings()
     end
   end
 
+  hs.settings.set("qwertyMidi_activeTrack", state.activeTrack or 1)
+  hs.settings.set("qwertyMidi_bottomRowTrack", state.bottomRowTrack or 1)
+  hs.settings.set("qwertyMidi_topRowTrack", state.topRowTrack or 3)
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
   hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
@@ -15763,6 +15771,7 @@ local function selectTrack(id)
     state.topRowOctaveOffset = trk.octaveOffset or 12
     state.topRowVolume = trk.volume or 100
   end
+  config.saveSettings()
 
   hud.updateWebviewHud({
     title = "SELECT TRACK " .. targetId,
@@ -16063,26 +16072,28 @@ local function executeControlAction(act, code)
     local curO = tonumber(state.octaveShift) or 0
     local curTop = tonumber(state.topRowOctaveOffset) or 0
     local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop - 12) or curTop
+    local newBot = (not isTop) and (curBot - 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
     if ok then
       pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      local actTrk = state.tracks and state.tracks[activeTrkId]
       if actTrk then
-        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+        actTrk.octaveOffset = isTop and finalTop or finalBot
       end
       config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
       local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16091,26 +16102,28 @@ local function executeControlAction(act, code)
     local curO = tonumber(state.octaveShift) or 0
     local curTop = tonumber(state.topRowOctaveOffset) or 0
     local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop + 12) or curTop
+    local newBot = (not isTop) and (curBot + 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
     if ok then
       pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      local actTrk = state.tracks and state.tracks[activeTrkId]
       if actTrk then
-        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+        actTrk.octaveOffset = isTop and finalTop or finalBot
       end
       config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
       local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
       }
       hud.updateWebviewHud(spot)
     end
@@ -16351,19 +16364,35 @@ local function executeControlAction(act, code)
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.tabDamping = true
     if trk then
       trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
+      if trk.sustainMode == "off" then
+        trk.sustainMode = "smart"
+        state.sustainActive = true
+        config.saveSettings()
+        local spot = {
+          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = "SMART ON",
+          subtext = "Smart sustain enabled (Tap Tab to damp)",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      else
+        -- Reverse functionality: smart sustain is on, hitting Tab cuts off ringing notes for silence
+        local hadNotes = (trk.sustainedPitches and #trk.sustainedPitches > 0)
+        cleanupSustainPitches(activeTrkId)
+        local spot = {
+          title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
+          value = "CUT OFF",
+          subtext = hadNotes and "Silenced ringing notes; Smart Sustain ready" or "Silence; Smart Sustain active",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      end
     end
-    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "smart") or state.sustainActive
-    local isSmart = trk and (trk.sustainMode == "smart")
-    local spot = {
-      title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-      value = isSmart and "SMART ON" or "SMART OFF",
-      subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Tap Tab to toggle Smart Sustain",
-      targetId = code and ("key-" .. code) or "key-48",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "classicSustain" then
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
@@ -16378,7 +16407,7 @@ local function executeControlAction(act, code)
       value = isClassic and "CLASSIC ON" or "CLASSIC OFF",
       subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Shift+Tab to toggle Classic",
       targetId = code and ("key-" .. code) or "key-48",
-      color = "#ff9100"
+      color = trk and trk.color or "#ff9100"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
@@ -16546,57 +16575,51 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "volDown" then
-    state.topRowVolume = math.max(0, state.topRowVolume - 4)
-    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
-    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-    if botTrk then
-      botTrk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrk.id) then
-        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.max(0, (trk.volume or 100) - 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
       end
-    end
-    if topTrk then
-      topTrk.volume = state.topRowVolume
-      if isTrackAudible(topTrk.id) then
-        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
       end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
     end
-    config.saveSettings()
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "volUp" or act == "volume" then
-    state.topRowVolume = math.min(127, state.topRowVolume + 4)
-    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
-    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-    if botTrk then
-      botTrk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrk.id) then
-        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.min(127, (trk.volume or 100) + 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
       end
-    end
-    if topTrk then
-      topTrk.volume = state.topRowVolume
-      if isTrackAudible(topTrk.id) then
-        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
       end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
     end
-    config.saveSettings()
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
     arpeggiator.updateLatchedArpChordNotes()
@@ -17369,7 +17392,10 @@ local function handleKeyDown(code, externalNoteKey)
     local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
 
     -- Track-independent sustain mode
-    local susMode = (trk and trk.sustainMode) or "off"
+    local susMode = (trk and trk.sustainMode) or "smart"
+    if state.tabDamping then
+      susMode = "off"
+    end
     local sustainPedalHeld = false
     for c, info in pairs(state.pressedKeys) do
       if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
@@ -17377,7 +17403,7 @@ local function handleKeyDown(code, externalNoteKey)
         break
       end
     end
-    if sustainPedalHeld and susMode == "off" then
+    if sustainPedalHeld and susMode == "off" and not state.tabDamping then
       susMode = "smart"
     end
 
@@ -17503,9 +17529,10 @@ local function handleKeyUp(code, externalNoteKey)
         end
       end
 
-      local susMode = (trk and trk.sustainMode) or "off"
-      if sustainPedalHeld and susMode == "off" then susMode = "smart" end
-      local isSustained = isSustainedNote or (susMode ~= "off")
+      local susMode = (trk and trk.sustainMode) or "smart"
+      if state.tabDamping then susMode = "off" end
+      if sustainPedalHeld and susMode == "off" and not state.tabDamping then susMode = "smart" end
+      local isSustained = (not state.tabDamping) and (isSustainedNote or (susMode ~= "off"))
 
       quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
         for _, playedPitch in ipairs(releasedPitches or pitches) do
@@ -17606,59 +17633,36 @@ local function handleKeyUp(code, externalNoteKey)
     local act = (keyInfo and keyInfo.action) or ((state.shiftHeld or state.altHeld) and ctrlKey.shiftAction or ctrlKey.action)
     
     local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
-    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "sustain" and act ~= "classicSustain" then
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
-        local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
-        if (wasSustain or act == "sustain" or act == "classicSustain") and not state.sustainActive then
-          cleanupSustainPitches()
-        end
-        local activeTrkId = state.activeTrack or 1
-        local trk = state.tracks and state.tracks[activeTrkId]
-        local isSusOn = trk and (trk.sustainMode ~= "off")
-        local spot = (act == "sustain" or act == "classicSustain") and {
-          title = (trk and trk.sustainMode == "classic") and ("CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")") or ("SMART SUSTAIN (TRK " .. activeTrkId .. ")"),
-          value = isSusOn and ((trk and trk.sustainMode == "classic") and "CLASSIC ON" or "SMART ON") or "OFF",
-          subtext = isSusOn and "Notes held across release" or "Damping enabled",
-          targetId = "key-48",
-          color = isSusOn and "#ffd700" or "#b5aba0"
-        } or nil
-        if spot then hud.updateWebviewHud(spot) end
         return true
       end
     end
 
     if act == "sustain" then
+      state.tabDamping = false
       local activeTrkId = state.activeTrack or 1
       local trk = state.tracks and state.tracks[activeTrkId]
       if trk then
-        if trk.sustainWasActiveOnPress then
-          trk.sustainMode = "off"
-          cleanupSustainPitches(activeTrkId)
-        else
-          trk.sustainMode = "smart"
-          for c, kInfo in pairs(state.pressedKeys) do
-            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
-              kInfo.isSustainedNote = true
-              local pitches = kInfo.pitches or { kInfo.pitch }
-              local ch = kInfo.channel or trk.channel or 0
-              for _, p in ipairs(pitches) do
-                if p then
-                  trk.sustainedPitches = trk.sustainedPitches or {}
-                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
-                end
-              end
-            end
+        if state.altHeld then
+          -- Option + Tab explicitly toggles sustain off / on
+          trk.sustainMode = (trk.sustainMode == "off") and "smart" or "off"
+          if trk.sustainMode == "off" then
+            cleanupSustainPitches(activeTrkId)
           end
         end
         state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
         local isSmart = (trk.sustainMode == "smart")
+        local isClassic = (trk.sustainMode == "classic")
+        local isSusOn = (trk.sustainMode ~= "off")
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isSmart and "SMART ON" or "OFF",
-          subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Damping enabled",
+          value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
+          subtext = isSmart and "Smart sustain active (Tap Tab to damp)" or "Damping enabled",
           targetId = "key-48",
-          color = isSmart and "#ffd700" or "#b5aba0"
+          color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
         }
         hud.updateWebviewHud(spot)
       end
@@ -17667,8 +17671,7 @@ local function handleKeyUp(code, externalNoteKey)
       local trk = state.tracks and state.tracks[activeTrkId]
       if trk then
         if trk.classicWasActiveOnPress then
-          trk.sustainMode = "off"
-          cleanupSustainPitches(activeTrkId)
+          trk.sustainMode = "smart"
         else
           trk.sustainMode = "classic"
           for c, kInfo in pairs(state.pressedKeys) do
@@ -17686,13 +17689,14 @@ local function handleKeyUp(code, externalNoteKey)
           end
         end
         state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
         local isClassic = (trk.sustainMode == "classic")
         local spot = {
           title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isClassic and "CLASSIC ON" or "OFF",
-          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Damping enabled",
+          value = isClassic and "CLASSIC ON" or "SMART ON",
+          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Smart sustain active",
           targetId = "key-48",
-          color = isClassic and "#ff9100" or "#b5aba0"
+          color = trk.color or "#00e5ff"
         }
         hud.updateWebviewHud(spot)
       end
@@ -17706,13 +17710,14 @@ local function handleKeyUp(code, externalNoteKey)
           trk.chordModeActive = true
         end
         state.chordModeActive = (trk.chordModeActive == true)
+        config.saveSettings()
         local chordName = state.CHORDS[trk.chordIdx or state.chordIdx or 1].name
         local spot = {
           title = "CHORD MODE (TRK " .. activeTrkId .. ")",
           value = trk.chordModeActive and ("ON (" .. chordName .. ")") or "OFF",
           subtext = trk.chordModeActive and ("Chords active on Track " .. activeTrkId .. " (" .. ((trk and trk.name) or "") .. ")") or ("Single notes on Track " .. activeTrkId),
           targetId = "key-39",
-          color = trk.chordModeActive and "#ffd700" or "#b5aba0"
+          color = trk.chordModeActive and (trk.color or "#00e5ff") or "#b5aba0"
         }
         hud.updateWebviewHud(spot)
       end

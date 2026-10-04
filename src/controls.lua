@@ -467,6 +467,7 @@ local function selectTrack(id)
     state.topRowOctaveOffset = trk.octaveOffset or 12
     state.topRowVolume = trk.volume or 100
   end
+  config.saveSettings()
 
   hud.updateWebviewHud({
     title = "SELECT TRACK " .. targetId,
@@ -767,26 +768,28 @@ local function executeControlAction(act, code)
     local curO = tonumber(state.octaveShift) or 0
     local curTop = tonumber(state.topRowOctaveOffset) or 0
     local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop - 12) or curTop
+    local newBot = (not isTop) and (curBot - 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
     if ok then
       pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      local actTrk = state.tracks and state.tracks[activeTrkId]
       if actTrk then
-        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+        actTrk.octaveOffset = isTop and finalTop or finalBot
       end
       config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
       local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
       }
       hud.updateWebviewHud(spot)
     end
@@ -795,26 +798,28 @@ local function executeControlAction(act, code)
     local curO = tonumber(state.octaveShift) or 0
     local curTop = tonumber(state.topRowOctaveOffset) or 0
     local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newO = curO + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, newO, curTop, curBot)
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop + 12) or curTop
+    local newBot = (not isTop) and (curBot + 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
     if ok then
       pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
       state.topRowOctaveOffset = finalTop
       state.bottomRowOctaveOffset = finalBot
       arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[state.activeTrack or 1]
+      local actTrk = state.tracks and state.tracks[activeTrkId]
       if actTrk then
-        actTrk.octaveOffset = (state.activeTrack and state.activeTrack > 2) and state.topRowOctaveOffset or state.bottomRowOctaveOffset
+        actTrk.octaveOffset = isTop and finalTop or finalBot
       end
       config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
       local spot = {
-        title = "OCTAVE",
-        value = (state.octaveShift >= 0 and "+" or "") .. math.floor(state.octaveShift / 12) .. " Oct",
-        subtext = "All keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
       }
       hud.updateWebviewHud(spot)
     end
@@ -1055,19 +1060,35 @@ local function executeControlAction(act, code)
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
     state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    state.tabDamping = true
     if trk then
       trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
+      if trk.sustainMode == "off" then
+        trk.sustainMode = "smart"
+        state.sustainActive = true
+        config.saveSettings()
+        local spot = {
+          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = "SMART ON",
+          subtext = "Smart sustain enabled (Tap Tab to damp)",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      else
+        -- Reverse functionality: smart sustain is on, hitting Tab cuts off ringing notes for silence
+        local hadNotes = (trk.sustainedPitches and #trk.sustainedPitches > 0)
+        cleanupSustainPitches(activeTrkId)
+        local spot = {
+          title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
+          value = "CUT OFF",
+          subtext = hadNotes and "Silenced ringing notes; Smart Sustain ready" or "Silence; Smart Sustain active",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      end
     end
-    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "smart") or state.sustainActive
-    local isSmart = trk and (trk.sustainMode == "smart")
-    local spot = {
-      title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-      value = isSmart and "SMART ON" or "SMART OFF",
-      subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Tap Tab to toggle Smart Sustain",
-      targetId = code and ("key-" .. code) or "key-48",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "classicSustain" then
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
@@ -1082,7 +1103,7 @@ local function executeControlAction(act, code)
       value = isClassic and "CLASSIC ON" or "CLASSIC OFF",
       subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Shift+Tab to toggle Classic",
       targetId = code and ("key-" .. code) or "key-48",
-      color = "#ff9100"
+      color = trk and trk.color or "#ff9100"
     }
     hud.updateWebviewHud(spot)
   elseif act == "arpToggle" then
@@ -1250,57 +1271,51 @@ local function executeControlAction(act, code)
     }
     hud.updateWebviewHud(spot)
   elseif act == "volDown" then
-    state.topRowVolume = math.max(0, state.topRowVolume - 4)
-    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
-    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-    if botTrk then
-      botTrk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrk.id) then
-        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.max(0, (trk.volume or 100) - 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
       end
-    end
-    if topTrk then
-      topTrk.volume = state.topRowVolume
-      if isTrackAudible(topTrk.id) then
-        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
       end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
     end
-    config.saveSettings()
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "volUp" or act == "volume" then
-    state.topRowVolume = math.min(127, state.topRowVolume + 4)
-    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
-    local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-    local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-    if botTrk then
-      botTrk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrk.id) then
-        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.min(127, (trk.volume or 100) + 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
       end
-    end
-    if topTrk then
-      topTrk.volume = state.topRowVolume
-      if isTrackAudible(topTrk.id) then
-        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
       end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
     end
-    config.saveSettings()
-    local spot = {
-      title = "ROW VOLUMES",
-      value = "TOP " .. math.floor((state.topRowVolume / 127) * 100) .. "% | BOT " .. math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = "Dual Row Volume Level",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
     arpeggiator.updateLatchedArpChordNotes()
@@ -2073,7 +2088,10 @@ local function handleKeyDown(code, externalNoteKey)
     local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
 
     -- Track-independent sustain mode
-    local susMode = (trk and trk.sustainMode) or "off"
+    local susMode = (trk and trk.sustainMode) or "smart"
+    if state.tabDamping then
+      susMode = "off"
+    end
     local sustainPedalHeld = false
     for c, info in pairs(state.pressedKeys) do
       if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
@@ -2081,7 +2099,7 @@ local function handleKeyDown(code, externalNoteKey)
         break
       end
     end
-    if sustainPedalHeld and susMode == "off" then
+    if sustainPedalHeld and susMode == "off" and not state.tabDamping then
       susMode = "smart"
     end
 
@@ -2207,9 +2225,10 @@ local function handleKeyUp(code, externalNoteKey)
         end
       end
 
-      local susMode = (trk and trk.sustainMode) or "off"
-      if sustainPedalHeld and susMode == "off" then susMode = "smart" end
-      local isSustained = isSustainedNote or (susMode ~= "off")
+      local susMode = (trk and trk.sustainMode) or "smart"
+      if state.tabDamping then susMode = "off" end
+      if sustainPedalHeld and susMode == "off" and not state.tabDamping then susMode = "smart" end
+      local isSustained = (not state.tabDamping) and (isSustainedNote or (susMode ~= "off"))
 
       quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
         for _, playedPitch in ipairs(releasedPitches or pitches) do
@@ -2310,59 +2329,36 @@ local function handleKeyUp(code, externalNoteKey)
     local act = (keyInfo and keyInfo.action) or ((state.shiftHeld or state.altHeld) and ctrlKey.shiftAction or ctrlKey.action)
     
     local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
-    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" then
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "sustain" and act ~= "classicSustain" then
       if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
-        local wasSustain = state.sustainActive
         applyStateSnapshot(state.controlKeyDownSnapshots[code])
-        if (wasSustain or act == "sustain" or act == "classicSustain") and not state.sustainActive then
-          cleanupSustainPitches()
-        end
-        local activeTrkId = state.activeTrack or 1
-        local trk = state.tracks and state.tracks[activeTrkId]
-        local isSusOn = trk and (trk.sustainMode ~= "off")
-        local spot = (act == "sustain" or act == "classicSustain") and {
-          title = (trk and trk.sustainMode == "classic") and ("CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")") or ("SMART SUSTAIN (TRK " .. activeTrkId .. ")"),
-          value = isSusOn and ((trk and trk.sustainMode == "classic") and "CLASSIC ON" or "SMART ON") or "OFF",
-          subtext = isSusOn and "Notes held across release" or "Damping enabled",
-          targetId = "key-48",
-          color = isSusOn and "#ffd700" or "#b5aba0"
-        } or nil
-        if spot then hud.updateWebviewHud(spot) end
         return true
       end
     end
 
     if act == "sustain" then
+      state.tabDamping = false
       local activeTrkId = state.activeTrack or 1
       local trk = state.tracks and state.tracks[activeTrkId]
       if trk then
-        if trk.sustainWasActiveOnPress then
-          trk.sustainMode = "off"
-          cleanupSustainPitches(activeTrkId)
-        else
-          trk.sustainMode = "smart"
-          for c, kInfo in pairs(state.pressedKeys) do
-            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
-              kInfo.isSustainedNote = true
-              local pitches = kInfo.pitches or { kInfo.pitch }
-              local ch = kInfo.channel or trk.channel or 0
-              for _, p in ipairs(pitches) do
-                if p then
-                  trk.sustainedPitches = trk.sustainedPitches or {}
-                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
-                end
-              end
-            end
+        if state.altHeld then
+          -- Option + Tab explicitly toggles sustain off / on
+          trk.sustainMode = (trk.sustainMode == "off") and "smart" or "off"
+          if trk.sustainMode == "off" then
+            cleanupSustainPitches(activeTrkId)
           end
         end
         state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
         local isSmart = (trk.sustainMode == "smart")
+        local isClassic = (trk.sustainMode == "classic")
+        local isSusOn = (trk.sustainMode ~= "off")
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isSmart and "SMART ON" or "OFF",
-          subtext = isSmart and "Notes latched; auto-resets on new chord (zero mud)" or "Damping enabled",
+          value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
+          subtext = isSmart and "Smart sustain active (Tap Tab to damp)" or "Damping enabled",
           targetId = "key-48",
-          color = isSmart and "#ffd700" or "#b5aba0"
+          color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
         }
         hud.updateWebviewHud(spot)
       end
@@ -2371,8 +2367,7 @@ local function handleKeyUp(code, externalNoteKey)
       local trk = state.tracks and state.tracks[activeTrkId]
       if trk then
         if trk.classicWasActiveOnPress then
-          trk.sustainMode = "off"
-          cleanupSustainPitches(activeTrkId)
+          trk.sustainMode = "smart"
         else
           trk.sustainMode = "classic"
           for c, kInfo in pairs(state.pressedKeys) do
@@ -2390,13 +2385,14 @@ local function handleKeyUp(code, externalNoteKey)
           end
         end
         state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
         local isClassic = (trk.sustainMode == "classic")
         local spot = {
           title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isClassic and "CLASSIC ON" or "OFF",
-          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Damping enabled",
+          value = isClassic and "CLASSIC ON" or "SMART ON",
+          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Smart sustain active",
           targetId = "key-48",
-          color = isClassic and "#ff9100" or "#b5aba0"
+          color = trk.color or "#00e5ff"
         }
         hud.updateWebviewHud(spot)
       end
@@ -2410,13 +2406,14 @@ local function handleKeyUp(code, externalNoteKey)
           trk.chordModeActive = true
         end
         state.chordModeActive = (trk.chordModeActive == true)
+        config.saveSettings()
         local chordName = state.CHORDS[trk.chordIdx or state.chordIdx or 1].name
         local spot = {
           title = "CHORD MODE (TRK " .. activeTrkId .. ")",
           value = trk.chordModeActive and ("ON (" .. chordName .. ")") or "OFF",
           subtext = trk.chordModeActive and ("Chords active on Track " .. activeTrkId .. " (" .. ((trk and trk.name) or "") .. ")") or ("Single notes on Track " .. activeTrkId),
           targetId = "key-39",
-          color = trk.chordModeActive and "#ffd700" or "#b5aba0"
+          color = trk.chordModeActive and (trk.color or "#00e5ff") or "#b5aba0"
         }
         hud.updateWebviewHud(spot)
       end

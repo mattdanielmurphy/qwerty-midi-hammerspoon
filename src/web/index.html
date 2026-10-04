@@ -1126,45 +1126,46 @@
   #key-48.ctrl-sus,
   .key-pad.ctrl-sus,
   .key-pad.ctrl-sustain {
-    background: #141417 !important;
-    border-color: rgba(212, 163, 89, 0.22) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.08) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
     box-shadow: none !important;
   }
   #key-48:not(.latch-active):not(.latch-mode-active) .key-note,
   #key-48.ctrl-sus .key-note,
   .key-pad.ctrl-sus .key-note,
   .key-pad.ctrl-sustain .key-note {
-    color: #8a7a58 !important;
-    font-weight: 500 !important;
-    text-shadow: none !important;
+    color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    font-weight: 600 !important;
+    opacity: 0.85;
+    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
   #key-48:not(.latch-active):not(.latch-mode-active) .key-code,
   #key-48.ctrl-sus .key-code,
   .key-pad.ctrl-sus .key-code,
   .key-pad.ctrl-sustain .key-code {
-    color: #63636e !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7) !important;
   }
 
-  #key-48.latch-active {
-    background: rgba(255, 215, 0, 0.22) !important;
-    border-color: #ffd700 !important;
-    box-shadow: 0 0 10px rgba(255, 215, 0, 0.5), inset 0 0 6px rgba(255, 215, 0, 0.2) !important;
+  #key-48.latch-active,
+  #key-48.latch-mode-active,
+  #key-48.sustain-active {
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.32) !important;
+    border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    box-shadow: 0 0 14px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7), inset 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
-  #key-48.latch-active .key-note {
-    color: #ffd700 !important;
+  #key-48.latch-active .key-note,
+  #key-48.latch-mode-active .key-note,
+  #key-48.sustain-active .key-note {
+    color: #ffffff !important;
     font-weight: 700 !important;
-    text-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+    text-shadow: 0 0 10px var(--assigned-track-color, var(--active-track-color, #00e5ff)), 0 0 18px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
-
-  #key-48.latch-mode-active {
-    background: rgba(255, 145, 0, 0.22) !important;
-    border-color: #ff9100 !important;
-    box-shadow: 0 0 12px rgba(255, 145, 0, 0.55), inset 0 0 6px rgba(255, 145, 0, 0.25) !important;
-  }
-  #key-48.latch-mode-active .key-note {
-    color: #ff9100 !important;
-    font-weight: 700 !important;
-    text-shadow: 0 0 6px rgba(255, 145, 0, 0.6);
+  #key-48.latch-active .key-code,
+  #key-48.latch-mode-active .key-code,
+  #key-48.sustain-active .key-code {
+    color: #ffffff !important;
+    opacity: 0.95;
+    text-shadow: 0 0 6px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Track Status Mode Tags: SUS and CHD */
@@ -1192,14 +1193,14 @@
   }
   .trk-tag-sus.active {
     display: inline-block;
-    background: rgba(255, 215, 0, 0.25);
-    color: #ffd700;
-    border: 1px solid rgba(255, 215, 0, 0.5);
+    background: rgba(var(--trk-rgb, 0, 229, 255), 0.25);
+    color: var(--trk-color, #00e5ff);
+    border: 1px solid rgba(var(--trk-rgb, 0, 229, 255), 0.5);
   }
   .trk-tag-sus.classic.active {
-    background: rgba(255, 145, 0, 0.25);
-    color: #ff9100;
-    border: 1px solid rgba(255, 145, 0, 0.5);
+    background: rgba(var(--trk-rgb, 0, 229, 255), 0.35);
+    color: #ffffff;
+    border: 1px solid var(--trk-color, #00e5ff);
   }
   .trk-tag-chd.active {
     display: inline-block;
@@ -2696,31 +2697,39 @@
 
   /* Per-Track Control Keys: ALWAYS use assigned track's color */
   .key-pad.per-track-ctrl {
-    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
-    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.1) !important;
+    border-color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.65) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.16) !important;
   }
   .key-pad.per-track-ctrl .key-note {
     color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
-    font-weight: 700;
-    text-shadow: 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.5);
+    font-weight: 700 !important;
+    text-shadow: 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6) !important;
   }
   .key-pad.per-track-ctrl .key-code {
-    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.85) !important;
+    color: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.9) !important;
   }
   .key-pad.per-track-ctrl.latch-active,
   .key-pad.per-track-ctrl.latch-mode-active,
   .key-pad.per-track-ctrl.sustain-active,
   .key-pad.per-track-ctrl.active-toggle {
-    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.28) !important;
+    background: rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
     border-color: var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
-    box-shadow: 0 0 12px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.6), inset 0 0 6px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.35) !important;
+    box-shadow: 0 0 14px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.7), inset 0 0 8px rgba(var(--assigned-track-rgb, var(--active-track-rgb, 0, 229, 255)), 0.4) !important;
   }
   .key-pad.per-track-ctrl.latch-active .key-note,
   .key-pad.per-track-ctrl.latch-mode-active .key-note,
   .key-pad.per-track-ctrl.sustain-active .key-note,
   .key-pad.per-track-ctrl.active-toggle .key-note {
     color: #ffffff !important;
-    text-shadow: 0 0 8px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+    text-shadow: 0 0 10px var(--assigned-track-color, var(--active-track-color, #00e5ff)), 0 0 18px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
+  }
+  .key-pad.per-track-ctrl.latch-active .key-code,
+  .key-pad.per-track-ctrl.latch-mode-active .key-code,
+  .key-pad.per-track-ctrl.sustain-active .key-code,
+  .key-pad.per-track-ctrl.active-toggle .key-code {
+    color: #ffffff !important;
+    opacity: 0.95;
+    text-shadow: 0 0 6px var(--assigned-track-color, var(--active-track-color, #00e5ff)) !important;
   }
 
   /* Header Controls Bound to Active Track */

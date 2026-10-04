@@ -131,7 +131,7 @@ local state = {
       attack = getSetting("track1Attack", 0),
       decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -143,7 +143,7 @@ local state = {
       attack = getSetting("track2Attack", 0),
       decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -155,7 +155,7 @@ local state = {
       attack = getSetting("track3Attack", 0),
       decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -167,15 +167,15 @@ local state = {
       attack = getSetting("track4Attack", 0),
       decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = "off", sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
     },
   },
-  bottomRowTrack = 1,
-  topRowTrack = 3,
-  activeTrack = 1,
+  bottomRowTrack = getSetting("bottomRowTrack", (getSetting("activeTrack", 1) <= 2 and getSetting("activeTrack", 1) or 1)),
+  topRowTrack = getSetting("topRowTrack", (getSetting("activeTrack", 1) > 2 and getSetting("activeTrack", 1) or 3)),
+  activeTrack = getSetting("activeTrack", 1),
 
   ccStates = {
     [1] = 0,
@@ -225,6 +225,7 @@ local function saveSettings()
         hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
         hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
         hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
+        hs.settings.set("qwertyMidi_track" .. i .. "SustainMode", trk.sustainMode or "smart")
       end
     end
     local botTrk = state.tracks[state.bottomRowTrack or 1]
@@ -239,6 +240,9 @@ local function saveSettings()
     end
   end
 
+  hs.settings.set("qwertyMidi_activeTrack", state.activeTrack or 1)
+  hs.settings.set("qwertyMidi_bottomRowTrack", state.bottomRowTrack or 1)
+  hs.settings.set("qwertyMidi_topRowTrack", state.topRowTrack or 3)
   hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
   hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
   hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
