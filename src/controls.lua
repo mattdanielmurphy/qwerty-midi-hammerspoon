@@ -1059,18 +1059,34 @@ local function executeControlAction(act, code)
   elseif act == "sustain" then
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
-    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    local now = hs.timer.secondsSinceEpoch()
+    state.sustainKeyDownTime = now
     state.tabDamping = true
     if trk then
       trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
-      if trk.sustainMode == "off" then
+      -- A short second Tab press is the explicit, visible sustain-off gesture.
+      -- The first tap retains its useful damping behavior.
+      if trk.lastSmartSustainTapAt and (now - trk.lastSmartSustainTapAt) <= 0.35 then
+        trk.sustainMode = "off"
+        trk.lastSmartSustainTapAt = nil
+        state.sustainActive = false
+        cleanupSustainPitches(activeTrkId)
+        config.saveSettings()
+        hud.updateWebviewHud({
+          title = "SUSTAIN OFF (TRK " .. activeTrkId .. ")",
+          value = "OFF",
+          subtext = "Double-tap Tab toggles Smart Sustain off",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = "#b5aba0"
+        })
+      elseif trk.sustainMode == "off" then
         trk.sustainMode = "smart"
         state.sustainActive = true
         config.saveSettings()
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
           value = "SMART ON",
-          subtext = "Smart sustain enabled (Tap Tab to damp)",
+          subtext = "Tap Tab to damp · double-tap Tab to turn off",
           targetId = code and ("key-" .. code) or "key-48",
           color = trk.color or "#00e5ff"
         }
@@ -1082,7 +1098,7 @@ local function executeControlAction(act, code)
         local spot = {
           title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
           value = "CUT OFF",
-          subtext = hadNotes and "Silenced ringing notes; Smart Sustain ready" or "Silence; Smart Sustain active",
+          subtext = hadNotes and "Silenced ringing notes; double-tap Tab to turn off" or "Silence; Smart Sustain active (2× Tab = off)",
           targetId = code and ("key-" .. code) or "key-48",
           color = trk.color or "#00e5ff"
         }
@@ -2348,6 +2364,13 @@ local function handleKeyUp(code, externalNoteKey)
             cleanupSustainPitches(activeTrkId)
           end
         end
+        -- Record only short base-layer taps. Holds remain momentary damping,
+        -- and Option+Tab keeps its separately displayed behavior.
+        if not state.altHeld and holdDuration <= 0.25 and trk.sustainMode ~= "off" then
+          trk.lastSmartSustainTapAt = hs.timer.secondsSinceEpoch()
+        elseif holdDuration > 0.25 then
+          trk.lastSmartSustainTapAt = nil
+        end
         state.sustainActive = (trk.sustainMode ~= "off")
         config.saveSettings()
         local isSmart = (trk.sustainMode == "smart")
@@ -2356,7 +2379,7 @@ local function handleKeyUp(code, externalNoteKey)
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
           value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
-          subtext = isSmart and "Smart sustain active (Tap Tab to damp)" or "Damping enabled",
+          subtext = isSmart and "Tap Tab to damp · double-tap Tab to turn off" or (isClassic and "Classic sustain active" or "Sustain disabled"),
           targetId = "key-48",
           color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
         }

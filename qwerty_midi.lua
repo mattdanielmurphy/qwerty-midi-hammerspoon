@@ -272,15 +272,11 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
 
       local flags = event:getFlags()
 
-      -- Handle Cmd-, for QWERTY MIDI settings while MIDI controller is enabled
-      if flags.cmd and not flags.alt and not flags.ctrl then
-        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-        if code == 43 then -- keycode 43 is ','
-          if event:getType() == hs.eventtap.event.types.keyDown then
-            settings_ui.toggleSettingsWindow()
-          end
-          return true
-        end
+      -- Controller shortcuts must be represented by a visible key in the HUD.
+      -- Leave Command shortcuts to macOS and Control+Tab to app navigation.
+      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+      if (flags.cmd or flags.ctrl) and code == 48 then
+        return false
       end
 
       if state.bpmInputMode then
@@ -384,16 +380,14 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   end
 end)
 
-_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
-  _G.toggleMidiMode()
-end)
-
-_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt", "ctrl", "shift" }, "R", function()
-  _G.dumpMidiLogs()
-  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
-  hs.timer.doAfter(0.1, function() hs.reload() end)
-end)
+-- Reloads keep this global watcher table alive, so delete retired invisible
+-- hotkeys from older bundles as well as avoiding new registrations.
+for _, retiredHotkey in ipairs({ "midiToggleHotkey", "midiRefreshHotkey" }) do
+  if _G.activeWatchers[retiredHotkey] then
+    _G.activeWatchers[retiredHotkey]:delete()
+    _G.activeWatchers[retiredHotkey] = nil
+  end
+end
 
 if _G.activeWatchers.settingsHotkey then
   _G.activeWatchers.settingsHotkey:delete()
@@ -4879,14 +4873,15 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Smart Sus",   class = "ctrl-sus",          action = "sustain" },
+    base            = { name = "Smart Sus · 2× Off", class = "ctrl-sus",    action = "sustain" },
     shift           = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     opt             = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     shift_opt       = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
-    ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",        action = "resetAll" },
+    -- Control+Tab belongs to macOS/app navigation. It is never a controller command.
+    ctrl            = { name = "Pass Through", class = "",                  action = "none" },
+    shift_ctrl      = { name = "Pass Through", class = "",                  action = "none" },
+    ctrl_opt        = { name = "Pass Through", class = "",                  action = "none" },
+    ctrl_opt_shift  = { name = "Pass Through", class = "",                  action = "none" },
   },
   [0] = { -- A
     base            = { name = "Arp",         class = "ctrl-arp",     action = "arpToggle" },
@@ -5575,9 +5570,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         end
       elseif propCode == 48 then -- Key 48 (Tab: Sustain)
         local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
-        if sMode == "smart" then
-          keyUpdates[strCode].displayNote = "Smart Sus"
-          keyUpdates[strCode].note = "Smart Sus"
+        if activeLayer == "ctrl" or activeLayer == "shift_ctrl" or activeLayer == "ctrl_opt" or activeLayer == "ctrl_opt_shift" then
+          keyUpdates[strCode].displayNote = "Pass Through"
+          keyUpdates[strCode].note = "Pass Through"
+          keyUpdates[strCode].typeClass = ""
+          keyUpdates[strCode].sustainActive = false
+        elseif sMode == "smart" then
+          keyUpdates[strCode].displayNote = "Smart Sus · 2× Off"
+          keyUpdates[strCode].note = "Smart Sus · 2× Off"
           keyUpdates[strCode].typeClass = "latch-active"
           keyUpdates[strCode].sustainActive = true
         elseif sMode == "classic" then
@@ -5587,7 +5587,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           keyUpdates[strCode].sustainActive = true
         else
           local isShiftOrOpt = (activeLayer == "shift" or activeLayer == "opt" or activeLayer == "shift_opt")
-          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus"
+          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus · 2× Off"
           keyUpdates[strCode].note = keyUpdates[strCode].displayNote
           keyUpdates[strCode].typeClass = "ctrl-sus"
           keyUpdates[strCode].sustainActive = false
@@ -9868,7 +9868,7 @@ local HTML_UI_CONTENT = [[
   }
   const LAYOUT_DATA = {
     number: [
-      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
+      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp Mode + A" },
       { code: 18, keyLabel: "1", isControl: true, noteLabel: "Trk 1: Bass", extraClass: "ctrl-track" },
       { code: 19, keyLabel: "2", isControl: true, noteLabel: "Trk 2: Chords", extraClass: "ctrl-track" },
       { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trk 3: Lead", extraClass: "ctrl-track" },
@@ -10515,7 +10515,7 @@ local HTML_UI_CONTENT = [[
     {
       category: "Volume & CC",
       actions: [
-        { id: "sustain", name: "Sustain", typeClass: "latch-active", description: "Sustain pedal CC64 toggle/hold" },
+        { id: "sustain", name: "Smart Sustain", typeClass: "ctrl-sus", description: "Tap to damp; double-tap Tab to turn sustain off" },
         { id: "volUp", name: "Vol +", typeClass: "ctrl-vol", description: "Increase bottom row velocity" },
         { id: "volDown", name: "Vol -", typeClass: "ctrl-vol", description: "Decrease bottom row velocity" },
         { id: "topVolUp", name: "Top Vol +", typeClass: "ctrl-vol", description: "Increase top row velocity" },
@@ -14629,8 +14629,8 @@ local defaultLowerRowKeys = {
 }
 
 local defaultHomeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "classicSustain", shiftName = "Classic Sus" },
-  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
+  [48] = { key = "Tab", name = "Smart Sus · 2× Off", action = "sustain", shiftAction = "classicSustain", shiftName = "Classic Sus" },
+  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "arpLatchToggle", shiftName = "Latch" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topVolUp",   shiftName = "TopVol +" },
@@ -14683,7 +14683,7 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "sustain", name = "Smart Sustain", typeClass = "ctrl-sus", description = "Tap to damp; double-tap Tab to turn sustain off" },
       { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
@@ -16363,18 +16363,34 @@ local function executeControlAction(act, code)
   elseif act == "sustain" then
     local activeTrkId = state.activeTrack or 1
     local trk = state.tracks and state.tracks[activeTrkId]
-    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    local now = hs.timer.secondsSinceEpoch()
+    state.sustainKeyDownTime = now
     state.tabDamping = true
     if trk then
       trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
-      if trk.sustainMode == "off" then
+      -- A short second Tab press is the explicit, visible sustain-off gesture.
+      -- The first tap retains its useful damping behavior.
+      if trk.lastSmartSustainTapAt and (now - trk.lastSmartSustainTapAt) <= 0.35 then
+        trk.sustainMode = "off"
+        trk.lastSmartSustainTapAt = nil
+        state.sustainActive = false
+        cleanupSustainPitches(activeTrkId)
+        config.saveSettings()
+        hud.updateWebviewHud({
+          title = "SUSTAIN OFF (TRK " .. activeTrkId .. ")",
+          value = "OFF",
+          subtext = "Double-tap Tab toggles Smart Sustain off",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = "#b5aba0"
+        })
+      elseif trk.sustainMode == "off" then
         trk.sustainMode = "smart"
         state.sustainActive = true
         config.saveSettings()
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
           value = "SMART ON",
-          subtext = "Smart sustain enabled (Tap Tab to damp)",
+          subtext = "Tap Tab to damp · double-tap Tab to turn off",
           targetId = code and ("key-" .. code) or "key-48",
           color = trk.color or "#00e5ff"
         }
@@ -16386,7 +16402,7 @@ local function executeControlAction(act, code)
         local spot = {
           title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
           value = "CUT OFF",
-          subtext = hadNotes and "Silenced ringing notes; Smart Sustain ready" or "Silence; Smart Sustain active",
+          subtext = hadNotes and "Silenced ringing notes; double-tap Tab to turn off" or "Silence; Smart Sustain active (2× Tab = off)",
           targetId = code and ("key-" .. code) or "key-48",
           color = trk.color or "#00e5ff"
         }
@@ -17652,6 +17668,13 @@ local function handleKeyUp(code, externalNoteKey)
             cleanupSustainPitches(activeTrkId)
           end
         end
+        -- Record only short base-layer taps. Holds remain momentary damping,
+        -- and Option+Tab keeps its separately displayed behavior.
+        if not state.altHeld and holdDuration <= 0.25 and trk.sustainMode ~= "off" then
+          trk.lastSmartSustainTapAt = hs.timer.secondsSinceEpoch()
+        elseif holdDuration > 0.25 then
+          trk.lastSmartSustainTapAt = nil
+        end
         state.sustainActive = (trk.sustainMode ~= "off")
         config.saveSettings()
         local isSmart = (trk.sustainMode == "smart")
@@ -17660,7 +17683,7 @@ local function handleKeyUp(code, externalNoteKey)
         local spot = {
           title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
           value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
-          subtext = isSmart and "Smart sustain active (Tap Tab to damp)" or "Damping enabled",
+          subtext = isSmart and "Tap Tab to damp · double-tap Tab to turn off" or (isClassic and "Classic sustain active" or "Sustain disabled"),
           targetId = "key-48",
           color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
         }

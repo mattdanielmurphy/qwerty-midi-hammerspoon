@@ -3293,7 +3293,7 @@ local HTML_UI_CONTENT = [[
   }
   const LAYOUT_DATA = {
     number: [
-      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp" },
+      { code: 50, keyLabel: "`", isControl: true, noteLabel: "Arp Mode + A" },
       { code: 18, keyLabel: "1", isControl: true, noteLabel: "Trk 1: Bass", extraClass: "ctrl-track" },
       { code: 19, keyLabel: "2", isControl: true, noteLabel: "Trk 2: Chords", extraClass: "ctrl-track" },
       { code: 20, keyLabel: "3", isControl: true, noteLabel: "Trk 3: Lead", extraClass: "ctrl-track" },
@@ -3940,7 +3940,7 @@ local HTML_UI_CONTENT = [[
     {
       category: "Volume & CC",
       actions: [
-        { id: "sustain", name: "Sustain", typeClass: "latch-active", description: "Sustain pedal CC64 toggle/hold" },
+        { id: "sustain", name: "Smart Sustain", typeClass: "ctrl-sus", description: "Tap to damp; double-tap Tab to turn sustain off" },
         { id: "volUp", name: "Vol +", typeClass: "ctrl-vol", description: "Increase bottom row velocity" },
         { id: "volDown", name: "Vol -", typeClass: "ctrl-vol", description: "Decrease bottom row velocity" },
         { id: "topVolUp", name: "Top Vol +", typeClass: "ctrl-vol", description: "Increase top row velocity" },

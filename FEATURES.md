@@ -7,7 +7,7 @@
 - **Dropdown Root Selection**: Clickable `<select>` badge in HUD header to select root note (C through B) directly from a styled dropdown.
 - **Draggable Mode Slider**: Interactive scale mode slider in HUD header allowing direct drag and click selection across all 9 modes/scales.
 - **Dedicated Sustain & Arp Latch Keys**:
-  - **Sustain (`Tab`)**: Dedicated control for MIDI CC #64. Features dual action: **Tap** to toggle sustain ON/OFF, or **Hold** (>0.25s) for momentary pedal sustain. Shown on the upper row of the visual keyboard grid.
+  - **Smart Sustain (`Tab`)**: The key itself displays `Smart Sus · 2× Off`. A tap damps ringing notes; a quick double-tap explicitly turns sustain off; holding it remains momentary damping. The modifier layers for `Ctrl+Tab` are visibly marked `Pass Through` and are never controller reset/panic commands.
   - **Arp Latch (`A`)**: Dedicated control for Arpeggiator pattern latching. Features dual action: **Tap** to toggle latch ON/OFF, or **Hold** (>0.25s) for momentary pattern latching.
 - **Built-in Arpeggiator**: Integrated arpeggiator engine with separate ON/OFF toggle, dropdown direction selector (UP, DOWN, UP-DOWN, RANDOM), time division rate dropdown (1/4 to 1/16T), note length gate duration dropdown (25% to 100%), selectable BPM speeds (freeform text input, arrow adjustments), per-row ARP filters, and real-time visual key highlights on active arpeggiated notes.
 - **Jitter-Free Key Rendering**: Fixed-size key pads with non-shifting inset shadow press states to eliminate DOM layout shifts during fast playing.

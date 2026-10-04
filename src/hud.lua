@@ -188,14 +188,15 @@ end
 local PROPOSED_LAYOUT_MAP = {
   -- HOME ROW CONTROLS:
   [48] = { -- Tab
-    base            = { name = "Smart Sus",   class = "ctrl-sus",          action = "sustain" },
+    base            = { name = "Smart Sus · 2× Off", class = "ctrl-sus",    action = "sustain" },
     shift           = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     opt             = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
     shift_opt       = { name = "Classic Sus", class = "ctrl-sus",          action = "classicSustain" },
-    ctrl            = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    shift_ctrl      = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    ctrl_opt        = { name = "Panic!",      class = "ctrl-panic",        action = "panic" },
-    ctrl_opt_shift  = { name = "Hard Reset",  class = "ctrl-panic",        action = "resetAll" },
+    -- Control+Tab belongs to macOS/app navigation. It is never a controller command.
+    ctrl            = { name = "Pass Through", class = "",                  action = "none" },
+    shift_ctrl      = { name = "Pass Through", class = "",                  action = "none" },
+    ctrl_opt        = { name = "Pass Through", class = "",                  action = "none" },
+    ctrl_opt_shift  = { name = "Pass Through", class = "",                  action = "none" },
   },
   [0] = { -- A
     base            = { name = "Arp",         class = "ctrl-arp",     action = "arpToggle" },
@@ -884,9 +885,14 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         end
       elseif propCode == 48 then -- Key 48 (Tab: Sustain)
         local sMode = trk and trk.sustainMode or (state.sustainActive and "smart" or "off")
-        if sMode == "smart" then
-          keyUpdates[strCode].displayNote = "Smart Sus"
-          keyUpdates[strCode].note = "Smart Sus"
+        if activeLayer == "ctrl" or activeLayer == "shift_ctrl" or activeLayer == "ctrl_opt" or activeLayer == "ctrl_opt_shift" then
+          keyUpdates[strCode].displayNote = "Pass Through"
+          keyUpdates[strCode].note = "Pass Through"
+          keyUpdates[strCode].typeClass = ""
+          keyUpdates[strCode].sustainActive = false
+        elseif sMode == "smart" then
+          keyUpdates[strCode].displayNote = "Smart Sus · 2× Off"
+          keyUpdates[strCode].note = "Smart Sus · 2× Off"
           keyUpdates[strCode].typeClass = "latch-active"
           keyUpdates[strCode].sustainActive = true
         elseif sMode == "classic" then
@@ -896,7 +902,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           keyUpdates[strCode].sustainActive = true
         else
           local isShiftOrOpt = (activeLayer == "shift" or activeLayer == "opt" or activeLayer == "shift_opt")
-          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus"
+          keyUpdates[strCode].displayNote = isShiftOrOpt and "Classic Sus" or "Smart Sus · 2× Off"
           keyUpdates[strCode].note = keyUpdates[strCode].displayNote
           keyUpdates[strCode].typeClass = "ctrl-sus"
           keyUpdates[strCode].sustainActive = false

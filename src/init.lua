@@ -255,15 +255,11 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
 
       local flags = event:getFlags()
 
-      -- Handle Cmd-, for QWERTY MIDI settings while MIDI controller is enabled
-      if flags.cmd and not flags.alt and not flags.ctrl then
-        local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
-        if code == 43 then -- keycode 43 is ','
-          if event:getType() == hs.eventtap.event.types.keyDown then
-            settings_ui.toggleSettingsWindow()
-          end
-          return true
-        end
+      -- Controller shortcuts must be represented by a visible key in the HUD.
+      -- Leave Command shortcuts to macOS and Control+Tab to app navigation.
+      local code = event:getProperty(hs.eventtap.event.properties.keyboardEventKeycode)
+      if (flags.cmd or flags.ctrl) and code == 48 then
+        return false
       end
 
       if state.bpmInputMode then
@@ -367,16 +363,14 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
   end
 end)
 
-_G.activeWatchers.midiToggleHotkey = hs.hotkey.bind({ "cmd", "shift" }, "M", function()
-  _G.toggleMidiMode()
-end)
-
-_G.activeWatchers.midiRefreshHotkey = hs.hotkey.bind({ "cmd", "alt", "ctrl", "shift" }, "R", function()
-  _G.dumpMidiLogs()
-  hs.alert.show("⚡ Hard Reloading Hammerspoon...", 1.5)
-  hs.notify.new({ title = "QWERTY MIDI", informativeText = "Logs copied to clipboard. Hard reloading..." }):send()
-  hs.timer.doAfter(0.1, function() hs.reload() end)
-end)
+-- Reloads keep this global watcher table alive, so delete retired invisible
+-- hotkeys from older bundles as well as avoiding new registrations.
+for _, retiredHotkey in ipairs({ "midiToggleHotkey", "midiRefreshHotkey" }) do
+  if _G.activeWatchers[retiredHotkey] then
+    _G.activeWatchers[retiredHotkey]:delete()
+    _G.activeWatchers[retiredHotkey] = nil
+  end
+end
 
 if _G.activeWatchers.settingsHotkey then
   _G.activeWatchers.settingsHotkey:delete()

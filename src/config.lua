@@ -331,8 +331,8 @@ local defaultLowerRowKeys = {
 }
 
 local defaultHomeRowControls = {
-  [48] = { key = "Tab", name = "Sustain", action = "sustain",     shiftAction = "classicSustain", shiftName = "Classic Sus" },
-  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "resetAll",   shiftName = "Reset" },
+  [48] = { key = "Tab", name = "Smart Sus · 2× Off", action = "sustain", shiftAction = "classicSustain", shiftName = "Classic Sus" },
+  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "arpLatchToggle", shiftName = "Latch" },
   [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
   [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
   [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topVolUp",   shiftName = "TopVol +" },
@@ -385,7 +385,7 @@ local ACTION_CATALOG = {
   {
     category = "Volume & CC",
     actions = {
-      { id = "sustain", name = "Smart Sus", typeClass = "ctrl-sus", description = "Smart sustain (auto-reset chord latch)" },
+      { id = "sustain", name = "Smart Sustain", typeClass = "ctrl-sus", description = "Tap to damp; double-tap Tab to turn sustain off" },
       { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
       { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
       { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
