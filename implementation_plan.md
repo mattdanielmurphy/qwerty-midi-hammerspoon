@@ -1,92 +1,204 @@
-# Keyboard Input Incident Plan
+# QWERTY MIDI: Contextual Controls and Chord-Safe Arpeggiation
 
-## Goal
+## Current runtime status
 
-Restore Mac QWERTY input to the Hammerspoon MIDI controller without breaking ordinary typing, shortcuts, text fields, or intentional KeyStep mappings.
+On 2026-10-03, the missing HUD was caused by the Hammerspoon application not
+running, not by a failing Lua load or WebKit render. A clean launch created the
+`MIDI Controller HUD`, reached `domReady`, and returned heartbeat pings. The
+HUD was visually confirmed at 960 x 323 points. There are duplicate watcher
+processes; inspect and consolidate those separately before changing watcher
+behavior, so a healthy automatic reloader is not accidentally removed.
 
-## Diagnose before changing code
+The UI recovery contract for the work below is:
 
-Capture one observation at each boundary, in order:
+- a close action hides the MIDI HUD only; it must not panic, stop a latched
+  arpeggio, unload MIDI, or close settings;
+- an unexpected WebKit closure still uses the existing guarded respawn path;
+- every new transient gesture is cancelled on HUD close, focus loss, mode exit,
+  panic, and reload.
 
-1. Confirm whether ordinary typing fails globally or only QWERTY-MIDI input fails. If global typing fails, prioritize macOS keyboard or Secure Input investigation.
-2. Preserve Hammerspoon Console startup errors and callback traces before rebuilding or reloading.
-3. In the Hammerspoon Console, inspect:
+## Goals
 
-   ```lua
-   local w = _G.activeWatchers
-   return {
-     watchersPresent = w ~= nil,
-     midiActive = w and w.state and w.state.midiActive,
-     textInputActive = w and w.state and w.state.textInputActive,
-     keyTapPresent = w and w.midiKeyTap ~= nil,
-     keyTapEnabled = w and w.midiKeyTap and w.midiKeyTap:isEnabled(),
-     secureInputEnabled = hs.eventtap.isSecureInputEnabled()
-   }
-   ```
+1. Restore `Cmd-Shift-M` as the keyboard shortcut to close the MIDI HUD and
+   add an owned right-click **Close** item to that HUD.
+2. Add selected-track volume down/up controls plus per-track delay and reverb
+   controller values.
+3. Make a small, visible Cmd/Cmd-Shift macro layer without taking standard
+   macOS shortcuts that need to pass through.
+4. When an arpeggiated source was entered in chord mode, changing *that
+   track's* selected chord reshapes the running pattern on the next step.
+5. Replace chord-type cycling with a hold-to-choose chord palette, and build
+   the palette as a reusable tap/double-tap/hold mechanism.
 
-4. Verify the installed artifact: resolve `~/.hammerspoon/init.lua` and its QWERTY-MIDI module target, compare it with this checkout, and run `luac -p` on the loaded bundle.
-5. Check Hammerspoon in macOS **Privacy & Security** under both **Input Monitoring** and **Accessibility**. Do not reset TCC permissions blindly. If Secure Input is active, identify and close the app or password field holding it, then restart Hammerspoon and retest.
-6. Test with a normal DAW window focused—not a HUD text field, Inspector, or DevTools. Record whether `textInputActive` is stale.
-7. Test one known control and one known note, observing separately: tap reception, HUD/control-state response, binding dispatch, and MIDI output. Do not use `Z` alone when a KeyStep is connected; that row is intentionally remapped to controls.
+## Findings that drive the design
 
-## Decision tree
+- `src/init.lua` currently passes every Cmd event through to macOS. It needs a
+  narrow, allowlisted exception rather than a general Cmd capture layer.
+- The HUD is the `MIDI Controller HUD` webview created in `src/hud.lua`; its
+  `windowCallback` currently treats every close as unexpected and respawns it.
+  An intentional-hide path must be represented explicitly.
+- Tracks already own `volume`, `chordModeActive`, `chordIdx`, arp state, and a
+  MIDI channel. Existing volume values are CC-style 0..127 values despite the
+  percent HUD display.
+- The KeyStep surface already uses CC 91 for reverb and CC 92 for delay. Use
+  those controller assignments consistently for QWERTY; label them as
+  controller/send values because a Logic instrument or plug-in must map them
+  to audible effects.
+- `controls.lua` calls `arpeggiator.updateLatchedArpChordNotes()` after chord
+  changes. Its current implementation iterates all tracks and derives intent
+  from held pitches, so it cannot preserve the crucial fact that a source was
+  originally entered in chord mode.
 
-| First failed gate | Repair branch |
-| --- | --- |
-| Module does not load or bundle differs | Repair only the install/symlink/bundle provenance; regenerate from source, parse the generated Lua, then reload. |
-| Tap missing or disabled while `midiActive=true` | Diagnose permissions, Secure Input, mode startup, and saved `qwertyMidi_wasOpen` state before modifying mappings. |
-| Tap enabled but `textInputActive=true` without a field | Repair the HUD focus lifecycle on blur, close, and webview recreation. |
-| Event is admitted but unbound or handler errors | Repair the smallest dispatch/configuration defect and expose a bounded diagnostic. |
-| HUD reacts but no sound | Investigate MIDI endpoint, channel/track route, mute/solo state, and DAW input—not macOS capture. |
+## Binding contract to audit before implementation
 
-## Proposed implementation (only after diagnosis)
+Candidate bindings are intentionally limited to active MIDI mode. The source
+audit must confirm each is not already claimed by an allowed foreground-app
+command; if it is, choose another Cmd-layer key and document the replacement.
 
-1. In `src/init.lua`, change only the failed load/tap/admission gate. Add a read-only keyboard status snapshot and bounded last-error reporting. Unrecognized keys, text-entry contexts, exempt windows, and callback failures must fail open to macOS.
-2. In `src/hud.lua`, make `textInputFocus` symmetric: clear it on blur, close, and webview recreation. Ensure HUD labels are based on the same resolved binding as dispatcher behavior.
-3. In `src/config.lua`, correct the independently identified cache flaw: note and control maps share `_cachedKsConnected`, so one getter can make the other stale after KeyStep connect/disconnect. Use independent generations or invalidate both maps atomically.
-4. Add focused tests for admission/pass-through, stale text focus, key-down/up pairing through focus or connection changes, each KeyStep transition with either getter order, lower-row connected/disconnected behavior, and HUD/dispatch binding parity.
-5. Touch bundling/install scripts only if the installed-artifact check proves a provenance defect. Do not edit generated `qwerty_midi.lua` as the source of truth.
+| Binding | Action | Scope |
+| --- | --- | --- |
+| Cmd-Shift-M | Close MIDI HUD | HUD only |
+| Cmd-9 / Cmd-0 | Volume - / + | selected track |
+| Cmd-7 / Cmd-8 | Delay - / + (CC 92) | selected track |
+| Cmd-Shift-7 / Cmd-Shift-8 | Reverb - / + (CC 91) | selected track |
+| Cmd-Shift-9 | Restore selected-track volume default | selected track |
+| Cmd-Shift-0 | Set delay and reverb to zero | selected track |
 
-## Acceptance checks
+Do not capture Cmd-Q, Cmd-W, Cmd-H, Cmd-Tab, Cmd-comma, Cmd-Space, or ordinary
+editing shortcuts. Base and Shift layers keep their existing musical bindings.
+Every captured shortcut must appear in the HUD’s shortcut/help presentation.
 
-1. Ordinary typing and macOS shortcuts remain usable.
-2. The intended and newly generated bundles both pass `luac -p`.
-3. Existing Bun tests plus focused keyboard-path tests pass.
-4. After bundle and reload: `midiActive=true`, tap present and enabled, and Secure Input disabled during testing.
-5. With a normal DAW window focused, verify a control and note-on/note-off; separately verify MIDI output.
-6. Verify text-field and Inspector/DevTools pass-through, both KeyStep connection transitions, and no stuck notes after a focus change.
+## Data and API design
 
-## Safety invariants
+### Track parameters
 
-- A handled key-down must retain enough information to release the same note on key-up even if focus, modifiers, mode, or connection changes.
+Extend each track with persisted `delaySend` and `reverbSend` values in the
+same 0..127 domain as `volume`. Add one authoritative selected-track parameter
+path, shared by keys, HUD actions, and future hardware:
 
----
+```text
+setTrackParameter(trackId, parameter, value) -> clampedValue
+adjustTrackParameter(trackId, parameter, delta) -> clampedValue
+```
 
-# QWERTY MIDI Controller Fixes
+The path validates the track and parameter, persists the value, sends CC 7, 91,
+or 92 on that track’s channel, and refreshes the HUD. A mute must retain a
+requested volume without sending an audible CC 7 value until the track becomes
+audible again.
 
-## Architecture
+### Chord provenance
 
-- Keep selected track and active function state authoritative. MIDI routing and HUD labels, values, and colors derive from that state.
-- Keep controller state and assignment resolution in `src/controls.lua` and `src/config.lua`, MIDI delivery in `src/midi.lua`, and presentation in `src/hud.lua` / `src/web/index.html`.
-- Use a two-control ADSR workflow: the A♯/B♭ black key selects Attack, Decay, Sustain, Release in sequence; the Mod strip edits the selected stage. Preserve four independent values. Use configurable CC mappings, defaulting to 24–27.
-- Keep Pitch as 14-bit pitch bend by default and route it to the active function assignment while a black key is held. Keep the dedicated Rate/Vol route; remove the Mod-strip Volume assignment.
+Keep existing derived arp pitch tables, but add source records per track:
 
-## Implementation
+```text
+arpSources[sourceId] = {
+  physicalKeyCode, baseNote, row, origin, chordAtEntry,
+  isPhysicallyHeld, isLatched
+}
+```
 
-1. Trace track focus/row selection, black-key holds and latches, Mod/Pitch IPC, note ownership, and panic callers. Preserve existing uncommitted KeyStep changes.
-2. Add per-track controller values and envelope values; represent simultaneously held function keys independently and restore the next held assignment on release.
-3. On assignment or track changes, refresh the HUD from the newly active control's stored value and selected track color without emitting a MIDI value.
-4. Route Mod CC and Pitch Bend on the focused track's MIDI channel. Recenter Pitch Bend on release.
-5. Coordinate panic: stop arpeggiator/quantizer producers, clear held and sustained note ownership, stop timers, release notes, reset sustain, and send CC 123/120 across channels.
-6. Update the web HUD and bundled outputs from source; record architectural decisions and implementation details in project context and logs.
+`origin` is `single`, `chordMode`, or `momentaryChord`. A chord-mode source is
+recorded before it expands into pitches. `setTrackChord(trackId, chordIdx,
+reason)` becomes the only chord setter: it updates the selected track, updates
+the active-track compatibility mirror, persists where appropriate, asks the
+arpeggiator to rebuild that track’s eligible chord-mode sources atomically, and
+refreshes the HUD. All keyboard, webview, and sync-originated chord changes
+must call it.
 
-## Acceptance
+The rebuild preserves the track’s timer, rate, direction, phase, and unrelated
+single-note sources. It releases currently gated pitches no longer in the new
+pool with the existing generation-safe gate logic, then lets the next arp tick
+play the new shape. A Track 2 change must never alter Track 1’s pool, channel,
+or clock.
 
-- Track-dependent controls use the selected track's color and recalled per-track values.
-- Mod assignment changes show the target's stored value immediately and do not send CC until adjusted.
-- Pitch sends 14-bit bend by default, follows active function assignments, and recenters; ADSR stages are independently editable through stage selection plus Mod strip.
-- Releasing one of multiple held black keys reveals the remaining held function.
-- Panic clears producers and held-note registries as well as MIDI channel state.
-- Hardware MIDI-monitor verification is unavailable unless a connected monitor/device is present; report that limitation explicitly.
-- Do not hide recurring callback errors with a broad `pcall`.
-- On failure, release only notes owned by the keyboard path; preserve intentional latched/background behavior.
+### Reusable contextual gesture
+
+Add one non-persisted gesture state and descriptor table, preferably in a
+small `src/gestures.lua` module wired before ordinary control/note dispatch:
+
+```text
+contextGesture = {
+  selectorId, selectorKeyCode, trackId, pressedAt,
+  phase, holdTimer, tapTimer, choiceActionId, consumedKeyUps
+}
+
+descriptor = {
+  selectorKeyCode, tapAction, doubleTapAction,
+  holdThresholdMs, doubleTapWindowMs, choices, scopeResolver
+}
+```
+
+The chord descriptor maps every entry in `state.CHORDS` to one visibly labeled
+choice key. If chord types outgrow the available choice keys, introduce a
+labeled page rather than silently omitting a type.
+
+On selector down, snapshot the track and start the hold timer. A release before
+the threshold performs the existing tap action once (or waits only when that
+specific descriptor offers a double-tap action). At the threshold, cancel a
+pending tap and reveal choices. A choice’s key-down commits one action; both it
+and its later key-up are consumed, so no note or ordinary control fires. The
+menu remains until selector release; release without a choice cancels it.
+
+The selector’s current chord-cycle action must be deferred until release. A
+hold must never cycle the chord before it opens the palette.
+
+## Presentation and window behavior
+
+- Put `closeKeyboardWindow()` behind both the Cmd shortcut and one allowlisted
+  webview IPC action. It hides the MIDI webview idempotently and marks that
+  hide as intentional so `windowCallback` does not respawn it.
+- Add a custom browser `contextmenu` only on the HUD chassis/background. It
+  offers **Close**, dismisses on Escape/outside click/hide, and leaves native
+  text-input context menus intact.
+- Include `contextMenu` state in the HUD payload: selector, captured track,
+  active choice, and choice labels. The frontend lights available choices and
+  dims non-choices without changing any fixed dimensions or reintroducing
+  layout shift.
+- `Cmd-Shift-M` and the context menu both call the same Lua close action.
+
+## File-by-file implementation order
+
+1. **Inventory and safety tests** — inspect `config.lua`, `controls.lua`,
+   `arpeggiator.lua`, `midi.lua`, `hud.lua`, `sync.lua`, `web/index.html`, and
+   existing tests. Produce the binding-collision table before fixing key names.
+2. **Track parameter core** — update `src/config.lua`, `src/controls.lua`, and
+   `src/midi.lua` with parameter initialization, persistence, selected-track
+   setters, CC 7/91/92 emission, mute-safe recall, and focused tests.
+3. **Chord-safe arp rebuild** — update `src/controls.lua`,
+   `src/arpeggiator.lua`, and `src/sync.lua` to record source provenance,
+   funnel all chord changes through `setTrackChord`, and rebuild only the
+   owning track.
+4. **Gesture router and macros** — add `src/gestures.lua` or a clearly bounded
+   equivalent in `controls.lua`; wire it into `src/init.lua` before normal
+   performance dispatch. Add only the audited Cmd/Cmd-Shift bindings.
+5. **HUD close/context menu/palette** — update `src/hud.lua` and
+   `src/web/index.html`; regenerate `src/ui_html.lua` and `qwerty_midi.lua`
+   only through the bundler.
+6. **Verification and live activation** — run focused tests and full `bun
+   test`, bundle, run `luac -p qwerty_midi.lua src/*.lua`, reload Hammerspoon,
+   then verify the live HUD and one MIDI monitor/Logic route where available.
+
+## Acceptance tests
+
+- A short chord-selector tap retains its current one-tap behavior exactly once.
+  A hold past the threshold changes nothing until a lit choice is pressed.
+- Choice key-down commits exactly one chord; its key-up cannot play a note.
+  Releasing the selector first, key repeat, focus loss, reload, panic, and mode
+  exit leave no pending timers, dimmed overlay, consumed-key record, or stuck
+  note.
+- A physically held or latched chord-mode arp source on Track 1 follows only
+  Track 1’s new chord. Track 2 remains byte-for-byte unchanged in pool,
+  channel, and clock. Single-note sources remain single after chord changes.
+- Volume, delay, and reverb clamp to 0..127, persist independently by track,
+  emit only on that track’s channel, and respect muted-track audibility.
+- Cmd-Shift-M and right-click **Close** hide the same HUD, clean up transient
+  gestures, do not close settings, and preserve intentional latched playback.
+- Existing UI liveness checks still reach DOM-ready and heartbeat after a
+  normal reload. An intentional close does not schedule a webview respawn.
+
+## Definition of done
+
+Attach the binding collision table, persistence migration decision (if any),
+focused and full test output, `luac -p` result, and a short live verification
+record showing: both close paths, selected-track CC output, and a running
+chord-mode arp changing only when its owning track’s chord changes.
