@@ -1,4 +1,5 @@
 ## 2026-10-03
+- **Logic Pro Real Track Name Synchronization & Smart Sustain Audit:** Implemented real-time track name discovery in `src/logic_names.lua` via macOS Accessibility (`hs.axuielement`) on Logic Pro's Tracks header element (`Track <N> “<Name>”`), refreshing every 2.0s and on app activation. Replaced static role labels (`Bass`, `Chords`, `Lead`, `Arp`) with dynamic `trk.name` in `src/hud.lua` and `src/web/index.html` with strict Zero-Layout-Shift (ZLS) truncation (`max-width: 44px`, ellipsis). Audited Smart Sustain out-of-the-box defaults (`"smart"` across tracks 1–4) and added comprehensive Bun regression tests in `tests/logic_names_and_smart_sustain.test.js` (77 passing tests across monorepo), passed `luac -p qwerty_midi.lua`, bundled release, and verified live sync in Logic Pro. Log: [2026-10-03_21-51_logic_track_names_and_smart_sustain_audit.md](agent-logs/2026-10-03_21-51_logic_track_names_and_smart_sustain_audit.md)
 - **HUD Close Safety and Context Menu:** Replaced the crashing in-event-tap
   `Cmd+Shift+M` path with one visible, project-owned Hammerspoon hotkey; the
   Studio Suite conflict remains removed. The chassis-only right-click **Close

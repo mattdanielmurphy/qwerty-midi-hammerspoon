@@ -917,6 +917,7 @@ local HTML_UI_CONTENT = [[
     right: 4px;
     left: auto;
     min-width: 20px;
+    max-width: 44px;
     height: 10px;
     padding: 0;
     border: 0;
@@ -925,9 +926,12 @@ local HTML_UI_CONTENT = [[
     font-size: 6.5px;
     font-weight: 800;
     line-height: 10px;
-    text-align: center;
+    text-align: right;
     letter-spacing: 0.45px;
     text-shadow: 0 0 4px rgba(var(--trk-rgb), 0.5);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     pointer-events: none;
   }
   .key-pad.track-card .stacked-rows-icon.top-active .rect.top {
@@ -5692,6 +5696,12 @@ local HTML_UI_CONTENT = [[
             if (mBadge) mBadge.classList.toggle('active', !!t.muted);
             const sBadge = el.querySelector('.trk-badge-s');
             if (sBadge) sBadge.classList.toggle('active', !!t.soloed);
+            const roleBadge = el.querySelector('.trk-role');
+            if (roleBadge && t.name) {
+              const displayName = String(t.name).trim();
+              roleBadge.textContent = displayName.toUpperCase();
+              roleBadge.title = displayName;
+            }
           }
         }
       }

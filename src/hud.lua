@@ -1098,7 +1098,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
     bottomTrackColor = (botTrk and botTrk.color) or "#00e5ff",
     tracks = {
       [1] = {
-        id = 1, name = "Bass", channel = 0, color = "#00e5ff",
+        id = 1, name = state.tracks and state.tracks[1] and state.tracks[1].name or "Track 1", channel = 0, color = "#00e5ff",
         selected = (state.bottomRowTrack == 1),
         volume = state.tracks and state.tracks[1] and state.tracks[1].volume or 100,
         octaveOffset = state.tracks and state.tracks[1] and state.tracks[1].octaveOffset or 0,
@@ -1111,7 +1111,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         arpStep = state.tracks and state.tracks[1] and state.tracks[1].arpIsPlaying == true or false
       },
       [2] = {
-        id = 2, name = "Chords", channel = 1, color = "#ff9100",
+        id = 2, name = state.tracks and state.tracks[2] and state.tracks[2].name or "Track 2", channel = 1, color = "#ff9100",
         selected = (state.bottomRowTrack == 2),
         volume = state.tracks and state.tracks[2] and state.tracks[2].volume or 100,
         octaveOffset = state.tracks and state.tracks[2] and state.tracks[2].octaveOffset or 0,
@@ -1124,7 +1124,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         arpStep = state.tracks and state.tracks[2] and state.tracks[2].arpIsPlaying == true or false
       },
       [3] = {
-        id = 3, name = "Lead", channel = 2, color = "#00e676",
+        id = 3, name = state.tracks and state.tracks[3] and state.tracks[3].name or "Track 3", channel = 2, color = "#00e676",
         selected = (state.topRowTrack == 3),
         volume = state.tracks and state.tracks[3] and state.tracks[3].volume or 100,
         octaveOffset = state.tracks and state.tracks[3] and state.tracks[3].octaveOffset or 12,
@@ -1137,7 +1137,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         arpStep = state.tracks and state.tracks[3] and state.tracks[3].arpIsPlaying == true or false
       },
       [4] = {
-        id = 4, name = "Arp", channel = 3, color = "#d500f9",
+        id = 4, name = state.tracks and state.tracks[4] and state.tracks[4].name or "Track 4", channel = 3, color = "#d500f9",
         selected = (state.topRowTrack == 4),
         volume = state.tracks and state.tracks[4] and state.tracks[4].volume or 100,
         octaveOffset = state.tracks and state.tracks[4] and state.tracks[4].octaveOffset or 12,
