@@ -141,6 +141,25 @@ local function sendMidiCC(controllerNum, val, channel)
   end
 end
 
+local function silenceChannel(channel)
+  local dev = getMidiDevice()
+  local ch = channel or 0
+  if dev then
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+  end
+  local notesToRelease = {}
+  for note, voices in pairs(activeNoteLedger) do
+    if voices and voices[ch] then
+      table.insert(notesToRelease, note)
+    end
+  end
+  for _, note in ipairs(notesToRelease) do
+    sendMidiNote("noteOff", note, 0, ch)
+  end
+end
+
 local function panicAllChannels()
   local dev = getMidiDevice()
   clearActiveNotes()
@@ -165,6 +184,7 @@ return {
   sendMidiNote = sendMidiNote,
   sendMidiCC = sendMidiCC,
   sendSustainCC = sendSustainCC,
+  silenceChannel = silenceChannel,
   panicAllChannels = panicAllChannels,
   getActiveNoteLedger = getActiveNoteLedger,
   clearActiveNotes = clearActiveNotes,

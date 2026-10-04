@@ -396,6 +396,9 @@ end
 
 profileLog("Before panicAllChannels")
 midi.panicAllChannels()
+if controls and controls.syncTrackAudibility then
+  controls.syncTrackAudibility()
+end
 
 
 
@@ -726,19 +729,23 @@ end
 local function silenceTrack(trkId)
   local trk = state.tracks and state.tracks[trkId]
   if not trk then return end
+  local ch = trk.channel or 0
   if trk.activeGateTimers then
     for pitch, entry in pairs(trk.activeGateTimers) do
       if entry and entry.timer then entry.timer:stop() end
-      local ch = entry and entry.channel or trk.channel or 0
-      midi.sendMidiNote("noteOff", pitch, 0, ch)
+      local c = entry and entry.channel or ch
+      midi.sendMidiNote("noteOff", pitch, 0, c)
     end
     trk.activeGateTimers = {}
   end
   if trk.currentPitch then
     local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
     midi.sendMidiNote("noteOff", p, 0, c)
     trk.currentPitch = nil
+  end
+  if midi and midi.silenceChannel then
+    midi.silenceChannel(ch)
   end
   trk.arpIsPlaying = false
   trk.activeNotesCount = 0
@@ -15324,6 +15331,13 @@ local function canApplyShifts(testT, testO, testTop, testBot)
   return false, testT, testO, testTop, testBot
 end
 
+local function countTableKeys(t)
+  if not t then return 0 end
+  local count = 0
+  for _ in pairs(t) do count = count + 1 end
+  return count
+end
+
 local function isTrackAudible(trackIdx)
   if not state.tracks then return true end
   local trk = state.tracks[trackIdx]
@@ -15343,33 +15357,54 @@ local function syncTrackAudibility()
   if not state.tracks then return end
   for trkId = 1, 4 do
     local trk = state.tracks[trkId]
+    local ch = trk.channel or (trkId - 1)
     local audible = isTrackAudible(trkId)
     if not audible then
-      -- Silence arpeggiator on this track
+      -- 1. Silence audio in DAW / Logic Pro immediately
+      if midi and midi.silenceChannel then
+        midi.silenceChannel(ch)
+      else
+        midi.sendMidiCC(64, 0, ch)
+        midi.sendMidiCC(120, 0, ch)
+        midi.sendMidiCC(123, 0, ch)
+      end
+      -- Set Channel Volume (CC 7) & Expression (CC 11) to 0 so synth/audio is truly muted
+      midi.sendMidiCC(7, 0, ch)
+      midi.sendMidiCC(11, 0, ch)
+
+      -- Dedicated DAW Controller Assignment CCs:
+      -- CC 108: Track Mute (127 if muted, 0 if unmuted)
+      -- CC 109: Track Solo (127 if soloed, 0 if not soloed)
+      midi.sendMidiCC(108, trk.muted and 127 or 0, ch)
+      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
+
+      -- 2. Silence arpeggiator active notes & gate timers on this track
       if arpeggiator and arpeggiator.silenceTrack then
         arpeggiator.silenceTrack(trkId)
       end
-      -- Silence any physically held notes on this track
+
+      -- 3. Silence any physically held notes on this track
       for code, info in pairs(state.pressedKeys) do
         if type(info) == "table" and not info.isControl and info.track == trkId then
           if info.pitches then
             for _, p in ipairs(info.pitches) do
-              midi.sendMidiNote("noteOff", p, 0, info.channel or trk.channel or 0)
+              midi.sendMidiNote("noteOff", p, 0, info.channel or ch)
             end
           end
         end
       end
-      -- Silence any sustained notes on this track's channel
+
+      -- 4. Silence any sustained notes on this track's channel
       if trk.sustainedPitches then
         for _, item in ipairs(trk.sustainedPitches) do
-          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or trk.channel or 0)
+          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or ch)
         end
         trk.sustainedPitches = {}
       end
       if state.sustainedPitches then
         local newSustained = {}
         for _, item in ipairs(state.sustainedPitches) do
-          if item.channel == trk.channel then
+          if item.channel == ch then
             midi.sendMidiNote("noteOff", item.pitch, 0, item.channel)
           else
             table.insert(newSustained, item)
@@ -15379,16 +15414,45 @@ local function syncTrackAudibility()
       end
       trk.activeNotesCount = 0
     else
-      -- If track became audible and has physically held keys that were silenced, resume them!
+      -- Track became audible!
+      -- 1. Restore DAW Controller Assignment CCs:
+      midi.sendMidiCC(108, 0, ch) -- Mute off
+      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
+
+      -- 2. Restore Channel Volume (CC 7) & Expression (CC 11):
+      local vol = trk.volume or 100
+      local volCc = math.floor(math.min(127, math.max(0, vol * 1.27)))
+      midi.sendMidiCC(7, volCc, ch)
+      midi.sendMidiCC(11, 127, ch)
+
+      -- 3. Resume physically held non-arp keys
       for code, info in pairs(state.pressedKeys) do
         if type(info) == "table" and not info.isControl and info.track == trkId and not info.isArpNote then
           if info.pitches then
             local vel = transposer.getEffectiveRowVelocity(trkId > 2)
             for _, p in ipairs(info.pitches) do
-              midi.sendMidiNote("noteOn", p, vel, info.channel or trk.channel or 0)
+              midi.sendMidiNote("noteOn", p, vel, info.channel or ch)
             end
             trk.activeNotesCount = (trk.activeNotesCount or 0) + #info.pitches
           end
+        end
+      end
+
+      -- 4. Resume arpeggiator if active or if notes are held
+      if trk.arpEnabled then
+        for code, info in pairs(state.pressedKeys) do
+          if type(info) == "table" and not info.isControl and info.track == trkId and info.isArpNote then
+            if info.pitches and arpeggiator and arpeggiator.arpAddNote then
+              for _, p in ipairs(info.pitches) do
+                arpeggiator.arpAddNote(code .. "_" .. p, p, trkId)
+              end
+            end
+          end
+        end
+
+        local hasHeld = countTableKeys(trk.heldNotes) > 0 or trk.locked
+        if hasHeld and not trk.timer and arpeggiator and arpeggiator.startTrackArp then
+          arpeggiator.startTrackArp(trk, true)
         end
       end
     end
@@ -16166,7 +16230,9 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[topTrkId]
     if trk then
       trk.volume = state.topRowVolume
-      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      if isTrackAudible(topTrkId) then
+        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -16183,7 +16249,9 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[topTrkId]
     if trk then
       trk.volume = state.topRowVolume
-      midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      if isTrackAudible(topTrkId) then
+        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -16200,7 +16268,9 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[botTrkId]
     if trk then
       trk.volume = state.bottomRowVolume
-      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      if isTrackAudible(botTrkId) then
+        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -16217,7 +16287,9 @@ local function executeControlAction(act, code)
     local trk = state.tracks and state.tracks[botTrkId]
     if trk then
       trk.volume = state.bottomRowVolume
-      midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      if isTrackAudible(botTrkId) then
+        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -16235,11 +16307,15 @@ local function executeControlAction(act, code)
     local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
     if botTrk then
       botTrk.volume = state.bottomRowVolume
-      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+      if isTrackAudible(botTrk.id) then
+        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+      end
     end
     if topTrk then
       topTrk.volume = state.topRowVolume
-      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if isTrackAudible(topTrk.id) then
+        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -16257,11 +16333,15 @@ local function executeControlAction(act, code)
     local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
     if botTrk then
       botTrk.volume = state.bottomRowVolume
-      midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+      if isTrackAudible(botTrk.id) then
+        midi.sendMidiCC(7, botTrk.volume, botTrk.channel or 0)
+      end
     end
     if topTrk then
       topTrk.volume = state.topRowVolume
-      midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      if isTrackAudible(topTrk.id) then
+        midi.sendMidiCC(7, topTrk.volume, topTrk.channel or 2)
+      end
     end
     config.saveSettings()
     local spot = {
@@ -17090,10 +17170,10 @@ local function handleKeyDown(code, externalNoteKey)
     local effectiveSustain = (susMode ~= "off")
     state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch, track = trkIdx, isTop = isTop }
     
-    if isTrackAudible(trkIdx) then
-      if isArpNote then 
-        for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
-      else 
+    if isArpNote then 
+      for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
+    else 
+      if isTrackAudible(trkIdx) then
         local quantMode = state.inputQuantizeMode or "Off"
         local bpm = state.arpBpm or 120.0
         local vel = transposer.getEffectiveRowVelocity(isTop)
@@ -17416,7 +17496,9 @@ return {
       if state.pressedKeys[code] then handleKeyUp(code, { isTop = false }) end
     end
   end,
-  stopAllControlRepeats = stopAllControlRepeats
+  stopAllControlRepeats = stopAllControlRepeats,
+  syncTrackAudibility = syncTrackAudibility,
+  isTrackAudible = isTrackAudible
 }
 
 end
@@ -17565,6 +17647,25 @@ local function sendMidiCC(controllerNum, val, channel)
   end
 end
 
+local function silenceChannel(channel)
+  local dev = getMidiDevice()
+  local ch = channel or 0
+  if dev then
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+  end
+  local notesToRelease = {}
+  for note, voices in pairs(activeNoteLedger) do
+    if voices and voices[ch] then
+      table.insert(notesToRelease, note)
+    end
+  end
+  for _, note in ipairs(notesToRelease) do
+    sendMidiNote("noteOff", note, 0, ch)
+  end
+end
+
 local function panicAllChannels()
   local dev = getMidiDevice()
   clearActiveNotes()
@@ -17589,6 +17690,7 @@ return {
   sendMidiNote = sendMidiNote,
   sendMidiCC = sendMidiCC,
   sendSustainCC = sendSustainCC,
+  silenceChannel = silenceChannel,
   panicAllChannels = panicAllChannels,
   getActiveNoteLedger = getActiveNoteLedger,
   clearActiveNotes = clearActiveNotes,

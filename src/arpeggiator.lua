@@ -287,19 +287,23 @@ end
 local function silenceTrack(trkId)
   local trk = state.tracks and state.tracks[trkId]
   if not trk then return end
+  local ch = trk.channel or 0
   if trk.activeGateTimers then
     for pitch, entry in pairs(trk.activeGateTimers) do
       if entry and entry.timer then entry.timer:stop() end
-      local ch = entry and entry.channel or trk.channel or 0
-      midi.sendMidiNote("noteOff", pitch, 0, ch)
+      local c = entry and entry.channel or ch
+      midi.sendMidiNote("noteOff", pitch, 0, c)
     end
     trk.activeGateTimers = {}
   end
   if trk.currentPitch then
     local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
     midi.sendMidiNote("noteOff", p, 0, c)
     trk.currentPitch = nil
+  end
+  if midi and midi.silenceChannel then
+    midi.silenceChannel(ch)
   end
   trk.arpIsPlaying = false
   trk.activeNotesCount = 0

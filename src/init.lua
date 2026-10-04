@@ -379,6 +379,9 @@ end
 
 profileLog("Before panicAllChannels")
 midi.panicAllChannels()
+if controls and controls.syncTrackAudibility then
+  controls.syncTrackAudibility()
+end
 
 
 
