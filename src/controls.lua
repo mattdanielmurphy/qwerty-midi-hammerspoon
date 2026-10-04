@@ -492,6 +492,25 @@ local function selectTrack(id)
   if ks and ks.syncToHud then ks.syncToHud() end
 end
 
+local function adjustTrackVolume(trackId, delta)
+  local id = math.max(1, math.min(4, math.floor(tonumber(trackId) or 0)))
+  local trk = state.tracks and state.tracks[id]
+  if not trk then return false end
+  trk.volume = math.max(0, math.min(127, (tonumber(trk.volume) or 100) + (tonumber(delta) or 0)))
+  if isTrackAudible(id) then midi.sendMidiCC(7, trk.volume, trk.channel or (id - 1)) end
+  if id <= 2 and state.bottomRowTrack == id then state.bottomRowVolume = trk.volume end
+  if id >= 3 and state.topRowTrack == id then state.topRowVolume = trk.volume end
+  config.saveSettings()
+  hud.updateWebviewHud({
+    title = "VOLUME (TRK " .. id .. ")",
+    value = math.floor((trk.volume / 127) * 100 + 0.5) .. "%",
+    subtext = (trk.name or ("Track " .. id)) .. " Volume (CC #7)",
+    targetId = "key-" .. (17 + id),
+    color = trk.color or "#d4a359"
+  })
+  return true
+end
+
 local function applyTransposeDelta(deltaSteps, spotTitle)
   local curT = tonumber(state.transposeShift) or 0
   local curO = tonumber(state.octaveShift) or 0
@@ -538,6 +557,11 @@ local function applyTransposeDelta(deltaSteps, spotTitle)
 end
 
 local function executeControlAction(act, code)
+  if act == "closeMidiHud" then
+    if _G.closeMidiHud then _G.closeMidiHud("Cmd-Shift-M") end
+    return
+  end
+
   if act == "undoState" then
     undoControllerState(code)
     return
@@ -1153,7 +1177,8 @@ local function executeControlAction(act, code)
     else
       state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
     end
-    arpeggiator.updateLatchedArpChordNotes()
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
@@ -1172,7 +1197,8 @@ local function executeControlAction(act, code)
     else
       state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
     end
-    arpeggiator.updateLatchedArpChordNotes()
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
@@ -1334,7 +1360,10 @@ local function executeControlAction(act, code)
     end
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",
@@ -1346,7 +1375,10 @@ local function executeControlAction(act, code)
     hud.updateWebviewHud(spot)
   elseif act == "chordDown" then
     state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     local chordName = state.CHORDS[state.chordIdx].name
     local spot = {
       title = "CHORD TYPE",
@@ -1766,21 +1798,33 @@ local function executeControlAction(act, code)
   -- Voicing Actions
   elseif act == "voicingUp" then
     state.chordIdx = ((state.chordIdx or 1) % #state.CHORDS) + 1
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing +", targetId = "key-39", color = "#ffd700" })
   elseif act == "voicingDown" then
     state.chordIdx = (((state.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing -", targetId = "key-39", color = "#ffd700" })
   elseif act == "inversionUp" or act == "inversionDown" then
     hud.updateWebviewHud({ title = "INVERSION", value = "Inversion Modified", subtext = "Pitch Inversion", targetId = "key-39", color = "#ffd700" })
   elseif act == "chordPower" then
     state.chordIdx = 4
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     hud.updateWebviewHud({ title = "CHORD VOICING", value = "Power (1-5)", subtext = "Root + Fifth", targetId = "key-39", color = "#ffd700" })
   elseif act == "chordTriad" then
     state.chordIdx = 1
-    arpeggiator.updateLatchedArpChordNotes()
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
     hud.updateWebviewHud({ title = "CHORD VOICING", value = "Triad", subtext = "Root + 3rd + 5th", targetId = "key-39", color = "#ffd700" })
 
   -- Arp Direction Presets (Key 5)
@@ -2029,6 +2073,13 @@ local function handleKeyDown(code, externalNoteKey)
   end
 
   local propDef = hud.getProposedActionDef and hud.getProposedActionDef(code)
+  if propDef and (propDef.reserved or propDef.passThrough) then
+    -- Command-layer holes are intentionally visible in the HUD but must never
+    -- fall through into the piano/note mapping when clicked in the webview.
+    state.pressedKeys[code] = { isProposed = true }
+    hud.updateSingleKeyState(code, true, false)
+    return true
+  end
   local actionToExecute = propDef and propDef.action
 
   if not actionToExecute or actionToExecute == "" or actionToExecute == "none" then
@@ -2152,18 +2203,22 @@ local function handleKeyDown(code, externalNoteKey)
       -- Latch new pitches into trk.sustainedPitches
       trk.sustainedPitches = trk.sustainedPitches or {}
       for _, p in ipairs(chordPitches) do
-        table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
+          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
       end
     elseif trk and susMode == "classic" and not isArpNote then
       -- Classic cumulative sustain: append without clearing
       trk.sustainedPitches = trk.sustainedPitches or {}
       for _, p in ipairs(chordPitches) do
-        table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
+          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
       end
     end
 
     local effectiveSustain = (susMode ~= "off")
-    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain, channel = ch, track = trkIdx, isTop = isTop }
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain,
+      channel = ch, track = trkIdx, isTop = isTop, basePitch = noteKey.baseNote,
+      isChordSource = isChordActive, chordIdx = trk and trk.chordIdx or state.chordIdx }
     
     if isArpNote then 
       for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
@@ -2259,7 +2314,9 @@ local function handleKeyUp(code, externalNoteKey)
                 end
               end
               if not found then
-                table.insert(trk.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel })
+                table.insert(trk.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel,
+                  basePitch = keyInfo.basePitch, isTop = keyInfo.isTop, isChordSource = keyInfo.isChordSource,
+                  chordIdx = keyInfo.chordIdx, sourceCode = code })
               end
             end
           else
@@ -2456,6 +2513,7 @@ end
 
 return {
   selectTrack = selectTrack,
+  adjustTrackVolume = adjustTrackVolume,
   executeControlAction = executeControlAction,
   setActiveArpDirection = setActiveArpDirection,
   getActiveArpDirectionIdx = getActiveArpDirectionIdx,

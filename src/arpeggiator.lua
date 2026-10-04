@@ -837,7 +837,7 @@ local function applyGatePercentChange()
   end
 end
 
-local function rebuildNoteTable(noteTable)
+local function rebuildNoteTable(noteTable, trk, chordSourcesOnly)
   local baseCodeCounts = {}
   local uniqueBaseCodes = {}
   local keysToRemove = {}
@@ -858,9 +858,10 @@ local function rebuildNoteTable(noteTable)
     local noteKey = config.getNoteKey(rawCode)
     if noteKey then
       local wasChord = (baseCodeCounts[rawCode] or 1) > 1
-      local isChord = state.quoteHeld or state.chordModeActive or wasChord
+      local isChord = wasChord
       if isChord then
-        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop, true)
+        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop,
+          { enabled = true, chordIdx = (trk and trk.chordIdx) or state.chordIdx })
         for _, p in ipairs(newPitches) do
           noteTable[tostring(rawCode) .. "_" .. tostring(p)] = p
         end
@@ -872,10 +873,84 @@ local function rebuildNoteTable(noteTable)
   end
 end
 
-local function updateLatchedArpNotes()
-  if not state.arpEnabled then return end
+local function rebuildHeldVoiceSources()
+  if not (state.tracks and state.pressedKeys) then return end
+  local anySolo = false
+  for _, trk in pairs(state.tracks) do if trk.soloed then anySolo = true; break end end
 
-  if not state.arpLinked then
+  for trkId, trk in pairs(state.tracks) do
+    local oldByChannel, newByChannel = {}, {}
+    local function add(set, channel, pitches)
+      set[channel] = set[channel] or {}
+      for _, pitch in ipairs(pitches or {}) do set[channel][pitch] = true end
+    end
+    local function render(source)
+      if not source.basePitch then return source.pitches or { source.pitch } end
+      if source.isChordSource then
+        return transposer.getChordPitches(source.basePitch, source.isTop == true,
+          { enabled = true, chordIdx = trk.chordIdx or source.chordIdx or state.chordIdx })
+      end
+      return { transposer.getTransposedPitch(source.basePitch, source.isTop == true) }
+    end
+
+    for _, info in pairs(state.pressedKeys) do
+      if type(info) == "table" and not info.isControl and not info.isArpNote and info.track == trkId then
+        local channel = info.channel or trk.channel or 0
+        add(oldByChannel, channel, info.pitches)
+        info.pitches = render(info)
+        add(newByChannel, channel, info.pitches)
+      end
+    end
+    local sustainedGroups, rebuiltSustained = {}, {}
+    for index, item in ipairs(trk.sustainedPitches or {}) do
+      local sourceId = item.sourceCode or ("legacy-" .. index)
+      local group = sustainedGroups[sourceId]
+      if not group then
+        group = { source = item, oldPitches = {} }
+        sustainedGroups[sourceId] = group
+      end
+      group.oldPitches[item.pitch] = true
+    end
+    for _, group in pairs(sustainedGroups) do
+      local item = group.source
+      local channel = item.channel or trk.channel or 0
+      local oldPitches = {}
+      for pitch in pairs(group.oldPitches) do table.insert(oldPitches, pitch) end
+      add(oldByChannel, channel, oldPitches)
+      local pitches = render(item)
+      add(newByChannel, channel, pitches)
+      for _, pitch in ipairs(pitches) do
+        local replacement = {}
+        for key, value in pairs(item) do if key ~= "pitches" then replacement[key] = value end end
+        replacement.pitch = pitch
+        replacement.pitches = nil
+        table.insert(rebuiltSustained, replacement)
+      end
+    end
+    trk.sustainedPitches = rebuiltSustained
+
+    for channel, pitches in pairs(oldByChannel) do
+      for pitch in pairs(pitches) do
+        if not (newByChannel[channel] and newByChannel[channel][pitch]) then
+          midi.sendMidiNote("noteOff", pitch, 0, channel)
+        end
+      end
+    end
+    if not trk.muted and (not anySolo or trk.soloed) then
+      local velocity = transposer.getEffectiveRowVelocity(trkId > 2)
+      for channel, pitches in pairs(newByChannel) do
+        for pitch in pairs(pitches) do
+          if not (oldByChannel[channel] and oldByChannel[channel][pitch]) then
+            midi.sendMidiNote("noteOn", pitch, velocity, channel)
+          end
+        end
+      end
+    end
+  end
+end
+
+local function updateLatchedArpNotes()
+  if not state.tracks and not state.arpLinked then
     for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
       if next(eng.heldNotes) ~= nil then
         rebuildNoteTable(eng.heldNotes)
@@ -890,10 +965,10 @@ local function updateLatchedArpNotes()
   if state.tracks then
     for _, trk in pairs(state.tracks) do
       if trk.heldNotes and next(trk.heldNotes) ~= nil then
-        rebuildNoteTable(trk.heldNotes)
+        rebuildNoteTable(trk.heldNotes, trk)
       end
       if trk.targetHeldNotes and next(trk.targetHeldNotes) ~= nil then
-        rebuildNoteTable(trk.targetHeldNotes)
+        rebuildNoteTable(trk.targetHeldNotes, trk)
       end
     end
   end
@@ -904,89 +979,26 @@ local function updateLatchedArpNotes()
   if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
     rebuildNoteTable(state.arpTargetHeldNotes)
   end
+  rebuildHeldVoiceSources()
 end
 
-local function updateLatchedArpChordNotes()
+local function updateLatchedArpChordNotes(targetTrackId)
+  targetTrackId = targetTrackId or state.activeTrack or 1
   if state.tracks then
-    for _, trk in pairs(state.tracks) do
-      if trk.heldNotes and next(trk.heldNotes) ~= nil then
-        local uniqueBaseCodes = {}
-        local keysToRemove = {}
-        for code, _ in pairs(trk.heldNotes) do
-          local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-          if rawCode then
-            uniqueBaseCodes[rawCode] = true
-            table.insert(keysToRemove, code)
-          end
-        end
-        for _, code in ipairs(keysToRemove) do trk.heldNotes[code] = nil end
-        for rawCode, _ in pairs(uniqueBaseCodes) do
-          local noteKey = config.getNoteKey(rawCode)
-          if noteKey then
-            local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
-            for _, p in ipairs(newPitches) do
-              trk.heldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
-            end
-          end
-        end
+    for trkId, trk in pairs(state.tracks) do
+      if not targetTrackId or targetTrackId == trkId then
+        if trk.heldNotes then rebuildNoteTable(trk.heldNotes, trk, true) end
+        if trk.targetHeldNotes then rebuildNoteTable(trk.targetHeldNotes, trk, true) end
       end
     end
-  end
-
-  if not state.arpEnabled or not state.arpLatchActive then return end
-
-  if not state.arpLinked then
-    for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
-      if next(eng.heldNotes) ~= nil then
-        local uniqueBaseCodes = {}
-        local keysToRemove = {}
-        for code, _ in pairs(eng.heldNotes) do
-          local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-          if rawCode then
-            uniqueBaseCodes[rawCode] = true
-            table.insert(keysToRemove, code)
-          end
-        end
-        for _, code in ipairs(keysToRemove) do eng.heldNotes[code] = nil end
-        for rawCode, _ in pairs(uniqueBaseCodes) do
-          local noteKey = config.getNoteKey(rawCode)
-          if noteKey then
-            local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
-            for _, p in ipairs(newPitches) do
-              eng.heldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
-            end
-          end
-        end
-      end
-    end
+  else
+    updateLatchedArpNotes()
     return
   end
 
-  if next(state.arpHeldNotes) == nil then return end
-
-  local uniqueBaseCodes = {}
-  local keysToRemove = {}
-  for code, _ in pairs(state.arpHeldNotes) do
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    if rawCode then
-      uniqueBaseCodes[rawCode] = true
-      table.insert(keysToRemove, code)
-    end
-  end
-
-  for _, code in ipairs(keysToRemove) do
-    state.arpHeldNotes[code] = nil
-  end
-
-  for rawCode, _ in pairs(uniqueBaseCodes) do
-    local noteKey = config.getNoteKey(rawCode)
-    if noteKey then
-      local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop)
-      for _, p in ipairs(newPitches) do
-        state.arpHeldNotes[tostring(rawCode) .. "_" .. tostring(p)] = p
-      end
-    end
-  end
+  -- Also reconcile currently held and sustained voices. Chord provenance is kept
+  -- on each source; only the selected track's chordIdx has changed.
+  updateLatchedArpNotes()
 end
 
 local function getArpRowTargetSubtext()

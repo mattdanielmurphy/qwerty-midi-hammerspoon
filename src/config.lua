@@ -27,6 +27,7 @@ local state = {
   sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
   sustainWasActiveOnPress = false,
   arpLatchActive = getSetting("arpLatchActive", false),  -- Arpeggiator Latch mode
+  cmdHeld = false,
   shiftHeld = false,          -- Shift key active state
   altHeld = false,            -- Option (Alt) key active state
   ctrlHeld = false,           -- Control key active state
@@ -131,7 +132,7 @@ local state = {
       attack = getSetting("track1Attack", 0),
       decay = getSetting("track1Decay", 64),
       muted = false, soloed = false, armed = true, locked = false,
-      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track1ChordIdx", 1),
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -143,7 +144,7 @@ local state = {
       attack = getSetting("track2Attack", 0),
       decay = getSetting("track2Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track2ChordIdx", 1),
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -155,7 +156,7 @@ local state = {
       attack = getSetting("track3Attack", 0),
       decay = getSetting("track3Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track3ChordIdx", 1),
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -167,7 +168,7 @@ local state = {
       attack = getSetting("track4Attack", 0),
       decay = getSetting("track4Decay", 64),
       muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = 1,
+      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track4ChordIdx", 1),
       arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
       heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
       currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
@@ -226,6 +227,7 @@ local function saveSettings()
         hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
         hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
         hs.settings.set("qwertyMidi_track" .. i .. "SustainMode", trk.sustainMode or "smart")
+        hs.settings.set("qwertyMidi_track" .. i .. "ChordIdx", trk.chordIdx or 1)
       end
     end
     local botTrk = state.tracks[state.bottomRowTrack or 1]

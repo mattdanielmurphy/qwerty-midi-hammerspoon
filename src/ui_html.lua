@@ -962,6 +962,51 @@ local HTML_UI_CONTENT = [[
     gap: 2px;
     z-index: 5;
   }
+  .trk-vol-controls {
+    position: absolute;
+    left: 2px;
+    bottom: 2px;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 13px;
+    z-index: 6;
+    -webkit-app-region: no-drag;
+  }
+  .trk-vol-btn {
+    width: 8px;
+    height: 13px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: rgba(var(--trk-rgb), 0.26);
+    color: var(--trk-color);
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 13px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .trk-vol-value {
+    min-width: 19px;
+    color: #fff;
+    font-family: inherit;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 13px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .shortcut-reserved {
+    opacity: 0.48 !important;
+    border-style: dashed !important;
+    background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255,255,255,0.045) 5px 8px) !important;
+  }
+  .shortcut-passthrough {
+    opacity: 0.4 !important;
+    border-style: dotted !important;
+  }
   .trk-badge {
     box-sizing: border-box;
     width: 10px;
@@ -3654,6 +3699,34 @@ local HTML_UI_CONTENT = [[
                 modeTags.appendChild(chdTag);
                 pad.appendChild(modeTags);
 
+                const volControls = document.createElement('div');
+                volControls.className = 'trk-vol-controls';
+                const volDown = document.createElement('button');
+                volDown.className = 'trk-vol-btn';
+                volDown.type = 'button';
+                volDown.textContent = '−';
+                volDown.title = 'Track ' + trkNum + ' volume down';
+                volDown.addEventListener('mousedown', (e) => {
+                  e.stopPropagation(); e.preventDefault();
+                  window.callHammerspoon('adjustTrackVolume', { type: 'adjustTrackVolume', trackId: trkNum, delta: -4 });
+                });
+                const volValue = document.createElement('span');
+                volValue.className = 'trk-vol-value';
+                volValue.textContent = '—%';
+                const volUp = document.createElement('button');
+                volUp.className = 'trk-vol-btn';
+                volUp.type = 'button';
+                volUp.textContent = '+';
+                volUp.title = 'Track ' + trkNum + ' volume up';
+                volUp.addEventListener('mousedown', (e) => {
+                  e.stopPropagation(); e.preventDefault();
+                  window.callHammerspoon('adjustTrackVolume', { type: 'adjustTrackVolume', trackId: trkNum, delta: 4 });
+                });
+                volControls.appendChild(volDown);
+                volControls.appendChild(volValue);
+                volControls.appendChild(volUp);
+                pad.appendChild(volControls);
+
                 const waveDiv = document.createElement('div');
                 waveDiv.className = 'trk-waveform';
                 waveDiv.innerHTML = '<span class="wbar b1"></span><span class="wbar b2"></span><span class="wbar b3"></span><span class="wbar b4"></span><span class="wbar b5"></span>';
@@ -3748,6 +3821,34 @@ local HTML_UI_CONTENT = [[
               modeTags.appendChild(susTag);
               modeTags.appendChild(chdTag);
               pad.appendChild(modeTags);
+
+              const volControls = document.createElement('div');
+              volControls.className = 'trk-vol-controls';
+              const volDown = document.createElement('button');
+              volDown.className = 'trk-vol-btn';
+              volDown.type = 'button';
+              volDown.textContent = '−';
+              volDown.title = 'Track ' + trkNum + ' volume down';
+              volDown.addEventListener('mousedown', (e) => {
+                e.stopPropagation(); e.preventDefault();
+                window.callHammerspoon('adjustTrackVolume', { type: 'adjustTrackVolume', trackId: trkNum, delta: -4 });
+              });
+              const volValue = document.createElement('span');
+              volValue.className = 'trk-vol-value';
+              volValue.textContent = '—%';
+              const volUp = document.createElement('button');
+              volUp.className = 'trk-vol-btn';
+              volUp.type = 'button';
+              volUp.textContent = '+';
+              volUp.title = 'Track ' + trkNum + ' volume up';
+              volUp.addEventListener('mousedown', (e) => {
+                e.stopPropagation(); e.preventDefault();
+                window.callHammerspoon('adjustTrackVolume', { type: 'adjustTrackVolume', trackId: trkNum, delta: 4 });
+              });
+              volControls.appendChild(volDown);
+              volControls.appendChild(volValue);
+              volControls.appendChild(volUp);
+              pad.appendChild(volControls);
 
               const waveDiv = document.createElement('div');
               waveDiv.className = 'trk-waveform';
@@ -5702,6 +5803,10 @@ local HTML_UI_CONTENT = [[
                 if (chdTag) {
                   chdTag.classList.toggle('active', !!k.trkChordMode);
                 }
+              }
+              if (k.trkVolumePercent !== undefined) {
+                const volValue = el.querySelector('.trk-vol-value');
+                if (volValue) volValue.textContent = Math.max(0, Math.min(100, Number(k.trkVolumePercent) || 0)) + '%';
               }
             }
 

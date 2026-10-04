@@ -1,0 +1,5 @@
+# Arpeggiator Revoicing, Command Layers, and Track Volume Controls
+
+- Rebuilds held/latched arpeggiator inputs after root, scale/mode, or transpose changes for each track; chord-origin inputs use their owning track's selected chord. Direct held and sustained voices are revoiced from retained source metadata. Selected-track chord changes refresh that track's chord-origin notes.
+- Persists per-track chord selection and adds per-track volume decrement/increment controls to each track card. The HUD shows a Command layer and Command-Shift layer; Cmd-Shift-M closes the HUD through the existing separate hotkey. Reserved shortcut cells are marked as holes, and pass-through/reserved HUD cells cannot dispatch notes when clicked. Cmd-9/0 remain native pass-through because they conflict with common application shortcuts.
+- Activated using `bash bin/bundle_and_reload.sh`; bundled Lua passed `luac -p qwerty_midi.lua`. Hammerspoon reported `midiActive=true`, key tap enabled, and HUD visible. The live HUD screenshot showed the per-track volume controls. `git diff --check` passed. Bun tests and device-dependent arp/MIDI behavior were not exercised.

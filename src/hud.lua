@@ -517,21 +517,44 @@ local PROPOSED_LAYOUT_MAP = {
 
 local lowerRowCodes = { [6]=true, [7]=true, [8]=true, [9]=true, [11]=true, [45]=true, [46]=true, [43]=true, [47]=true, [44]=true }
 
-local function getProposedActionDef(code)
-  if lowerRowCodes[code] and not isKeyStepConnected() then
-    return nil
-  end
+local COMMAND_LAYER_MAP = {
+  [46] = {
+    cmd = { name = "Minimize Window", class = "shortcut-reserved", action = "none", reserved = true },
+    cmdShift = { name = "Close UI", class = "ctrl-window", action = "closeMidiHud" }
+  },
+  [12] = { cmd = { name = "Quit App", class = "shortcut-reserved", action = "none", reserved = true } },
+  [13] = { cmd = { name = "Close Window", class = "shortcut-reserved", action = "none", reserved = true } },
+  [4] = { cmd = { name = "Hide App", class = "shortcut-reserved", action = "none", reserved = true } },
+  [48] = { cmd = { name = "Switch App", class = "shortcut-reserved", action = "none", reserved = true } },
+  [49] = { cmd = { name = "Spotlight", class = "shortcut-reserved", action = "none", reserved = true } },
+  [1] = { cmd = { name = "Save in App", class = "shortcut-reserved", action = "none", reserved = true } },
+  [6] = { cmd = { name = "Undo in App", class = "shortcut-reserved", action = "none", reserved = true } },
+}
+
+local function getModifierLayer()
+  if state.cmdHeld then return state.shiftHeld and "cmdShift" or "cmd" end
   local s = state.shiftHeld == true
   local a = state.altHeld == true
   local c = state.ctrlHeld == true
-  local activeLayer = "base"
-  if c and a and s then activeLayer = "ctrl_opt_shift"
-  elseif c and a then activeLayer = "ctrl_opt"
-  elseif c and s then activeLayer = "shift_ctrl"
-  elseif a and s then activeLayer = "shift_opt"
-  elseif c then activeLayer = "ctrl"
-  elseif a then activeLayer = "opt"
-  elseif s then activeLayer = "shift"
+  if c and a and s then return "ctrl_opt_shift"
+  elseif c and a then return "ctrl_opt"
+  elseif c and s then return "shift_ctrl"
+  elseif a and s then return "shift_opt"
+  elseif c then return "ctrl"
+  elseif a then return "opt"
+  elseif s then return "shift" end
+  return "base"
+end
+
+local function getProposedActionDef(code)
+  local activeLayer = getModifierLayer()
+  if activeLayer == "cmd" or activeLayer == "cmdShift" then
+    local layerEntry = COMMAND_LAYER_MAP[tonumber(code)]
+    local layerDef = layerEntry and layerEntry[activeLayer]
+    return layerDef or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+  end
+  if lowerRowCodes[code] and not isKeyStepConnected() then
+    return nil
   end
 
   local layerTable = PROPOSED_LAYOUT_MAP[code]
@@ -545,18 +568,7 @@ local function getProposedActionSpotlight(code)
   if lowerRowCodes[code] and not isKeyStepConnected() then
     return nil
   end
-  local s = state.shiftHeld == true
-  local a = state.altHeld == true
-  local c = state.ctrlHeld == true
-  local activeLayer = "base"
-  if c and a and s then activeLayer = "ctrl_opt_shift"
-  elseif c and a then activeLayer = "ctrl_opt"
-  elseif c and s then activeLayer = "shift_ctrl"
-  elseif a and s then activeLayer = "shift_opt"
-  elseif c then activeLayer = "ctrl"
-  elseif a then activeLayer = "opt"
-  elseif s then activeLayer = "shift"
-  end
+  local activeLayer = getModifierLayer()
 
   local layerTable = PROPOSED_LAYOUT_MAP[code]
   if layerTable then
@@ -564,7 +576,8 @@ local function getProposedActionSpotlight(code)
     if layerDef then
       local layerDisplayNames = {
         base = "BASE", shift = "SHIFT", opt = "OPTION", shift_opt = "SHIFT+OPT",
-        ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT"
+        ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT",
+        cmd = "COMMAND", cmdShift = "COMMAND+SHIFT"
       }
       return {
         title = "PROPOSED ACTION",
@@ -617,22 +630,12 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   local susStr = state.sustainActive and "SUS: ON" or ""
   local shiftStr = state.shiftHeld and "[SHIFT]" or ""
 
-  local s = state.shiftHeld == true
-  local a = state.altHeld == true
-  local c = state.ctrlHeld == true
-  local activeLayer = "base"
-  if c and a and s then activeLayer = "ctrl_opt_shift"
-  elseif c and a then activeLayer = "ctrl_opt"
-  elseif c and s then activeLayer = "shift_ctrl"
-  elseif a and s then activeLayer = "shift_opt"
-  elseif c then activeLayer = "ctrl"
-  elseif a then activeLayer = "opt"
-  elseif s then activeLayer = "shift"
-  end
+  local activeLayer = getModifierLayer()
 
   local layerDisplayNames = {
     base = "BASE", shift = "SHIFT", opt = "OPTION", shift_opt = "SHIFT+OPT",
-    ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT"
+    ctrl = "CONTROL", shift_ctrl = "CTRL+SHIFT", ctrl_opt = "CTRL+OPT", ctrl_opt_shift = "CTRL+OPT+SHIFT",
+    cmd = "COMMAND", cmdShift = "COMMAND+SHIFT"
   }
 
   local statusParts = {}
@@ -848,7 +851,8 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   for propCode, layerTable in pairs(PROPOSED_LAYOUT_MAP) do
     if not (lowerRowCodes[propCode] and not ksConnected) then
       local strCode = tostring(propCode)
-      local layerDef = layerTable[activeLayer] or layerTable.base
+      local layerDef = (activeLayer == "cmd" or activeLayer == "cmdShift")
+        and getProposedActionDef(propCode) or (layerTable[activeLayer] or layerTable.base)
       if layerDef then
       keyUpdates[strCode] = keyUpdates[strCode] or { isControl = true, pressed = false }
       keyUpdates[strCode].displayNote = layerDef.name
@@ -941,6 +945,31 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
   end
   end
 
+  if activeLayer == "cmd" or activeLayer == "cmdShift" then
+    for code in pairs(COMMAND_LAYER_MAP) do
+      if not keyUpdates[tostring(code)] then keyUpdates[tostring(code)] = { isControl = true, pressed = false } end
+    end
+    for code = 0, 127 do
+      if config.getNoteKey and config.getNoteKey(code) and not keyUpdates[tostring(code)] then
+        keyUpdates[tostring(code)] = { isControl = true, pressed = false }
+      end
+    end
+    for codeStr, key in pairs(keyUpdates) do
+      local code = tonumber(codeStr)
+      local command = COMMAND_LAYER_MAP[code]
+      local layerDef = command and command[activeLayer]
+        or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+      key.displayNote = layerDef.name
+      key.note = layerDef.name
+      key.action = layerDef.action
+      key.shiftAction = layerDef.action
+      key.typeClass = layerDef.class or ""
+      key.shortcutReserved = layerDef.reserved == true
+      key.shortcutPassThrough = layerDef.passThrough == true
+      key.isControl = true
+    end
+  end
+
   local activeTrkId = state.activeTrack or 1
   local botTrkId = state.bottomRowTrack or 1
   local topTrkId = state.topRowTrack or 3
@@ -1006,6 +1035,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
         keyUpdates[strCode].trkArpStep = (t.arpIsPlaying == true)
         keyUpdates[strCode].trkSustainMode = t.sustainMode or "off"
         keyUpdates[strCode].trkChordMode = (t.chordModeActive == true)
+        keyUpdates[strCode].trkVolumePercent = math.floor(((t.volume or 100) / 127) * 100 + 0.5)
       end
     end
   end
@@ -1307,6 +1337,11 @@ createMidiWebview = function()
       local tId = math.floor(tonumber(body.trackId) or 0)
       if controlsModule and controlsModule.selectTrack and tId >= 1 and tId <= 4 then
         controlsModule.selectTrack(tId)
+      end
+    elseif body.type == "adjustTrackVolume" and body.trackId then
+      local tId = math.floor(tonumber(body.trackId) or 0)
+      if controlsModule and controlsModule.adjustTrackVolume and tId >= 1 and tId <= 4 then
+        controlsModule.adjustTrackVolume(tId, tonumber(body.delta) or 0)
       end
     elseif body.type == "setRoot" and body.root ~= nil then
       state.currentRoot = math.max(0, math.min(11, body.root))

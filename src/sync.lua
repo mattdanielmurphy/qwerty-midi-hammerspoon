@@ -3,6 +3,7 @@
 -- Uses macOS native NSDistributedNotificationCenter via hs.distributednotifications
 
 local sync = {}
+local arpeggiator = require("arpeggiator")
 
 local isSyncing = false
 local configRef = nil
@@ -82,6 +83,8 @@ function sync.init(config, hud, controls)
         local targetChord = chordNum + 1
         if state.chordIdx ~= targetChord then
           state.chordIdx = targetChord
+          local activeTrack = state.tracks and state.tracks[state.activeTrack or 1]
+          if activeTrack then activeTrack.chordIdx = targetChord end
           hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
           stateChanged = true
         end
@@ -97,6 +100,8 @@ function sync.init(config, hud, controls)
     end
 
     if stateChanged then
+      arpeggiator.updateLatchedArpNotes()
+      arpeggiator.updateLatchedArpChordNotes(state.activeTrack or 1)
       log("Synced state from DualSynth: Root=" .. tostring(state.currentRoot) .. " Scale=" .. tostring(state.currentScaleIdx) .. " BPM=" .. tostring(state.arpBpm))
       if hudRef and hudRef.updateWebviewHud then
         hudRef.updateWebviewHud()

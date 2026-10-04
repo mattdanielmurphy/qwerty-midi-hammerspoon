@@ -35,6 +35,7 @@ _G.activeWatchers.arpeggiator = arpeggiator
 
 local function disarmMidiInput(reason)
   state.midiActive = false
+  state.cmdHeld = false
   hs.settings.set("qwertyMidi_wasOpen", false)
   if _G.activeWatchers.midiKeyTap then _G.activeWatchers.midiKeyTap:stop() end
   if _G.activeWatchers.midiScrollTap then _G.activeWatchers.midiScrollTap:stop() end
@@ -141,6 +142,7 @@ function _G.toggleMidiMode(newState)
     end
     -- Reset sustain to prevent stuck notes on disable
     state.sustainActive = false
+    state.cmdHeld = false
     midi.sendMidiCC(64, 0)
     
     -- NOTE: Arpeggiator continues running in background when window is closed,
@@ -293,6 +295,18 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       local flags = event:getFlags()
       local isDown = (event:getType() == hs.eventtap.event.types.keyDown)
 
+      local modifierChanges = (state.cmdHeld ~= (flags.cmd == true)) or
+        (state.shiftHeld ~= (flags.shift == true)) or
+        (state.altHeld ~= (flags.alt == true)) or
+        (state.ctrlHeld ~= (flags.ctrl == true))
+      if modifierChanges then
+        state.cmdHeld = flags.cmd == true
+        state.shiftHeld = flags.shift == true
+        state.altHeld = flags.alt == true
+        state.ctrlHeld = flags.ctrl == true
+        hud.updateWebviewHud()
+      end
+
       -- Exception: Let text input fields receive keystrokes natively
       if state.textInputActive then
         return false
@@ -315,8 +329,11 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
         end
       end
 
-      -- Controller shortcuts must be represented by a visible key in the HUD.
-      -- Leave Command shortcuts to macOS and Control+Tab to app navigation.
+      if flags.cmd then
+        return false
+      end
+
+      -- Control+Tab belongs to macOS/app navigation.
       if (flags.cmd or flags.ctrl) and code == 48 then
         return false
       end
@@ -336,20 +353,6 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       -- Pass cmd and capslock through to macOS for system hotkeys (Cmd+Tab, Cmd+Q, etc.)
       if flags.cmd or flags.capslock then
         return false
-      end
-
-      local isShiftNow = flags.shift == true
-      local isAltNow = flags.alt == true
-      local isCtrlNow = flags.ctrl == true
-
-      local flagsChanged = (isShiftNow ~= (state.shiftHeld == true)) or
-                           (isAltNow ~= (state.altHeld == true)) or
-                           (isCtrlNow ~= (state.ctrlHeld == true))
-      if flagsChanged then
-        state.shiftHeld = isShiftNow
-        state.altHeld = isAltNow
-        state.ctrlHeld = isCtrlNow
-        hud.updateWebviewHud()
       end
 
       if event:getType() == hs.eventtap.event.types.flagsChanged then
