@@ -45,7 +45,6 @@ _G.activeWatchers = _G.activeWatchers or {}
 arpeggiator.setHudModule(hud)
 hud.setControlsModule(controls)
 sync.init(config, hud, controls)
-logic_names.init()
 _G.activeWatchers.logic_names = logic_names
 _G.activeWatchers.sync = sync
 _G.activeWatchers.hud = hud
@@ -59,6 +58,9 @@ local function disarmMidiInput(reason)
   hs.settings.set("qwertyMidi_wasOpen", false)
   if _G.activeWatchers.midiKeyTap then _G.activeWatchers.midiKeyTap:stop() end
   if _G.activeWatchers.midiScrollTap then _G.activeWatchers.midiScrollTap:stop() end
+  if _G.activeWatchers.keyTapWatchdog then _G.activeWatchers.keyTapWatchdog:stop() end
+  if logic_names and logic_names.stop then logic_names.stop() end
+  if arpeggiator and arpeggiator.stopLogicSync then arpeggiator.stopLogicSync() end
   state.pressedKeys = {}
   state.bpmInputMode = false
   print("QWERTY MIDI: keyboard interception disabled — " .. tostring(reason))
@@ -146,6 +148,15 @@ function _G.toggleMidiMode(newState)
     profileLog("Starting midiActive logic")
     _G.activeWatchers.midiKeyTap:start()
     _G.activeWatchers.midiScrollTap:start()
+    if _G.activeWatchers.keyTapWatchdog and not _G.activeWatchers.keyTapWatchdog:running() then
+      _G.activeWatchers.keyTapWatchdog:start()
+    end
+    if logic_names and logic_names.init then
+      logic_names.init()
+    end
+    if arpeggiator and arpeggiator.startLogicSync then
+      arpeggiator.startLogicSync()
+    end
     profileLog("Before showMidiWebview")
     hud.showMidiWebview()
     profileLog("After showMidiWebview")
@@ -173,6 +184,9 @@ function _G.toggleMidiMode(newState)
 
     _G.activeWatchers.midiKeyTap:stop()
     _G.activeWatchers.midiScrollTap:stop()
+    if _G.activeWatchers.keyTapWatchdog then _G.activeWatchers.keyTapWatchdog:stop() end
+    if logic_names and logic_names.stop then logic_names.stop() end
+    if arpeggiator and arpeggiator.stopLogicSync then arpeggiator.stopLogicSync() end
     state.bpmInputMode = false
     state.pressedKeys = {}
     state.sustainKeyDownTime = nil
@@ -418,7 +432,7 @@ end)
 -- keyboard instead of silently restarting and continuing to consume it.
 if _G.activeWatchers.keyTapWatchdog then _G.activeWatchers.keyTapWatchdog:stop() end
 local lastRefreshClickTime = 0
-_G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
+_G.activeWatchers.keyTapWatchdog = hs.timer.new(3.0, function()
   if state.midiActive then
     if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
       failOpenMidiInput("keyboard event tap stopped")
@@ -449,6 +463,9 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.doEvery(3.0, function()
     end
   end
 end)
+if state.midiActive and _G.activeWatchers.keyTapWatchdog then
+  _G.activeWatchers.keyTapWatchdog:start()
+end
 
 -- Reloads keep this global watcher table alive, so delete retired invisible
 -- hotkeys from older bundles as well as avoiding new registrations.
@@ -1989,10 +2006,28 @@ local function syncLogicBpm()
   task:start()
 end
 
+local function startLogicSync()
+  if not state.logicSyncEnabled or not state.midiActive then return end
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  elseif not _G.activeWatchers.logicSyncTimer:running() then
+    _G.activeWatchers.logicSyncTimer:start()
+  end
+  syncLogicBpm()
+end
+
+local function stopLogicSync()
+  if _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer:stop()
+  end
+end
+
 local function toggleLogicSync()
   state.logicSyncEnabled = not state.logicSyncEnabled
-  if state.logicSyncEnabled then
-    syncLogicBpm()
+  if state.logicSyncEnabled and state.midiActive then
+    startLogicSync()
+  else
+    stopLogicSync()
   end
   local spot = {
     title = "LOGIC PRO SYNC",
@@ -2005,10 +2040,9 @@ local function toggleLogicSync()
 end
 
 local function initLogicSync()
-  if not _G.activeWatchers.logicSyncTimer then
-    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  if state.midiActive and state.logicSyncEnabled then
+    startLogicSync()
   end
-  syncLogicBpm()
 end
 
 initLogicSync()
@@ -2152,6 +2186,8 @@ return {
   toggleArp = toggleArp,
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,
+  startLogicSync = startLogicSync,
+  stopLogicSync = stopLogicSync,
   syncLogicBpm = syncLogicBpm,
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,
@@ -18547,6 +18583,11 @@ function logic_names.init()
   if _G.activeWatchers.logicNamesAppWatcher then
     _G.activeWatchers.logicNamesAppWatcher:stop()
     _G.activeWatchers.logicNamesAppWatcher = nil
+  end
+
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if state and not state.midiActive then
+    return
   end
 
   -- Initial scan

@@ -1482,10 +1482,28 @@ local function syncLogicBpm()
   task:start()
 end
 
+local function startLogicSync()
+  if not state.logicSyncEnabled or not state.midiActive then return end
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  elseif not _G.activeWatchers.logicSyncTimer:running() then
+    _G.activeWatchers.logicSyncTimer:start()
+  end
+  syncLogicBpm()
+end
+
+local function stopLogicSync()
+  if _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer:stop()
+  end
+end
+
 local function toggleLogicSync()
   state.logicSyncEnabled = not state.logicSyncEnabled
-  if state.logicSyncEnabled then
-    syncLogicBpm()
+  if state.logicSyncEnabled and state.midiActive then
+    startLogicSync()
+  else
+    stopLogicSync()
   end
   local spot = {
     title = "LOGIC PRO SYNC",
@@ -1498,10 +1516,9 @@ local function toggleLogicSync()
 end
 
 local function initLogicSync()
-  if not _G.activeWatchers.logicSyncTimer then
-    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  if state.midiActive and state.logicSyncEnabled then
+    startLogicSync()
   end
-  syncLogicBpm()
 end
 
 initLogicSync()
@@ -1645,6 +1662,8 @@ return {
   toggleArp = toggleArp,
   handleBpmInput = handleBpmInput,
   toggleLogicSync = toggleLogicSync,
+  startLogicSync = startLogicSync,
+  stopLogicSync = stopLogicSync,
   syncLogicBpm = syncLogicBpm,
   stepLogicBpm = stepLogicBpm,
   setLogicBpmTarget = setLogicBpmTarget,

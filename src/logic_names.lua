@@ -161,6 +161,11 @@ function logic_names.init()
     _G.activeWatchers.logicNamesAppWatcher = nil
   end
 
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if state and not state.midiActive then
+    return
+  end
+
   -- Initial scan
   logic_names.updateTrackNames(true)
 
