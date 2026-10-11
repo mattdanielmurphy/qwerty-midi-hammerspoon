@@ -58,12 +58,17 @@ Deliver comprehensive fix and enhancement suite for qwerty-midi-hammerspoon acro
 | m1_explorer_1 | teamwork_preview_explorer | M1 Audio Test Suite Design | completed | f75cf65e-3197-4c6a-b620-aa6303f8b448 |
 | m1_explorer_2 | teamwork_preview_explorer | M1 HUD Test Suite Design | completed | dad44884-3f49-469a-98bf-94637a1b2ca2 |
 | m1_explorer_3 | teamwork_preview_explorer | M1 Build Pipeline Hardening Design | completed | 3542376f-200b-4e09-954a-068a2d5eef9a |
-| worker_m1 | teamwork_preview_worker | M1 Test Infra & Build Hardening | in-progress | 5a434663-f466-4a1d-a008-0b1df79ca0ef |
+| worker_m1 | teamwork_preview_worker | M1 Test Infra & Build Hardening | completed | 5a434663-f466-4a1d-a008-0b1df79ca0ef |
+| m1_reviewer_1 | teamwork_preview_reviewer | M1 Pipeline Review | in-progress | 100b3348-4730-4f40-ade2-0bdf0eb4b17d |
+| m1_reviewer_2 | teamwork_preview_reviewer | M1 Robustness Review | in-progress | 7b54a45e-bded-406b-9ada-7d5e5a1a3bb2 |
+| m1_challenger_1 | teamwork_preview_challenger | M1 Build Stress Challenger | in-progress | 4c50efb3-1de2-4f5d-b170-ce815e76a95c |
+| m1_challenger_2 | teamwork_preview_challenger | M1 Contract Stress Challenger | in-progress | 21c4e36c-d961-4cb4-ab21-a8a1765f3c64 |
+| m1_auditor_1 | teamwork_preview_auditor | M1 Forensic Integrity Audit | in-progress | 63292479-75da-41eb-babe-d11b90f58d08 |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 7 / 16
-- Pending subagents: 5a434663-f466-4a1d-a008-0b1df79ca0ef
+- Spawn count: 12 / 16
+- Pending subagents: 100b3348-4730-4f40-ade2-0bdf0eb4b17d, 7b54a45e-bded-406b-9ada-7d5e5a1a3bb2, 4c50efb3-1de2-4f5d-b170-ce815e76a95c, 21c4e36c-d961-4cb4-ab21-a8a1765f3c64, 63292479-75da-41eb-babe-d11b90f58d08
 - Predecessor: none
 - Successor: not yet spawned
 
