@@ -14,6 +14,5583 @@ local function __require(modname)
   return require(modname)
 end
 
+__modules["arpeggiator"] = function()
+local config = __require("config")
+local midi = __require("midi")
+local transposer = __require("transposer")
+
+local state = config.state
+local upperRowKeys = config.upperRowKeys
+local lowerRowKeys = config.lowerRowKeys
+local ARP_DIRECTIONS = state.ARP_DIRECTIONS
+local ARP_RATES = state.ARP_RATES
+local ARP_GATES = state.ARP_GATES
+local DIGIT_KEYCODES = state.DIGIT_KEYCODES
+
+
+local function countTableKeys(t)
+  local count = 0
+  for _ in pairs(t or {}) do count = count + 1 end
+  return count
+end
+
+local function newArpEngine()
+  return {
+    heldNotes = {},
+    targetHeldNotes = {},
+    keysCurrentlyHeld = {},
+    stepIndex = 1,
+    stepDirection = 1,
+    pos = 0,
+    currentPitch = nil,
+    beatPosition = 0,
+    activeGateTimers = {},
+    gateGeneration = 0,
+    latchClearedForNewChord = false,
+  }
+end
+
+state.arpEngineTop = newArpEngine()
+state.arpEngineBottom = newArpEngine()
+state.arpEngineLinked = newArpEngine()
+
+local function setHudModule(m)
+  hudModule = m
+end
+
+local function updateHud(spotlightInfo, activeArpPitch)
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
+  end
+end
+
+local function stopEngineState(eng)
+  eng.beatPosition = 0
+  if eng.activeGateTimers then
+    for pitchInfo, entry in pairs(eng.activeGateTimers) do
+      if entry and entry.timer then entry.timer:stop() end
+      local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
+      local ch = entry and entry.channel or 0
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
+    end
+    eng.activeGateTimers = {}
+  end
+  if eng.currentPitch then
+    local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+    local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+    midi.sendMidiNote("noteOff", p, 0, c)
+    eng.currentPitch = nil
+  end
+  eng.stepIndex = 1
+  eng.stepDirection = 1
+  eng.pos = 0
+end
+
+local function stopArpTimer()
+  stopEngineState(state.arpEngineTop)
+  stopEngineState(state.arpEngineBottom)
+  stopEngineState(state.arpEngineLinked)
+  state.arpBeatPosition = 0
+  if state.arpActiveGateTimers then
+    for pitchInfo, entry in pairs(state.arpActiveGateTimers) do
+      if entry and entry.timer then entry.timer:stop() end
+      local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
+      local ch = entry and entry.channel or 0
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
+    end
+    state.arpActiveGateTimers = {}
+  end
+  if state.arpGateTimer then
+    state.arpGateTimer:stop()
+    state.arpGateTimer = nil
+  end
+  if state.arpTimer then
+    state.arpTimer:stop()
+    state.arpTimer = nil
+  end
+  if state.arpCurrentPitch then
+    local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+    local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+    midi.sendMidiNote("noteOff", p, 0, c)
+    state.arpCurrentPitch = nil
+  end
+  state.arpStepIndex = 1
+  state.arpStepDirection = 1
+  state.arpPos = 0
+end
+
+local function getArpIntervalSeconds()
+  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
+  return (60.0 / state.arpBpm) * rateFactor
+end
+
+local function arpTickEngine(eng, isTopRow)
+  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
+  local prevBeat = math.floor(eng.beatPosition or 0)
+  local prevBar = math.floor((eng.beatPosition or 0) / 4)
+  eng.beatPosition = (eng.beatPosition or 0) + rateFactor
+  local currentBeat = math.floor(eng.beatPosition)
+  local currentBar = math.floor(eng.beatPosition / 4)
+  local doSync = false
+  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then doSync = true
+  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then doSync = true end
+  if doSync then
+    eng.heldNotes = {}
+    if eng.targetHeldNotes then
+      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
+    end
+    local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
+      stopEngineState(eng)
+      if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 then
+        if state.arpTimer then state.arpTimer:stop(); state.arpTimer = nil end
+      end
+      updateHud()
+      return
+    end
+  end
+  local pitchList = {}
+  for code, pitch in pairs(eng.heldNotes) do
+    if pitch then table.insert(pitchList, pitch) end
+  end
+  table.sort(pitchList)
+  if #pitchList == 0 then
+    if eng.activeGateTimers then
+      for pitch, entry in pairs(eng.activeGateTimers) do
+        if entry and entry.timer then entry.timer:stop() end
+        local ch = entry and entry.channel or 0
+        midi.sendMidiNote("noteOff", pitch, 0, ch)
+      end
+      eng.activeGateTimers = {}
+    end
+    if eng.currentPitch then
+      local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+      local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      eng.currentPitch = nil
+      updateHud()
+    end
+    return
+  end
+  if state.arpDirectionIdx == 1 then
+    eng.stepIndex = (eng.pos % #pitchList) + 1
+  elseif state.arpDirectionIdx == 2 then
+    local pos = (eng.pos % #pitchList) + 1
+    eng.stepIndex = #pitchList - pos + 1
+  elseif state.arpDirectionIdx == 3 then
+    if eng.stepIndex > #pitchList then
+      eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
+    elseif eng.stepIndex < 1 then
+      eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1
+    end
+  elseif state.arpDirectionIdx == 4 then
+    if eng.stepIndex > #pitchList or eng.stepIndex < 1 then
+      eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
+    end
+  elseif state.arpDirectionIdx == 5 then
+    local pos = (eng.pos % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then idx = math.floor(pos / 2) + 1
+    else idx = #pitchList - math.floor(pos / 2) + 1 end
+    eng.stepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif state.arpDirectionIdx == 6 then
+    local pos = (eng.pos % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then idx = mid
+    elseif pos % 2 == 0 then idx = mid + math.floor(pos / 2)
+    else idx = mid - math.floor(pos / 2) end
+    if idx < 1 or idx > #pitchList then idx = ((pos - 1) % #pitchList) + 1 end
+    eng.stepIndex = idx
+  elseif state.arpDirectionIdx == 7 then
+    eng.stepIndex = math.random(1, #pitchList)
+  end
+  eng.stepIndex = math.max(1, math.min(#pitchList, eng.stepIndex or 1))
+  local nextPitch = pitchList[eng.stepIndex]
+  if state.arpDirectionIdx == 3 then
+    if #pitchList == 1 then eng.stepIndex = 1; eng.stepDirection = 1
+    else
+      eng.stepIndex = eng.stepIndex + eng.stepDirection
+      if eng.stepIndex > #pitchList then eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
+      elseif eng.stepIndex < 1 then eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1 end
+    end
+  elseif state.arpDirectionIdx == 4 then
+    if #pitchList == 1 then eng.stepIndex = 1; eng.stepDirection = -1
+    else
+      eng.stepIndex = eng.stepIndex + eng.stepDirection
+      if eng.stepIndex < 1 then eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1
+      elseif eng.stepIndex > #pitchList then eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1 end
+    end
+  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
+    eng.pos = (eng.pos or 0) + 1
+  end
+  local success, err = pcall(function()
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    local vel = transposer.getEffectiveRowVelocity(isTopRow)
+    local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
+    if gateRatio <= 1.0 and eng.currentPitch then
+      local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+      local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+      if eng.activeGateTimers and eng.activeGateTimers[oldP] then
+        if eng.activeGateTimers[oldP].timer then eng.activeGateTimers[oldP].timer:stop() end
+        eng.activeGateTimers[oldP] = nil
+      end
+      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
+      eng.currentPitch = nil
+    end
+    local isAudible = true
+    if state.tracks then
+      local trkId = 4
+      for id, t in pairs(state.tracks) do
+        if t.channel == ch then
+          trkId = id
+          break
+        end
+      end
+      local trk = state.tracks[trkId]
+      if trk and trk.muted then isAudible = false end
+      local anySolo = false
+      for _, t in pairs(state.tracks) do
+        if t.soloed then anySolo = true; break end
+      end
+      if anySolo and trk and not trk.soloed then isAudible = false end
+    end
+
+    if isAudible then
+      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+      eng.currentPitch = { pitch = nextPitch, channel = ch }
+
+      local gateDuration = getArpIntervalSeconds() * gateRatio
+      local pitchToRelease = nextPitch
+      local releaseCh = ch
+      local timer = hs.timer.doAfter(gateDuration, function()
+        local ok, e = pcall(function()
+          midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+          if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
+            eng.currentPitch = nil
+          end
+          if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
+        end)
+        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+      end)
+      eng.activeGateTimers = eng.activeGateTimers or {}
+      if eng.activeGateTimers[pitchToRelease] then
+        if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
+        eng.activeGateTimers[pitchToRelease] = nil
+      end
+      eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
+    end
+  end)
+  if not success then print("[Arp Engine Error] " .. tostring(err)) end
+  return nextPitch
+end
+
+local function isTrackAudible(trkId)
+  if not state.tracks then return true end
+  local trk = state.tracks[trkId]
+  if not trk then return true end
+  if trk.muted then return false end
+  local anySolo = false
+  for _, t in pairs(state.tracks) do
+    if t.soloed then anySolo = true; break end
+  end
+  if anySolo then
+    return trk.soloed == true
+  end
+  return true
+end
+
+local function silenceTrack(trkId)
+  local trk = state.tracks and state.tracks[trkId]
+  if not trk then return end
+  local ch = trk.channel or 0
+  if trk.activeGateTimers then
+    for pitch, entry in pairs(trk.activeGateTimers) do
+      if entry and entry.timer then entry.timer:stop() end
+      local c = entry and entry.channel or ch
+      midi.sendMidiNote("noteOff", pitch, 0, c)
+    end
+    trk.activeGateTimers = {}
+  end
+  if trk.currentPitch then
+    local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
+    midi.sendMidiNote("noteOff", p, 0, c)
+    trk.currentPitch = nil
+  end
+  if midi and midi.silenceChannel then
+    midi.silenceChannel(ch)
+  end
+  trk.arpIsPlaying = false
+  trk.activeNotesCount = 0
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+end
+
+local function arpTickTrack(trk)
+  if not trk then return nil end
+  local rateFactor = ARP_RATES[trk.arpRateIdx or state.arpRateIdx] and ARP_RATES[trk.arpRateIdx or state.arpRateIdx].factor or 0.5
+  local prevBeat = math.floor(trk.beatPosition or 0)
+  local prevBar = math.floor((trk.beatPosition or 0) / 4)
+  trk.beatPosition = (trk.beatPosition or 0) + rateFactor
+  local currentBeat = math.floor(trk.beatPosition)
+  local currentBar = math.floor(trk.beatPosition / 4)
+  local doSync = false
+  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then doSync = true
+  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then doSync = true end
+  if doSync then
+    trk.heldNotes = {}
+    if trk.targetHeldNotes then
+      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+    end
+    if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
+      stopEngineState(trk)
+      return nil
+    end
+  end
+
+  local pitchList = {}
+  for code, pitch in pairs(trk.heldNotes or {}) do
+    if pitch then table.insert(pitchList, pitch) end
+  end
+  table.sort(pitchList)
+
+  if #pitchList == 0 then
+    if trk.activeGateTimers then
+      for pitch, entry in pairs(trk.activeGateTimers) do
+        if entry and entry.timer then entry.timer:stop() end
+        local ch = entry and entry.channel or trk.channel or 0
+        midi.sendMidiNote("noteOff", pitch, 0, ch)
+      end
+      trk.activeGateTimers = {}
+    end
+    if trk.currentPitch then
+      local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+      local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      trk.currentPitch = nil
+    end
+    trk.arpIsPlaying = false
+    return nil
+  end
+
+  local dirIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
+  if dirIdx == 1 then
+    trk.stepIndex = (trk.pos % #pitchList) + 1
+  elseif dirIdx == 2 then
+    local pos = (trk.pos % #pitchList) + 1
+    trk.stepIndex = #pitchList - pos + 1
+  elseif dirIdx == 3 then
+    if trk.stepIndex > #pitchList then
+      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+    elseif trk.stepIndex < 1 then
+      trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
+    end
+  elseif dirIdx == 4 then
+    if trk.stepIndex > #pitchList or trk.stepIndex < 1 then
+      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+    end
+  elseif dirIdx == 5 then
+    local pos = (trk.pos % #pitchList) + 1
+    local idx
+    if pos % 2 == 1 then idx = math.floor(pos / 2) + 1
+    else idx = #pitchList - math.floor(pos / 2) + 1 end
+    trk.stepIndex = math.max(1, math.min(#pitchList, idx))
+  elseif dirIdx == 6 then
+    local pos = (trk.pos % #pitchList) + 1
+    local mid = math.floor((#pitchList + 1) / 2)
+    local idx
+    if pos == 1 then idx = mid
+    elseif pos % 2 == 0 then idx = mid + math.floor(pos / 2)
+    else idx = mid - math.floor(pos / 2) end
+    if idx < 1 or idx > #pitchList then idx = ((pos - 1) % #pitchList) + 1 end
+    trk.stepIndex = idx
+  elseif dirIdx == 7 then
+    trk.stepIndex = math.random(1, #pitchList)
+  end
+  trk.stepIndex = math.max(1, math.min(#pitchList, trk.stepIndex or 1))
+  local nextPitch = pitchList[trk.stepIndex]
+
+  if dirIdx == 3 then
+    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = 1
+    else
+      trk.stepIndex = trk.stepIndex + trk.stepDirection
+      if trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
+      elseif trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1 end
+    end
+  elseif dirIdx == 4 then
+    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = -1
+    else
+      trk.stepIndex = trk.stepIndex + trk.stepDirection
+      if trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
+      elseif trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1 end
+    end
+  elseif dirIdx == 1 or dirIdx == 2 or dirIdx == 5 or dirIdx == 6 then
+    trk.pos = (trk.pos or 0) + 1
+  end
+
+  local success, err = pcall(function()
+    local gateRatio = (trk.arpGatePercent or state.arpGatePercent or 80.0) / 100.0
+    local vel = math.floor(math.min(127, (trk.volume or 100) * 1.0))
+    local ch = trk.channel or 0
+
+    if gateRatio <= 1.0 and trk.currentPitch then
+      local oldP = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+      local oldCh = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
+      if trk.activeGateTimers and trk.activeGateTimers[oldP] then
+        if trk.activeGateTimers[oldP].timer then trk.activeGateTimers[oldP].timer:stop() end
+        trk.activeGateTimers[oldP] = nil
+      end
+      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
+      trk.currentPitch = nil
+    end
+
+    local isAudible = isTrackAudible(trk.id)
+    if isAudible then
+      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
+      trk.currentPitch = { pitch = nextPitch, channel = ch }
+      trk.arpIsPlaying = true
+
+      local trackRateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+      local trackStepSec = (60.0 / (state.arpBpm or 120.0)) * trackRateFactor
+      local gateDuration = trackStepSec * gateRatio
+      local pitchToRelease = nextPitch
+      local releaseCh = ch
+      trk.activeGateTimers = trk.activeGateTimers or {}
+      local priorGate = trk.activeGateTimers[pitchToRelease]
+      if priorGate and priorGate.timer then priorGate.timer:stop() end
+      local gateGeneration = (trk.gateGeneration or 0) + 1
+      trk.gateGeneration = gateGeneration
+      local timer = hs.timer.doAfter(gateDuration, function()
+        local ok, e = pcall(function()
+          local activeGate = trk.activeGateTimers and trk.activeGateTimers[pitchToRelease]
+          if activeGate and activeGate.generation == gateGeneration then
+            midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
+            if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
+              trk.currentPitch = nil
+            end
+            trk.arpIsPlaying = false
+            trk.activeGateTimers[pitchToRelease] = nil
+          end
+          if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
+        end)
+        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
+      end)
+      trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh, generation = gateGeneration }
+      if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
+    else
+      trk.arpIsPlaying = false
+    end
+  end)
+  if not success then print("[Arp Track Error] " .. tostring(err)) end
+  return nextPitch
+end
+
+local function stopTrackArp(trk)
+  if not trk then return end
+  if trk.timer then
+    trk.timer:stop()
+    trk.timer = nil
+  end
+  silenceTrack(trk.id)
+end
+
+local function startTrackArp(trk, preserveState)
+  if not trk then return end
+  if trk.timer then
+    trk.timer:stop()
+    trk.timer = nil
+  end
+  local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+  local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+  if not preserveState then
+    if trk.arpDirectionIdx == 4 then
+      trk.stepIndex = 999 
+      trk.stepDirection = -1
+    else
+      trk.stepIndex = 1
+      trk.stepDirection = 1
+    end
+    trk.pos = 0
+    arpTickTrack(trk)
+  end
+  trk.timer = hs.timer.doEvery(intervalSeconds, function()
+    arpTickTrack(trk)
+  end)
+end
+
+local function isAnyTrackArpActive()
+  if not state.tracks then return false end
+  for _, trk in pairs(state.tracks) do
+    if trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
+      return true
+    end
+  end
+  return false
+end
+
+local function safeEvaluateJS(js)
+  if not _G.activeWatchers.midiWebview then return end
+  local ok, err = pcall(function()
+    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
+  end)
+  if not ok then
+    hudLog("evaluateJavaScript error: " .. tostring(err))
+  end
+  return ok
+end
+
+local function arpTick()
+  local start = hs.timer.absoluteTime()
+  local activeP = nil
+
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk and trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
+        local p = arpTickTrack(trk)
+        if i == (state.activeTrack or 1) then
+          activeP = p
+        end
+      end
+    end
+  else
+    if not state.arpLinked then
+      local p1 = arpTickEngine(state.arpEngineTop, true)
+      local p2 = arpTickEngine(state.arpEngineBottom, false)
+      activeP = p1 or p2
+    else
+      activeP = arpTickEngine(state.arpEngineTop, false)
+    end
+  end
+
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  else
+    updateHud(nil, activeP)
+  end
+  
+  local durationMs = (hs.timer.absoluteTime() - start) / 1000000
+  if durationMs > 15 then print(string.format("[Arp Perf Warning] arpTick took %.2f ms", durationMs)) end
+end
+
+local function sendHudPayload(payload)
+  local jsonStr = hs.json.encode(payload)
+  safeEvaluateJS("renderHud(" .. jsonStr .. ")")
+end
+
+local function startArpTimer(preserveState)
+  if state.arpTimer then return end
+  local intervalSeconds = getArpIntervalSeconds()
+  if not preserveState then
+    if state.arpDirectionIdx == 4 then
+      state.arpStepIndex = 999 
+      state.arpStepDirection = -1
+    else
+      state.arpStepIndex = 1
+      state.arpStepDirection = 1
+    end
+    state.arpPos = 0
+    arpTick()
+  end
+  state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
+end
+
+local function arpAddNote(code, pitch, trackIdx)
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+  local trkId = trackIdx or defaultTrk
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    trk.keysCurrentlyHeld = trk.keysCurrentlyHeld or {}
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
+    if isLatched then
+      if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
+        trk.targetHeldNotes = {}
+        trk.latchClearedForNewChord = true
+        if trk.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
+          local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
+          local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
+          midi.sendMidiNote("noteOff", p, 0, c)
+          trk.currentPitch = nil
+        end
+      end
+    end
+    trk.keysCurrentlyHeld[code] = true
+    trk.targetHeldNotes = trk.targetHeldNotes or {}
+    trk.targetHeldNotes[code] = pitch
+    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+      trk.heldNotes = {}
+      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+      if not trk.timer and (trk.arpEnabled or state.arpEnabled) then
+        startTrackArp(trk)
+      end
+    end
+    return
+  end
+
+  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
+  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
+  if state.arpLatchActive then
+    if numPhysicalHeld == 0 or not eng.latchClearedForNewChord then
+      eng.targetHeldNotes = {}
+      eng.latchClearedForNewChord = true
+      if eng.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
+        local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+        local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
+        midi.sendMidiNote("noteOff", p, 0, c)
+        eng.currentPitch = nil
+      end
+    end
+  end
+  eng.keysCurrentlyHeld[code] = true
+  eng.targetHeldNotes = eng.targetHeldNotes or {}
+  eng.targetHeldNotes[code] = pitch
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    eng.heldNotes = {}
+    for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
+    if not state.arpTimer then
+      startArpTimer()
+    end
+  end
+
+  if state.arpLinked then
+    state.arpHeldNotes = state.arpEngineLinked.heldNotes
+    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
+    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
+  end
+end
+
+local function arpRemoveNote(code, trackIdx)
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+  local trkId = trackIdx or defaultTrk
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    if trk.keysCurrentlyHeld then
+      trk.keysCurrentlyHeld[code] = nil
+    end
+    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
+    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
+    if isLatched then
+      if numPhysicalHeld == 0 then
+        trk.latchClearedForNewChord = false
+      end
+    else
+      if trk.targetHeldNotes then
+        trk.targetHeldNotes[code] = nil
+      end
+    end
+    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+      trk.heldNotes = {}
+      if trk.targetHeldNotes then
+        for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
+      end
+      if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
+        stopTrackArp(trk)
+        updateHud()
+      end
+    end
+    return
+  end
+
+  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+  local noteKey = rawCode and config.getNoteKey(rawCode)
+  local isTop = noteKey and noteKey.isTop or false
+  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
+  eng.keysCurrentlyHeld[code] = nil
+  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
+  if state.arpLatchActive or state.sustainActive then
+    if numPhysicalHeld == 0 then
+      eng.latchClearedForNewChord = false
+    end
+  else
+    if eng.targetHeldNotes then
+      eng.targetHeldNotes[code] = nil
+    end
+  end
+  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
+    eng.heldNotes = {}
+    if eng.targetHeldNotes then
+      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
+    end
+    if state.arpLinked then
+      if countTableKeys(eng.heldNotes) == 0 then
+        stopEngineState(eng)
+        stopArpTimer()
+        updateHud()
+      end
+    else
+      local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
+      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
+        stopEngineState(eng)
+        stopArpTimer()
+        updateHud()
+      end
+    end
+  end
+
+  if state.arpLinked then
+    state.arpHeldNotes = state.arpEngineLinked.heldNotes
+    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
+    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
+  end
+end
+
+local function formatBpm(bpm)
+  if bpm == math.floor(bpm) then
+    return tostring(math.floor(bpm))
+  else
+    return string.format("%.1f", bpm)
+  end
+end
+
+local function applyBpmChange()
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk and trk.timer then
+        trk.timer:stop()
+        local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
+        local newInterval = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+        trk.timer = hs.timer.doEvery(newInterval, function() arpTickTrack(trk) end)
+      end
+    end
+  end
+  if state.arpTimer then
+    state.arpTimer:stop()
+    local newInterval = getArpIntervalSeconds()
+    state.arpTimer = hs.timer.doEvery(newInterval, arpTick)
+  end
+end
+
+-- Tracks own their timing.  The header and rate keys control the focused track
+-- so a rate change immediately replaces that track's running clock interval.
+local function setTrackArpRate(rateIdx, targetTrackIdx)
+  local normalizedRateIdx = math.max(1, math.min(#ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  state.arpRateIdx = normalizedRateIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    if state.arpTimer then applyBpmChange() end
+    return nil, normalizedRateIdx
+  end
+
+  trk.arpRateIdx = normalizedRateIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpRateIdx", normalizedRateIdx)
+  end
+  if trk.timer then
+    trk.timer:stop()
+    local rateFactor = ARP_RATES[normalizedRateIdx] and ARP_RATES[normalizedRateIdx].factor or 0.25
+    local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
+    trk.timer = hs.timer.doEvery(intervalSeconds, function()
+      arpTickTrack(trk)
+    end)
+  end
+
+  return trk, normalizedRateIdx
+end
+
+local function setTrackArpDirection(dirIdx, targetTrackIdx)
+  local normalizedDirIdx = math.max(1, math.min(#ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+
+  local trackId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trackId]
+  if not trk then
+    return nil, normalizedDirIdx
+  end
+
+  trk.arpDirectionIdx = normalizedDirIdx
+  if trk.id then
+    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  return trk, normalizedDirIdx
+end
+
+local function applyGatePercentChange()
+  if state.arpTimer then
+    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
+    if not state.arpLinked then
+      if gateRatio <= 1.0 then
+        for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
+          if eng.activeGateTimers then
+            for pitch, entry in pairs(eng.activeGateTimers) do
+              local curPitchNum = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
+              if pitch ~= curPitchNum then
+                if entry and entry.timer then entry.timer:stop() end
+                local ch = entry and entry.channel or 0
+                midi.sendMidiNote("noteOff", pitch, 0, ch)
+                eng.activeGateTimers[pitch] = nil
+              end
+            end
+          end
+        end
+      end
+      return
+    end
+    if state.arpActiveGateTimers then
+      if gateRatio <= 1.0 then
+        for pitch, entry in pairs(state.arpActiveGateTimers) do
+          local curPitchNum = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+          if pitch ~= curPitchNum then
+            if entry and entry.timer then entry.timer:stop() end
+            local ch = entry and entry.channel or 0
+            midi.sendMidiNote("noteOff", pitch, 0, ch)
+            state.arpActiveGateTimers[pitch] = nil
+          end
+        end
+      end
+    end
+  end
+end
+
+local function rebuildNoteTable(noteTable, trk, chordSourcesOnly)
+  local baseCodeCounts = {}
+  local uniqueBaseCodes = {}
+  local keysToRemove = {}
+  for code, _ in pairs(noteTable) do
+    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+    if rawCode then
+      baseCodeCounts[rawCode] = (baseCodeCounts[rawCode] or 0) + 1
+      uniqueBaseCodes[rawCode] = true
+      table.insert(keysToRemove, code)
+    end
+  end
+
+  for _, code in ipairs(keysToRemove) do
+    noteTable[code] = nil
+  end
+
+  for rawCode, _ in pairs(uniqueBaseCodes) do
+    local noteKey = config.getNoteKey(rawCode)
+    if noteKey then
+      local wasChord = (baseCodeCounts[rawCode] or 1) > 1
+      local isChord = wasChord
+      if isChord then
+        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop,
+          { enabled = true, chordIdx = (trk and trk.chordIdx) or state.chordIdx })
+        for _, p in ipairs(newPitches) do
+          noteTable[tostring(rawCode) .. "_" .. tostring(p)] = p
+        end
+      else
+        local newPitch = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
+        noteTable[tostring(rawCode) .. "_" .. tostring(newPitch)] = newPitch
+      end
+    end
+  end
+end
+
+local function rebuildHeldVoiceSources()
+  if not (state.tracks and state.pressedKeys) then return end
+  local anySolo = false
+  for _, trk in pairs(state.tracks) do if trk.soloed then anySolo = true; break end end
+
+  for trkId, trk in pairs(state.tracks) do
+    local oldByChannel, newByChannel = {}, {}
+    local function add(set, channel, pitches)
+      set[channel] = set[channel] or {}
+      for _, pitch in ipairs(pitches or {}) do set[channel][pitch] = true end
+    end
+    local function render(source)
+      if not source.basePitch then return source.pitches or { source.pitch } end
+      if source.isChordSource then
+        return transposer.getChordPitches(source.basePitch, source.isTop == true,
+          { enabled = true, chordIdx = trk.chordIdx or source.chordIdx or state.chordIdx })
+      end
+      return { transposer.getTransposedPitch(source.basePitch, source.isTop == true) }
+    end
+
+    for _, info in pairs(state.pressedKeys) do
+      if type(info) == "table" and not info.isControl and not info.isArpNote and info.track == trkId then
+        local channel = info.channel or trk.channel or 0
+        add(oldByChannel, channel, info.pitches)
+        info.pitches = render(info)
+        add(newByChannel, channel, info.pitches)
+      end
+    end
+    local sustainedGroups, rebuiltSustained = {}, {}
+    for index, item in ipairs(trk.sustainedPitches or {}) do
+      local sourceId = item.sourceCode or ("legacy-" .. index)
+      local group = sustainedGroups[sourceId]
+      if not group then
+        group = { source = item, oldPitches = {} }
+        sustainedGroups[sourceId] = group
+      end
+      group.oldPitches[item.pitch] = true
+    end
+    for _, group in pairs(sustainedGroups) do
+      local item = group.source
+      local channel = item.channel or trk.channel or 0
+      local oldPitches = {}
+      for pitch in pairs(group.oldPitches) do table.insert(oldPitches, pitch) end
+      add(oldByChannel, channel, oldPitches)
+      local pitches = render(item)
+      add(newByChannel, channel, pitches)
+      for _, pitch in ipairs(pitches) do
+        local replacement = {}
+        for key, value in pairs(item) do if key ~= "pitches" then replacement[key] = value end end
+        replacement.pitch = pitch
+        replacement.pitches = nil
+        table.insert(rebuiltSustained, replacement)
+      end
+    end
+    trk.sustainedPitches = rebuiltSustained
+
+    for channel, pitches in pairs(oldByChannel) do
+      for pitch in pairs(pitches) do
+        if not (newByChannel[channel] and newByChannel[channel][pitch]) then
+          midi.sendMidiNote("noteOff", pitch, 0, channel)
+        end
+      end
+    end
+    if not trk.muted and (not anySolo or trk.soloed) then
+      local velocity = transposer.getEffectiveRowVelocity(trkId > 2)
+      for channel, pitches in pairs(newByChannel) do
+        for pitch in pairs(pitches) do
+          if not (oldByChannel[channel] and oldByChannel[channel][pitch]) then
+            midi.sendMidiNote("noteOn", pitch, velocity, channel)
+          end
+        end
+      end
+    end
+  end
+end
+
+local function updateLatchedArpNotes()
+  if not state.tracks and not state.arpLinked then
+    for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
+      if next(eng.heldNotes) ~= nil then
+        rebuildNoteTable(eng.heldNotes)
+      end
+      if eng.targetHeldNotes and next(eng.targetHeldNotes) ~= nil then
+        rebuildNoteTable(eng.targetHeldNotes)
+      end
+    end
+    return
+  end
+
+  if state.tracks then
+    for _, trk in pairs(state.tracks) do
+      if trk.heldNotes and next(trk.heldNotes) ~= nil then
+        rebuildNoteTable(trk.heldNotes, trk)
+      end
+      if trk.targetHeldNotes and next(trk.targetHeldNotes) ~= nil then
+        rebuildNoteTable(trk.targetHeldNotes, trk)
+      end
+    end
+  end
+
+  if next(state.arpHeldNotes) ~= nil then
+    rebuildNoteTable(state.arpHeldNotes)
+  end
+  if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
+    rebuildNoteTable(state.arpTargetHeldNotes)
+  end
+  rebuildHeldVoiceSources()
+end
+
+local function updateLatchedArpChordNotes(targetTrackId)
+  targetTrackId = targetTrackId or state.activeTrack or 1
+  if state.tracks then
+    for trkId, trk in pairs(state.tracks) do
+      if not targetTrackId or targetTrackId == trkId then
+        if trk.heldNotes then rebuildNoteTable(trk.heldNotes, trk, true) end
+        if trk.targetHeldNotes then rebuildNoteTable(trk.targetHeldNotes, trk, true) end
+      end
+    end
+  else
+    updateLatchedArpNotes()
+    return
+  end
+
+  -- Also reconcile currently held and sustained voices. Chord provenance is kept
+  -- on each source; only the selected track's chordIdx has changed.
+  updateLatchedArpNotes()
+end
+
+local function getArpRowTargetSubtext()
+  if state.tracks then
+    local trk = state.tracks[state.activeTrack or 1]
+    return trk and ("Track " .. trk.id .. ": " .. trk.name) or "Active Track"
+  end
+  if state.arpTopEnabled and state.arpBottomEnabled then
+    return "Top & Bottom Rows"
+  elseif state.arpTopEnabled then
+    return "Top Row Only"
+  elseif state.arpBottomEnabled then
+    return "Bottom Row Only"
+  else
+    return "No Rows Active"
+  end
+end
+
+local function toggleArpPower(targetTrackIdx)
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    if not trk.arpEnabled then
+      trk.arpEnabled = true
+      trk.arpLatchActive = true
+      trk.latchClearedForNewChord = false
+    elseif trk.arpLatchActive then
+      trk.arpLatchActive = false
+      local newHeld = {}
+      for code, pitch in pairs(trk.heldNotes or {}) do
+        if trk.keysCurrentlyHeld[code] then
+          newHeld[code] = pitch
+        end
+      end
+      trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
+      if countTableKeys(trk.heldNotes) == 0 then
+        stopTrackArp(trk)
+      end
+    else
+      trk.arpEnabled = false
+      trk.arpLatchActive = false
+      stopTrackArp(trk)
+      trk.heldNotes = {}
+      trk.keysCurrentlyHeld = {}
+    end
+
+    state.arpEnabled = trk.arpEnabled
+    state.arpLatchActive = trk.arpLatchActive
+
+    local valStr = "ARP: OFF"
+    local subStr = "Track " .. trkId .. " Arp Disabled"
+    if trk.arpEnabled then
+      if trk.arpLatchActive then
+        valStr = "ARP: LATCH 🔒"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH 🔒 • " .. formatBpm(state.arpBpm) .. " BPM"
+      else
+        valStr = "ARP: ON"
+        subStr = "Track " .. trkId .. " (" .. trk.name .. ") ON • " .. formatBpm(state.arpBpm) .. " BPM"
+      end
+    end
+
+    local spot = {
+      title = "TRACK " .. trkId .. " ARP",
+      value = valStr,
+      subtext = subStr,
+      targetId = "key-0",
+      color = trk.color or "#64d8f0"
+    }
+    updateHud(spot)
+    config.saveSettings()
+    return
+  end
+
+  if not state.arpEnabled then
+    state.arpEnabled = true
+    state.arpLatchActive = true
+    state.arpLatchClearedForNewChord = false
+  elseif state.arpLatchActive then
+    state.arpLatchActive = false
+    local newHeld = {}
+    for code, pitch in pairs(state.arpHeldNotes) do
+      if state.arpKeysCurrentlyHeld[code] then
+        newHeld[code] = pitch
+      end
+    end
+    state.arpHeldNotes = newHeld
+    
+    local count = countTableKeys(state.arpHeldNotes)
+    if count == 0 then
+      stopArpTimer()
+      if state.arpCurrentPitch then
+        local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+        local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+        midi.sendMidiNote("noteOff", p, 0, c)
+        state.arpCurrentPitch = nil
+      end
+    end
+  else
+    state.arpEnabled = false
+    state.arpLatchActive = false
+    stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpEngineTop = newArpEngine()
+    state.arpEngineBottom = newArpEngine()
+  end
+
+  local valStr = "ARP: OFF"
+  local subStr = "Arp Disabled"
+  if state.arpEnabled then
+    if not state.arpTopEnabled and not state.arpBottomEnabled then
+      valStr = "ARP: ON (MUTED)"
+      subStr = "⚠️ Top & Bottom rows are both disabled"
+    elseif state.arpLatchActive then
+      valStr = "ARP: LATCH 🔒"
+      subStr = "LATCH 🔒 (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    else
+      valStr = "ARP: ON"
+      subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
+    end
+  end
+
+  local spot = {
+    title = "ARP POWER",
+    value = valStr,
+    subtext = subStr,
+    targetId = "key-0",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+  config.saveSettings()
+end
+
+local function toggleArpLatch(targetTrackIdx)
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  local curLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
+  local targetLatch = not curLatch
+
+  if trk then
+    trk.arpLatchActive = targetLatch
+    if targetLatch then
+      trk.arpEnabled = true
+      trk.latchClearedForNewChord = false
+      -- If notes are currently physically held on the keyboard for this track, latch them now
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.pitches then
+          for _, p in ipairs(info.pitches) do
+            local keyId = code .. "_" .. p
+            trk.heldNotes[keyId] = p
+            trk.targetHeldNotes[keyId] = p
+            trk.keysCurrentlyHeld[keyId] = true
+          end
+        end
+      end
+      if countTableKeys(trk.heldNotes) > 0 then
+        startTrackArp(trk)
+      end
+    else
+      local newHeld = {}
+      for code, pitch in pairs(trk.heldNotes or {}) do
+        local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+        if trk.keysCurrentlyHeld[code] or (rawCode and state.pressedKeys[rawCode]) then
+          newHeld[code] = pitch
+        end
+      end
+      trk.heldNotes = newHeld
+      trk.targetHeldNotes = {}
+      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
+      if countTableKeys(trk.heldNotes) == 0 then
+        stopTrackArp(trk)
+      end
+    end
+  else
+    state.arpLatchActive = targetLatch
+    if targetLatch then
+      state.arpEnabled = true
+      state.arpLatchClearedForNewChord = false
+    else
+      local newHeld = {}
+      for code, pitch in pairs(state.arpHeldNotes or {}) do
+        if state.arpKeysCurrentlyHeld[code] or state.pressedKeys[code] then
+          newHeld[code] = pitch
+        end
+      end
+      state.arpHeldNotes = newHeld
+      if countTableKeys(state.arpHeldNotes) == 0 then
+        stopArpTimer()
+      end
+    end
+  end
+
+  state.arpLatchActive = targetLatch
+  if targetLatch then
+    state.arpEnabled = true
+  end
+
+  config.saveSettings()
+
+  local spot = {
+    title = "TRACK " .. trkId .. " LATCH",
+    value = targetLatch and "LATCH 🔒 ON" or "LATCH OFF",
+    subtext = "Track " .. trkId .. " (" .. (trk and trk.name or "Track") .. ") • Latch " .. (targetLatch and "Active 🔒 (held notes loop)" or "Disabled (momentary)"),
+    targetId = "key-0",
+    color = (trk and trk.color) or "#64d8f0"
+  }
+  updateHud(spot)
+  return targetLatch
+end
+
+local function clearTrackArp(trackId)
+  local trkId = trackId or state.activeTrack or 1
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    stopEngineState(trk)
+    trk.heldNotes = {}
+    trk.targetHeldNotes = {}
+    trk.keysCurrentlyHeld = {}
+    trk.latchClearedForNewChord = false
+    trk.arpEnabled = false
+    trk.arpLatchActive = false
+    trk.locked = false
+    if not isAnyTrackArpActive() then
+      stopArpTimer()
+    end
+    if trkId == state.activeTrack then
+      state.arpEnabled = false
+      state.arpLatchActive = false
+    end
+    updateHud()
+  end
+end
+
+local function stopAllLoops()
+  if state.tracks then
+    for _, trk in pairs(state.tracks) do
+      stopEngineState(trk)
+      trk.heldNotes = {}
+      trk.targetHeldNotes = {}
+      trk.keysCurrentlyHeld = {}
+      trk.arpEnabled = false
+      trk.arpLatchActive = false
+      trk.locked = false
+    end
+  end
+  stopArpTimer()
+  state.arpEnabled = false
+  state.arpLatchActive = false
+  updateHud()
+end
+
+local function toggleArp()
+  toggleArpPower()
+end
+
+local function handleBpmInput(code, flags)
+  if code == 53 then -- Escape
+    state.arpBpm = state.bpmBeforeEdit
+    state.bpmInputMode = false
+    state.bpmInputBuffer = ""
+    updateHud()
+    config.saveSettings()
+    return true
+  elseif code == 36 then -- Return
+    if state.bpmInputBuffer ~= "" then
+      local val = tonumber(state.bpmInputBuffer)
+      if val and val >= 20 and val <= 300 then
+        state.arpBpm = val
+      end
+    end
+    local prevBpm = state.bpmBeforeEdit
+    state.bpmInputMode = false
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    setLogicBpmTarget(state.arpBpm, prevBpm)
+    updateHud()
+    config.saveSettings()
+    return true
+  elseif code == 126 then -- Arrow Up
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    state.arpBpm = math.min(300, state.arpBpm + delta)
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    updateHud()
+    return true
+  elseif code == 125 then -- Arrow Down
+    local delta = 1
+    if flags.shift then delta = 10
+    elseif flags.alt then delta = 0.1 end
+    state.arpBpm = math.max(20, state.arpBpm - delta)
+    state.bpmInputBuffer = ""
+    applyBpmChange()
+    updateHud()
+    return true
+  elseif code == 51 then -- Backspace
+    if #state.bpmInputBuffer > 0 then
+      state.bpmInputBuffer = state.bpmInputBuffer:sub(1, -2)
+    end
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer ~= "" and (state.bpmInputBuffer .. " BPM") or "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  elseif DIGIT_KEYCODES[code] then
+    state.bpmInputBuffer = state.bpmInputBuffer .. DIGIT_KEYCODES[code]
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  elseif code == 47 then -- Period "."
+    if not state.bpmInputBuffer:find("%.") then
+      state.bpmInputBuffer = state.bpmInputBuffer .. "."
+    end
+    local spot = {
+      title = "EDIT BPM",
+      value = state.bpmInputBuffer .. " BPM",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    updateHud(spot)
+    return true
+  end
+
+  state.bpmInputMode = false
+  state.bpmInputBuffer = ""
+  updateHud()
+  return false
+end
+
+local isSyncingLogicBpm = false
+local logicBpmTask = nil
+local logicBpmDebounceTimer = nil
+
+local function setLogicBpmTarget(targetBpm)
+  if not state.logicSyncEnabled then return end
+
+  if logicBpmDebounceTimer then
+    logicBpmDebounceTimer:stop()
+    logicBpmDebounceTimer = nil
+  end
+
+  logicBpmDebounceTimer = hs.timer.doAfter(0.40, function()
+    logicBpmDebounceTimer = nil
+    if logicBpmTask then
+      logicBpmTask:terminate()
+      logicBpmTask = nil
+    end
+
+    isSyncingLogicBpm = true
+
+    local script = string.format([[
+      property minBPM : 5
+      property maxBPM : 990
+
+      on setExactBPM(targetBPM)
+        set targetBPM to targetBPM as integer
+        
+        if targetBPM < minBPM then set targetBPM to minBPM
+        if targetBPM > maxBPM then set targetBPM to maxBPM
+        
+        tell application "System Events"
+          tell process "Logic Pro"
+            set tempoSlider to missing value
+            set allSliders to sliders of group 1 of group 1 of window 1
+            repeat with s in allSliders
+              if description of s is "Tempo" then
+                set tempoSlider to s
+                exit repeat
+              end if
+            end repeat
+            
+            if tempoSlider is missing value then return targetBPM
+            
+            repeat 20 times
+              set currentBPM to (value of tempoSlider) as integer
+              set deltaBPM to targetBPM - currentBPM
+              
+              if deltaBPM = 0 then return currentBPM
+              
+              if deltaBPM > 0 then
+                set goingUp to true
+                set amountLeft to deltaBPM
+              else
+                set goingUp to false
+                set amountLeft to -deltaBPM
+              end if
+              
+              set tenSteps to amountLeft div 10
+              repeat tenSteps times
+                if goingUp then
+                  perform action "AXIncrement" of tempoSlider
+                else
+                  perform action "AXDecrement" of tempoSlider
+                end if
+              end repeat
+              
+              set oneSteps to amountLeft mod 10
+              repeat oneSteps times
+                if goingUp then
+                  set value of tempoSlider to maxBPM
+                else
+                  set value of tempoSlider to minBPM
+                end if
+              end repeat
+            end repeat
+          end tell
+        end tell
+      end setExactBPM
+
+      setExactBPM(%d)
+    ]], math.floor(targetBpm + 0.5))
+
+    logicBpmTask = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+      isSyncingLogicBpm = false
+      logicBpmTask = nil
+    end, { "-e", script })
+    logicBpmTask:start()
+  end)
+end
+
+local function stepLogicBpm(delta)
+  setLogicBpmTarget(state.arpBpm)
+end
+
+local function syncLogicBpm()
+  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
+  isSyncingLogicBpm = true
+
+  local script = [[
+    var bpm = null;
+    try {
+      var se = Application('System Events');
+      var logic = se.processes['Logic Pro'];
+      if (logic && logic.exists()) {
+        var win = logic.windows[0];
+        if (win && win.exists()) {
+          var grp = win.groups[0];
+          if (grp && grp.exists()) {
+            var ctrlBar = grp.uiElements[0];
+            if (ctrlBar && ctrlBar.exists()) {
+              var elems = ctrlBar.uiElements();
+              for (var i = 0; i < elems.length; i++) {
+                if (elems[i].description() === 'Tempo') {
+                  bpm = parseFloat(elems[i].value());
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch(e) {}
+    bpm;
+  ]]
+
+  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
+    isSyncingLogicBpm = false
+    if exitCode == 0 and stdOut then
+      local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
+      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
+        state.arpBpm = val
+        applyBpmChange()
+        updateHud()
+      end
+    end
+  end, { "-l", "JavaScript", "-e", script })
+  task:start()
+end
+
+local function startLogicSync()
+  if not state.logicSyncEnabled or not state.midiActive then return end
+  if not _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
+  elseif not _G.activeWatchers.logicSyncTimer:running() then
+    _G.activeWatchers.logicSyncTimer:start()
+  end
+  syncLogicBpm()
+end
+
+local function stopLogicSync()
+  if _G.activeWatchers.logicSyncTimer then
+    _G.activeWatchers.logicSyncTimer:stop()
+  end
+end
+
+local function toggleLogicSync()
+  state.logicSyncEnabled = not state.logicSyncEnabled
+  if state.logicSyncEnabled and state.midiActive then
+    startLogicSync()
+  else
+    stopLogicSync()
+  end
+  local spot = {
+    title = "LOGIC PRO SYNC",
+    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
+    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
+    targetId = "bpm-val",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+end
+
+local function initLogicSync()
+  if state.midiActive and state.logicSyncEnabled then
+    startLogicSync()
+  end
+end
+
+initLogicSync()
+
+local function clearRowEngine(isTop)
+  local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+  stopEngineState(eng)
+  eng.heldNotes = {}
+  eng.targetHeldNotes = {}
+  eng.keysCurrentlyHeld = {}
+  eng.latchClearedForNewChord = false
+  local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
+  if countTableKeys(otherEng.heldNotes) == 0 then
+    if state.arpTimer then
+      state.arpTimer:stop()
+      state.arpTimer = nil
+    end
+  end
+end
+
+local function setArpPowerImplicit(enabled)
+  state.arpEnabled = enabled
+  if not enabled then
+    stopArpTimer()
+    if state.arpCurrentPitch then
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      state.arpCurrentPitch = nil
+    end
+    stopEngineState(state.arpEngineTop)
+    stopEngineState(state.arpEngineBottom)
+  else
+    if countTableKeys(state.arpHeldNotes) > 0 or countTableKeys(state.arpEngineTop.heldNotes) > 0 or countTableKeys(state.arpEngineBottom.heldNotes) > 0 then
+      if not state.arpTimer then startArpTimer() end
+    end
+  end
+  updateHud()
+end
+
+local function toggleArpLink()
+  state.arpLinked = not state.arpLinked
+  if state.arpLinked then
+    state.arpHeldNotes = {}
+    state.arpTargetHeldNotes = state.arpTargetHeldNotes or {}
+    state.arpKeysCurrentlyHeld = {}
+    for k, v in pairs(state.arpEngineTop.heldNotes) do state.arpHeldNotes[k] = v end
+    for k, v in pairs(state.arpEngineBottom.heldNotes) do state.arpHeldNotes[k] = v end
+    for k, v in pairs(state.arpEngineTop.targetHeldNotes or {}) do state.arpTargetHeldNotes[k] = v end
+    for k, v in pairs(state.arpEngineBottom.targetHeldNotes or {}) do state.arpTargetHeldNotes[k] = v end
+    for k, v in pairs(state.arpEngineTop.keysCurrentlyHeld) do state.arpKeysCurrentlyHeld[k] = v end
+    for k, v in pairs(state.arpEngineBottom.keysCurrentlyHeld) do state.arpKeysCurrentlyHeld[k] = v end
+    stopEngineState(state.arpEngineTop)
+    stopEngineState(state.arpEngineBottom)
+    state.arpStepIndex = 1
+    state.arpStepDirection = 1
+    state.arpPos = 0
+    state.arpBeatPosition = 0
+    if countTableKeys(state.arpHeldNotes) == 0 and state.arpTimer then
+      stopArpTimer()
+    end
+  else
+    state.arpEngineTop = newArpEngine()
+    state.arpEngineBottom = newArpEngine()
+    for code, pitch in pairs(state.arpHeldNotes) do
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      local noteKey = rawCode and config.getNoteKey(rawCode)
+      local isTop = noteKey and noteKey.isTop or false
+      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+      eng.heldNotes[code] = pitch
+    end
+    for code, pitch in pairs(state.arpTargetHeldNotes or {}) do
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      local noteKey = rawCode and config.getNoteKey(rawCode)
+      local isTop = noteKey and noteKey.isTop or false
+      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+      eng.targetHeldNotes[code] = pitch
+    end
+    for code, v in pairs(state.arpKeysCurrentlyHeld) do
+      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
+      local noteKey = rawCode and config.getNoteKey(rawCode)
+      local isTop = noteKey and noteKey.isTop or false
+      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
+      eng.keysCurrentlyHeld[code] = v
+    end
+    if state.arpCurrentPitch then
+      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
+      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
+      midi.sendMidiNote("noteOff", p, 0, c)
+      state.arpCurrentPitch = nil
+    end
+    if state.arpActiveGateTimers then
+      for pitch, entry in pairs(state.arpActiveGateTimers) do
+        if entry and entry.timer then entry.timer:stop() end
+        local ch = entry and entry.channel or 0
+        midi.sendMidiNote("noteOff", pitch, 0, ch)
+      end
+      state.arpActiveGateTimers = {}
+    end
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpTargetHeldNotes = {}
+    if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 and state.arpTimer then
+      stopArpTimer()
+    end
+  end
+  local spot = {
+    title = "ARP LINK",
+    value = state.arpLinked and "LINKED" or "SPLIT",
+    subtext = state.arpLinked and "Top & Bottom share one pattern" or "Top & Bottom run independently",
+    targetId = "header",
+    color = "#d4a359"
+  }
+  updateHud(spot)
+  config.saveSettings()
+end
+
+return {
+  setHudModule = setHudModule,
+  stopArpTimer = stopArpTimer,
+  getArpIntervalSeconds = getArpIntervalSeconds,
+  startArpTimer = startArpTimer,
+  startTrackArp = startTrackArp,
+  stopTrackArp = stopTrackArp,
+  silenceTrack = silenceTrack,
+  isTrackAudible = isTrackAudible,
+  arpTickTrack = arpTickTrack,
+  arpAddNote = arpAddNote,
+  arpRemoveNote = arpRemoveNote,
+  formatBpm = formatBpm,
+  applyBpmChange = applyBpmChange,
+  setTrackArpRate = setTrackArpRate,
+  setTrackArpDirection = setTrackArpDirection,
+  applyGatePercentChange = applyGatePercentChange,
+  updateLatchedArpNotes = updateLatchedArpNotes,
+  updateLatchedArpChordNotes = updateLatchedArpChordNotes,
+  getArpRowTargetSubtext = getArpRowTargetSubtext,
+  toggleArpPower = toggleArpPower,
+  toggleArpLatch = toggleArpLatch,
+  isAnyTrackArpActive = isAnyTrackArpActive,
+  toggleArp = toggleArp,
+  handleBpmInput = handleBpmInput,
+  toggleLogicSync = toggleLogicSync,
+  startLogicSync = startLogicSync,
+  stopLogicSync = stopLogicSync,
+  syncLogicBpm = syncLogicBpm,
+  stepLogicBpm = stepLogicBpm,
+  setLogicBpmTarget = setLogicBpmTarget,
+  toggleArpLink = toggleArpLink,
+  clearRowEngine = clearRowEngine,
+  clearTrackArp = clearTrackArp,
+  stopAllLoops = stopAllLoops,
+  setArpPowerImplicit = setArpPowerImplicit
+}
+
+end
+
+__modules["clock"] = function()
+-- packages/music-engine/clock.lua
+-- Tempo, BPM conversion, rates, and timing calculations.
+
+local ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" }
+
+local ARP_RATES = {
+  -- Straight rates (slow → fast)
+  { label = "4",     factor = 16.0 },
+  { label = "2",     factor = 8.0 },
+  { label = "1",     factor = 4.0 },
+  { label = "1/2",   factor = 2.0 },
+  { label = "1/4",   factor = 1.0 },
+  { label = "1/8",   factor = 0.5 },
+  { label = "1/16",  factor = 0.25 },
+  { label = "1/32",  factor = 0.125 },
+  { label = "1/64",  factor = 0.0625 },
+  -- Triplet rates (slow → fast)
+  { label = "4T",    factor = 16.0 / 1.5 },
+  { label = "2T",    factor = 8.0  / 1.5 },
+  { label = "1T",    factor = 4.0  / 1.5 },
+  { label = "1/2T",  factor = 2.0  / 1.5 },
+  { label = "1/4T",  factor = 1.0  / 1.5 },
+  { label = "1/8T",  factor = 0.5  / 1.5 },
+  { label = "1/16T", factor = 0.25 / 1.5 },
+  { label = "1/32T", factor = 0.125 / 1.5 },
+  { label = "1/64T", factor = 0.0625 / 1.5 }
+}
+
+local function getRateFactor(rateIdx)
+  local rate = ARP_RATES[rateIdx] or ARP_RATES[5]
+  return rate.factor
+end
+
+local function bpmToIntervalSeconds(bpm, rateIdx)
+  local clampedBpm = math.max(20.0, math.min(999.0, bpm or 120.0))
+  local quarterNoteDuration = 60.0 / clampedBpm
+  local factor = getRateFactor(rateIdx)
+  return quarterNoteDuration * factor
+end
+
+local function getGateDurationSeconds(intervalSeconds, gatePercent)
+  local clampedGate = math.max(5.0, math.min(100.0, gatePercent or 80.0)) / 100.0
+  return math.max(0.010, intervalSeconds * clampedGate)
+end
+
+return {
+  ARP_DIRECTIONS = ARP_DIRECTIONS,
+  ARP_RATES = ARP_RATES,
+  getRateFactor = getRateFactor,
+  bpmToIntervalSeconds = bpmToIntervalSeconds,
+  getGateDurationSeconds = getGateDurationSeconds
+}
+
+end
+
+__modules["config"] = function()
+local function getSetting(key, default)
+  local val = hs.settings.get("qwertyMidi_" .. key)
+  if val == nil then return default end
+  if type(default) == "number" then
+    local num = tonumber(val)
+    return num ~= nil and num or default
+  elseif type(default) == "boolean" then
+    if type(val) == "boolean" then return val end
+    if type(val) == "number" then return val ~= 0 end
+    if type(val) == "string" then return val == "true" or val == "1" end
+  end
+  return val
+end
+
+local state = {
+  midiActive = false,
+  currentMode = "Home",
+  modeSelectHeld = false,
+  modeWasSelectedDuringHold = false,
+  currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
+  currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
+  octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
+  topRowOctaveOffset = getSetting("topRowOctaveOffset", 12), -- Independent Top Row Octave Offset
+  bottomRowOctaveOffset = getSetting("bottomRowOctaveOffset", 0), -- Independent Bottom Row Octave Offset
+  transposeShift = getSetting("transposeShift", 0),     -- Transpose offset in scale degrees (-12 to +12)
+  sustainActive = false,      -- Sustain toggle state (CC64)
+  sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
+  sustainWasActiveOnPress = false,
+  arpLatchActive = getSetting("arpLatchActive", false),  -- Arpeggiator Latch mode
+  cmdHeld = false,
+  shiftHeld = false,          -- Shift key active state
+  altHeld = false,            -- Option (Alt) key active state
+  ctrlHeld = false,           -- Control key active state
+  zoomLevel = getSetting("zoomLevel", 1.0),
+  BASE_HUD_SCALE = 1.4,
+
+  -- UI Styling (Clean Dark Studio Grayscale)
+  uiActionKeyHue = getSetting("uiActionKeyHue", 0),
+  uiActionKeySat = getSetting("uiActionKeySat", 0),
+  uiActionKeyLight = getSetting("uiActionKeyLight", 70),
+  uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
+  uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
+
+  -- Chord Trigger State
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = {
+    { name = "Triad", offsets = { 0, 2, 4 } },
+    { name = "7th", offsets = { 0, 2, 4, 6 } },
+    { name = "9th", offsets = { 0, 2, 4, 6, 8 } },
+    { name = "Power (1-5)", offsets = { 0, 4 } },
+    { name = "Octaves", offsets = { 0, 7 } }
+  },
+
+  -- Arpeggiator State
+  arpEnabled = getSetting("arpEnabled", false),
+  arpDirectionIdx = getSetting("arpDirectionIdx", 1),    -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
+  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
+  arpRateIdx = getSetting("arpRateIdx", 5),
+  ARP_RATES = {
+    -- Straight rates (slow → fast)
+    { label = "4",     factor = 16.0 },
+    { label = "2",     factor = 8.0 },
+    { label = "1",     factor = 4.0 },
+    { label = "1/2",   factor = 2.0 },
+    { label = "1/4",   factor = 1.0 },
+    { label = "1/8",   factor = 0.5 },
+    { label = "1/16",  factor = 0.25 },
+    { label = "1/32",  factor = 0.125 },
+    { label = "1/64",  factor = 0.0625 },
+    -- Triplet rates (slow → fast)
+    { label = "4T",    factor = 16.0 / 1.5 },
+    { label = "2T",    factor = 8.0  / 1.5 },
+    { label = "1T",    factor = 4.0  / 1.5 },
+    { label = "1/2T",  factor = 2.0  / 1.5 },
+    { label = "1/4T",  factor = 1.0  / 1.5 },
+    { label = "1/8T",  factor = 0.5  / 1.5 },
+    { label = "1/16T", factor = 0.25 / 1.5 },
+    { label = "1/32T", factor = 0.125 / 1.5 },
+    { label = "1/64T", factor = 0.0625 / 1.5 }
+  },
+  arpGatePercent = getSetting("arpGatePercent", 80.0),
+  arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
+  inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
+  arpBpm = getSetting("arpBpm", 120.0),
+  arpTimer = nil,
+  arpGateTimer = nil,
+  arpHeldNotes = {},          -- [code] = pitch
+  arpKeysCurrentlyHeld = {},  -- [code] = true
+  arpCurrentPitch = nil,
+  arpStepIndex = 1,
+  arpStepDirection = 1,
+  lastArpMode = 1,
+  arpTopEnabled = getSetting("arpTopEnabled", true),
+  arpBottomEnabled = getSetting("arpBottomEnabled", true),
+  arpLinked = getSetting("arpLinked", true),
+
+  -- BPM Input Mode & Sync State
+  bpmInputMode = false,
+  bpmInputBuffer = "",
+  bpmBeforeEdit = 120.0,
+  bpmStepSize = getSetting("bpmStepSize", 10),
+  logicSyncEnabled = (hs.settings.get("qwertyMidi_logicSyncEnabled") == nil) and true or hs.settings.get("qwertyMidi_logicSyncEnabled"),
+  logicSyncTimer = nil,
+
+  -- Scroll / Trackpad
+  scrollSensitivity     = getSetting("scrollSensitivity", 0.15),
+  scrollAcceleration    = getSetting("scrollAcceleration", 1.0),
+  scrollInertiaInitial  = getSetting("scrollInertiaInitial", 1.0),
+  scrollInertiaDecay    = getSetting("scrollInertiaDecay", 0.85),
+  scrollCurveExponent   = getSetting("scrollCurveExponent", 1.0),
+  scrollMaxInertiaMs    = getSetting("scrollMaxInertiaMs", 250),
+  scrollInertiaCutoff   = getSetting("scrollInertiaCutoff", 0.5),
+
+  DIGIT_KEYCODES = {
+    [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
+    [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
+  },
+
+  topRowVolume = getSetting("track3Volume", getSetting("topRowVolume", 100)),
+  bottomRowVolume = getSetting("track1Volume", getSetting("bottomRowVolume", 100)),
+  topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
+  bottomRowChannel = getSetting("bottomRowChannel", 1),    -- MIDI Channel 1 (Ch 2 in 1-based indexing)
+  arpChannel = getSetting("arpChannel", 2),            -- Dedicated Arp MIDI Channel 2 (Ch 3 in 1-based indexing)
+  splitArpTopBoost = 20,
+
+  tracks = {
+    [1] = {
+      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255",
+      volume = getSetting("track1Volume", 100),
+      octaveOffset = getSetting("track1OctaveOffset", 0),
+      attack = getSetting("track1Attack", 0),
+      decay = getSetting("track1Decay", 64),
+      muted = false, soloed = false, armed = true, locked = false,
+      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track1ChordIdx", 1),
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
+    },
+    [2] = {
+      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0",
+      volume = getSetting("track2Volume", 100),
+      octaveOffset = getSetting("track2OctaveOffset", 0),
+      attack = getSetting("track2Attack", 0),
+      decay = getSetting("track2Decay", 64),
+      muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track2ChordIdx", 1),
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
+    },
+    [3] = {
+      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118",
+      volume = getSetting("track3Volume", 100),
+      octaveOffset = getSetting("track3OctaveOffset", 12),
+      attack = getSetting("track3Attack", 0),
+      decay = getSetting("track3Decay", 64),
+      muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track3ChordIdx", 1),
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
+    },
+    [4] = {
+      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249",
+      volume = getSetting("track4Volume", 100),
+      octaveOffset = getSetting("track4OctaveOffset", 12),
+      attack = getSetting("track4Attack", 0),
+      decay = getSetting("track4Decay", 64),
+      muted = false, soloed = false, armed = false, locked = false,
+      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track4ChordIdx", 1),
+      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
+      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
+      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
+    },
+  },
+  bottomRowTrack = getSetting("bottomRowTrack", (getSetting("activeTrack", 1) <= 2 and getSetting("activeTrack", 1) or 1)),
+  topRowTrack = getSetting("topRowTrack", (getSetting("activeTrack", 1) > 2 and getSetting("activeTrack", 1) or 3)),
+  activeTrack = getSetting("activeTrack", 1),
+
+  ccStates = {
+    [1] = 0,
+    [7] = 100,
+    [72] = 64
+  },
+
+  chordIdx = getSetting("chordIdx", 1),
+  quoteHeld = false,
+  CHORDS = { { name = "Triad", offsets = { 0, 2, 4 } }, { name = "7th", offsets = { 0, 2, 4, 6 } }, { name = "9th", offsets = { 0, 2, 4, 6, 8 } }, { name = "Power (1-5)", offsets = { 0, 4 } }, { name = "Octaves", offsets = { 0, 7 } } },
+  pressedKeys = {},
+  sustainedPitches = {},
+  spotlightInfo = nil,
+  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false),
+  scaleGuideEnabled = getSetting("scaleGuideEnabled", true)
+}
+
+local function saveSettings()
+  state.currentRoot = tonumber(state.currentRoot) or 0
+  state.currentScaleIdx = tonumber(state.currentScaleIdx) or 1
+  state.octaveShift = tonumber(state.octaveShift) or 0
+  state.topRowOctaveOffset = tonumber(state.topRowOctaveOffset) or 0
+  state.bottomRowOctaveOffset = tonumber(state.bottomRowOctaveOffset) or 0
+  state.transposeShift = tonumber(state.transposeShift) or 0
+  state.arpDirectionIdx = tonumber(state.arpDirectionIdx) or 1
+  state.arpRateIdx = tonumber(state.arpRateIdx) or 5
+  state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
+  state.arpBpm = tonumber(state.arpBpm) or 120.0
+  state.bpmStepSize = tonumber(state.bpmStepSize) or 10
+  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
+  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 1.0
+  state.scrollInertiaInitial = tonumber(state.scrollInertiaInitial) or 1.0
+  state.scrollInertiaDecay = tonumber(state.scrollInertiaDecay) or 0.85
+  state.scrollCurveExponent = tonumber(state.scrollCurveExponent) or 1.0
+  state.scrollMaxInertiaMs = tonumber(state.scrollMaxInertiaMs) or 250
+  state.scrollInertiaCutoff = tonumber(state.scrollInertiaCutoff) or 0.5
+  state.topRowVolume = tonumber(state.topRowVolume) or 100
+  state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
+  state.zoomLevel = tonumber(state.zoomLevel) or 1.0
+
+  if state.tracks then
+    for i = 1, 4 do
+      local trk = state.tracks[i]
+      if trk then
+        hs.settings.set("qwertyMidi_track" .. i .. "Volume", trk.volume or 100)
+        hs.settings.set("qwertyMidi_track" .. i .. "OctaveOffset", trk.octaveOffset or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
+        hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
+        hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
+        hs.settings.set("qwertyMidi_track" .. i .. "SustainMode", trk.sustainMode or "smart")
+        hs.settings.set("qwertyMidi_track" .. i .. "ChordIdx", trk.chordIdx or 1)
+      end
+    end
+    local botTrk = state.tracks[state.bottomRowTrack or 1]
+    if botTrk then
+      state.bottomRowOctaveOffset = botTrk.octaveOffset or 0
+      state.bottomRowVolume = botTrk.volume or 100
+    end
+    local topTrk = state.tracks[state.topRowTrack or 3]
+    if topTrk then
+      state.topRowOctaveOffset = topTrk.octaveOffset or 12
+      state.topRowVolume = topTrk.volume or 100
+    end
+  end
+
+  hs.settings.set("qwertyMidi_activeTrack", state.activeTrack or 1)
+  hs.settings.set("qwertyMidi_bottomRowTrack", state.bottomRowTrack or 1)
+  hs.settings.set("qwertyMidi_topRowTrack", state.topRowTrack or 3)
+  hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
+  hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
+  hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
+  hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
+  hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
+  hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
+  hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
+  hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled == true)
+  hs.settings.set("qwertyMidi_chordModeActive", state.chordModeActive == true)
+  hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
+  hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
+  hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
+  hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
+  hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
+  hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
+  hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
+  hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
+  hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
+  hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
+  hs.settings.set("qwertyMidi_arpLinked", state.arpLinked == true)
+  hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
+  hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
+  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
+  hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
+  hs.settings.set("qwertyMidi_scrollInertiaInitial", state.scrollInertiaInitial)
+  hs.settings.set("qwertyMidi_scrollInertiaDecay", state.scrollInertiaDecay)
+  hs.settings.set("qwertyMidi_scrollCurveExponent", state.scrollCurveExponent)
+  hs.settings.set("qwertyMidi_scrollMaxInertiaMs", state.scrollMaxInertiaMs)
+  hs.settings.set("qwertyMidi_scrollInertiaCutoff", state.scrollInertiaCutoff)
+  hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
+  hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
+  hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
+  hs.settings.set("qwertyMidi_stackedKeyLabelsInPerformanceMode", state.stackedKeyLabelsInPerformanceMode == true)
+
+  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastState then
+    _G.activeWatchers.sync.broadcastState(state)
+  end
+end
+
+local SCALES = {
+  { name = "Lydian",                  intervals = { 0, 2, 4, 6, 7, 9, 11 }, brightness = 6, brightTag = "BRIGHTEST ☀️" },
+  { name = "Major / Ionian",          intervals = { 0, 2, 4, 5, 7, 9, 11 }, brightness = 5, brightTag = "BRIGHT 🌤" },
+  { name = "Mixolydian",              intervals = { 0, 2, 4, 5, 7, 9, 10 }, brightness = 4, brightTag = "WARM ⛅" },
+  { name = "Dorian",                  intervals = { 0, 2, 3, 5, 7, 9, 10 }, brightness = 3, brightTag = "NEUTRAL ☁️" },
+  { name = "Natural Minor / Aeolian", intervals = { 0, 2, 3, 5, 7, 8, 10 }, brightness = 2, brightTag = "DARK 🌧" },
+  { name = "Phrygian",                intervals = { 0, 1, 3, 5, 7, 8, 10 }, brightness = 1, brightTag = "DARKER 🌩" },
+  { name = "Locrian",                 intervals = { 0, 1, 3, 5, 6, 8, 10 }, brightness = 0, brightTag = "DARKEST 🌑" },
+  { name = "Harmonic Minor",          intervals = { 0, 2, 3, 5, 7, 8, 11 }, brightness = 2, brightTag = "EXOTIC 🔮" },
+  { name = "Melodic Minor",           intervals = { 0, 2, 3, 5, 7, 9, 11 }, brightness = 3, brightTag = "JAZZY 🎷" }
+}
+
+local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+
+local WHITE_KEY_INDEX = {
+  [0] = 0, [1] = -1, [2] = 1, [3] = -1, [4] = 2, [5] = 3,
+  [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
+}
+
+local defaultNumberRowControls = {
+  [18] = { key = "1", name = "Trk 1: Bass",   action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [19] = { key = "2", name = "Trk 2: Chords", action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [20] = { key = "3", name = "Trk 3: Lead",   action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [21] = { key = "4", name = "Trk 4: Arp",    action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
+  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
+  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
+  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
+  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "botVolDown",   shiftName = "BotVol -" },
+  [25] = { key = "9", name = "Atk -",    action = "atkDown",        shiftAction = "decDown",      shiftName = "Dec -" },
+  [29] = { key = "0", name = "Atk +",    action = "atkUp",          shiftAction = "decUp",        shiftName = "Dec +" },
+  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
+  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
+}
+
+local defaultUpperRowKeys = {
+  [12] = { key = "Q", baseNote = 72, isTop = true }, [13] = { key = "W", baseNote = 74, isTop = true }, [14] = { key = "E", baseNote = 76, isTop = true },
+  [15] = { key = "R", baseNote = 77, isTop = true }, [17] = { key = "T", baseNote = 79, isTop = true }, [16] = { key = "Y", baseNote = 81, isTop = true },
+  [32] = { key = "U", baseNote = 83, isTop = true }, [34] = { key = "I", baseNote = 84, isTop = true }, [31] = { key = "O", baseNote = 86, isTop = true },
+  [35] = { key = "P", baseNote = 88, isTop = true }, [33] = { key = "[", baseNote = 89, isTop = true }, [30] = { key = "]", baseNote = 91, isTop = true }
+}
+
+local defaultLowerRowKeys = {
+  [6]  = { key = "Z", baseNote = 60, isTop = false }, [7]  = { key = "X", baseNote = 62, isTop = false }, [8]  = { key = "C", baseNote = 64, isTop = false },
+  [9]  = { key = "V", baseNote = 65, isTop = false }, [11] = { key = "B", baseNote = 67, isTop = false }, [45] = { key = "N", baseNote = 69, isTop = false },
+  [46] = { key = "M", baseNote = 71, isTop = false }, [43] = { key = ",", baseNote = 72, isTop = false }, [47] = { key = ".", baseNote = 74, isTop = false },
+  [44] = { key = "/", baseNote = 76, isTop = false }
+}
+
+local defaultHomeRowControls = {
+  [48] = { key = "Tab", name = "Smart Sus · 2× Off", action = "sustain", shiftAction = "classicSustain", shiftName = "Classic Sus" },
+  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "arpLatchToggle", shiftName = "Latch" },
+  [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
+  [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
+  [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topVolUp",   shiftName = "TopVol +" },
+  [5]  = { key = "G",   name = "Mode -",  action = "modeDown",    shiftAction = "modWheelDown", shiftName = "Mod -" },
+  [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "rootDown",   shiftName = "Root -" },
+  [38] = { key = "J",   name = "Trnsp -", action = "trnspDown",   shiftAction = "volDown",    shiftName = "Vol -" },
+  [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
+  [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
+  [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
+  [39] = { key = "'",   name = "Chord",   action = "chordToggle",    shiftAction = "chordUp",      shiftName = "Chord +" }
+}
+
+local ACTION_CATALOG = {
+  {
+    category = "Arpeggiator",
+    actions = {
+      { id = "arpToggle", name = "Arp On/Off", typeClass = "ctrl-arp", description = "Toggle arpeggiator engine" },
+      { id = "arpTopToggle", name = "Top Arp", typeClass = "ctrl-arptop", description = "Toggle top row arpeggiator" },
+      { id = "arpBottomToggle", name = "Bot Arp", typeClass = "ctrl-arpbot", description = "Toggle bottom row arpeggiator" },
+      { id = "arpDirUp", name = "Arp Dir +", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction up" },
+      { id = "arpDirDown", name = "Arp Dir -", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction down" },
+      { id = "arpRateUp", name = "Arp Rate +", typeClass = "ctrl-arprate", description = "Increase arpeggiator speed" },
+      { id = "arpRateDown", name = "Arp Rate -", typeClass = "ctrl-arprate", description = "Decrease arpeggiator speed" },
+      { id = "arpGateUp", name = "Arp Gate +", typeClass = "ctrl-arpgate", description = "Lengthen arpeggiator gate" },
+      { id = "arpGateDown", name = "Arp Gate -", typeClass = "ctrl-arpgate", description = "Shorten arpeggiator gate" },
+      { id = "arpLinkToggle", name = "Arp Link", typeClass = "ctrl-arplink", description = "Toggle linked/split arp mode" }
+    }
+  },
+  {
+    category = "Scale & Pitch",
+    actions = {
+      { id = "rootUp", name = "Root +", typeClass = "ctrl-root", description = "Shift root note up" },
+      { id = "rootDown", name = "Root -", typeClass = "ctrl-root", description = "Shift root note down" },
+      { id = "modeUp", name = "Mode +", typeClass = "ctrl-mode", description = "Cycle scale/mode forward" },
+      { id = "modeDown", name = "Mode -", typeClass = "ctrl-mode", description = "Cycle scale/mode backward" },
+      { id = "trnspUp", name = "Trnsp +", typeClass = "ctrl-trnsp", description = "Transpose semitone up" },
+      { id = "trnspDown", name = "Trnsp -", typeClass = "ctrl-trnsp", description = "Transpose semitone down" },
+      { id = "octaveUp", name = "Main Oct +", typeClass = "ctrl-oct", description = "Shift main octave up" },
+      { id = "octaveDown", name = "Main Oct -", typeClass = "ctrl-oct", description = "Shift main octave down" },
+      { id = "botOctUp", name = "Bot Oct +", typeClass = "ctrl-oct", description = "Shift bottom octave up" },
+      { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
+      { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
+      { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
+      { id = "chordMod", name = "Chord Mod", typeClass = "ctrl-mode", description = "Hold for chord trigger mode" },
+      { id = "chordUp", name = "Chord +", typeClass = "ctrl-mode", description = "Cycle chord pattern forward" },
+      { id = "chordDown", name = "Chord -", typeClass = "ctrl-mode", description = "Cycle chord pattern backward" },
+      { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
+    }
+  },
+  {
+    category = "Volume & CC",
+    actions = {
+      { id = "sustain", name = "Smart Sustain", typeClass = "ctrl-sus", description = "Tap to damp; double-tap Tab to turn sustain off" },
+      { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
+      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
+      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
+      { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
+      { id = "topVolDown", name = "Top Vol -", typeClass = "ctrl-vol", description = "Decrease top row velocity" },
+      { id = "botVolUp", name = "Bot Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
+      { id = "botVolDown", name = "Bot Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
+      { id = "atkUp", name = "Attack +", typeClass = "ctrl-atk", description = "Increase track synth attack time" },
+      { id = "atkDown", name = "Attack -", typeClass = "ctrl-atk", description = "Decrease track synth attack time" },
+      { id = "decUp", name = "Decay +", typeClass = "ctrl-dec", description = "Increase track synth decay & tail (ADSR)" },
+      { id = "decDown", name = "Decay -", typeClass = "ctrl-dec", description = "Decrease track synth decay & tail (ADSR)" },
+      { id = "modWheelUp", name = "Mod +", typeClass = "ctrl-modw", description = "Increase modulation wheel CC1" },
+      { id = "modWheelDown", name = "Mod -", typeClass = "ctrl-modw", description = "Decrease modulation wheel CC1" },
+      { id = "panic", name = "Panic!", typeClass = "ctrl-panic", description = "Send all-notes-off MIDI panic" }
+    }
+  },
+  {
+    category = "Tempo & View",
+    actions = {
+      { id = "undoState", name = "Undo", typeClass = "ctrl-reset", description = "Undo last controller state change (scale, pitch, octave, etc.)" },
+      { id = "redoState", name = "Redo State", typeClass = "ctrl-reset", description = "Redo previous controller state change" },
+      { id = "bpmUp", name = "BPM +", typeClass = "ctrl-bpm", description = "Increase tempo" },
+      { id = "bpmDown", name = "BPM -", typeClass = "ctrl-bpm", description = "Decrease tempo" },
+      { id = "zoomIn", name = "Zoom +", typeClass = "ctrl-zoom", description = "Zoom in HUD size" },
+      { id = "zoomOut", name = "Zoom -", typeClass = "ctrl-zoom", description = "Zoom out HUD size" },
+      { id = "resetAll", name = "Reset All", typeClass = "ctrl-reset", description = "Reset settings to defaults" },
+      { id = "none", name = "None", typeClass = "", description = "Unassigned key" }
+    }
+  }
+}
+
+local function deepCopy(orig)
+  if type(orig) ~= "table" then return orig end
+  local copy = {}
+  for k, v in pairs(orig) do
+    copy[k] = deepCopy(v)
+  end
+  return copy
+end
+
+local numberRowControls = deepCopy(defaultNumberRowControls)
+local upperRowKeys = deepCopy(defaultUpperRowKeys)
+local lowerRowKeys = deepCopy(defaultLowerRowKeys)
+local homeRowControls = deepCopy(defaultHomeRowControls)
+
+local function getActionIndex()
+  local idx = {}
+  for _, cat in ipairs(ACTION_CATALOG) do
+    for _, act in ipairs(cat.actions) do
+      idx[act.id] = act
+    end
+  end
+  return idx
+end
+
+local function applyCustomLayout(customData)
+  for k in pairs(numberRowControls) do numberRowControls[k] = nil end
+  for k, v in pairs(deepCopy(defaultNumberRowControls)) do numberRowControls[k] = v end
+
+  for k in pairs(upperRowKeys) do upperRowKeys[k] = nil end
+  for k, v in pairs(deepCopy(defaultUpperRowKeys)) do upperRowKeys[k] = v end
+
+  for k in pairs(homeRowControls) do homeRowControls[k] = nil end
+  for k, v in pairs(deepCopy(defaultHomeRowControls)) do homeRowControls[k] = v end
+
+  for k in pairs(lowerRowKeys) do lowerRowKeys[k] = nil end
+  for k, v in pairs(deepCopy(defaultLowerRowKeys)) do lowerRowKeys[k] = v end
+
+  _cachedActiveNoteKeysMap = nil
+  _cachedActiveControlKeysMap = nil
+
+  if not customData or type(customData) ~= "table" then return end
+
+  local actionIdx = getActionIndex()
+
+  -- Legacy saved layout migration: replace F (code 3) -> arpLatchToggle with Octave +
+  if type(customData.home_row_controls) == "table" then
+    for _, item in ipairs(customData.home_row_controls) do
+      if item.code == 3 and (item.action == "arpLatchToggle" or item.action == "lockLoop" or item.action == "lockAndSwap") then
+        item.action = "octaveUp"
+        item.name = "Oct +"
+        item.shiftAction = "topVolUp"
+        item.shiftName = "TopVol +"
+      end
+    end
+  end
+
+  for codeStr, binding in pairs(customData) do
+    local code = tonumber(codeStr)
+    if code and type(binding) == "table" then
+      if code == 3 and (binding.action == "arpLatchToggle" or binding.action == "lockLoop" or binding.action == "lockAndSwap") then
+        binding.action = "octaveUp"
+        binding.name = "Oct +"
+        binding.shiftAction = "topVolUp"
+        binding.shiftName = "TopVol +"
+      end
+      if binding.action == "none" or binding.isNote == true or (binding.action == nil and binding.shiftAction == nil and binding.baseNote == nil) then
+        -- Revert to default note or control for this keycode
+        local defaultDef = defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultHomeRowControls[code] or defaultNumberRowControls[code]
+        if defaultDef then
+          if defaultUpperRowKeys[code] then upperRowKeys[code] = deepCopy(defaultDef)
+          elseif defaultLowerRowKeys[code] then lowerRowKeys[code] = deepCopy(defaultDef)
+          elseif defaultHomeRowControls[code] then homeRowControls[code] = deepCopy(defaultDef)
+          elseif defaultNumberRowControls[code] then numberRowControls[code] = deepCopy(defaultDef)
+          end
+        end
+      elseif binding.action ~= nil or binding.shiftAction ~= nil then
+        local targetTable = nil
+        if defaultNumberRowControls[code] then targetTable = numberRowControls
+        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
+        elseif defaultUpperRowKeys[code] then targetTable = upperRowKeys
+        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
+        end
+
+        if targetTable then
+          local defaultDef = defaultNumberRowControls[code] or defaultHomeRowControls[code] or defaultUpperRowKeys[code] or defaultLowerRowKeys[code]
+          local actObj = binding.action and actionIdx[binding.action]
+          local shiftActObj = binding.shiftAction and actionIdx[binding.shiftAction]
+
+          local actionVal, nameVal
+          if binding.action ~= nil then
+            actionVal = binding.action
+            nameVal = binding.name
+            if not nameVal or nameVal == "Ctrl" or nameVal == "" then
+              nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
+            end
+          else
+            actionVal = defaultDef and defaultDef.action
+            nameVal = defaultDef and defaultDef.name
+          end
+
+          local shiftActionVal, shiftNameVal
+          if binding.shiftAction ~= nil then
+            shiftActionVal = binding.shiftAction
+            shiftNameVal = binding.shiftName
+            if not shiftNameVal or shiftNameVal == "" then
+              shiftNameVal = (shiftActObj and shiftActObj.name) or (defaultDef and defaultDef.shiftName)
+            end
+          else
+            shiftActionVal = defaultDef and defaultDef.shiftAction
+            shiftNameVal = defaultDef and defaultDef.shiftName
+          end
+
+          targetTable[code] = {
+            key = binding.key or (defaultDef and defaultDef.key),
+            name = nameVal,
+            action = actionVal,
+            shiftAction = shiftActionVal,
+            shiftName = shiftNameVal,
+            baseNote = defaultDef and defaultDef.baseNote,
+            isTop = defaultDef and defaultDef.isTop
+          }
+        end
+      elseif binding.baseNote ~= nil then
+        local targetTable = nil
+        if defaultUpperRowKeys[code] then targetTable = upperRowKeys
+        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
+        elseif defaultNumberRowControls[code] then targetTable = numberRowControls
+        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
+        end
+
+        if targetTable then
+          targetTable[code] = {
+            key = binding.key or (defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultNumberRowControls[code] or defaultHomeRowControls[code]).key,
+            baseNote = binding.baseNote,
+            isTop = (binding.isTop ~= nil) and binding.isTop or (defaultUpperRowKeys[code] ~= nil)
+          }
+        end
+      end
+    end
+  end
+end
+
+local function getActionCatalog()
+  local path = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/actions/actions.json"
+  local f = io.open(path, "r")
+  if f then
+    local content = f:read("*a")
+    f:close()
+    local ok, res = pcall(function() return hs.json.decode(content) end)
+    if ok and res then return res end
+  end
+  return {}
+end
+
+local function getAvailableLayouts()
+  local dir = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/layouts"
+  local list = {}
+  local ok, iter_fn, dir_obj = pcall(hs.fs.dir, dir)
+  if ok and iter_fn and dir_obj then
+    for file in iter_fn, dir_obj do
+      if file and file:match("%.json$") then
+        local fullPath = dir .. "/" .. file
+        local f = io.open(fullPath, "r")
+        if f then
+          local content = f:read("*a")
+          f:close()
+          local sok, res = pcall(function() return hs.json.decode(content) end)
+          if sok and res and res.id then
+            table.insert(list, {
+              id = res.id,
+              name = res.name or res.id,
+              description = res.description or "",
+              filename = file,
+              data = res
+            })
+          end
+        end
+      end
+    end
+  end
+  table.sort(list, function(a, b) return a.name < b.name end)
+  return list
+end
+
+local function getPresetsMap()
+  local layouts = getAvailableLayouts()
+  local map = {}
+  for _, l in ipairs(layouts) do
+    map[l.id] = l
+  end
+  if not map["default"] then
+    map["default"] = { id = "default", name = "Default Layout", data = {} }
+  end
+  return map
+end
+
+local function getActivePresetId()
+  return hs.settings.get("qwertyMidi_activePresetId") or "default"
+end
+
+local function getPresetsList()
+  return getAvailableLayouts()
+end
+
+local function getActivePresetData()
+  local map = getPresetsMap()
+  local activeId = getActivePresetId()
+  local p = map[activeId] or map["default"]
+  return (p and p.data) or {}
+end
+
+local function selectPreset(presetId)
+  local map = getPresetsMap()
+  if not map[presetId] then
+    presetId = "default"
+  end
+  hs.settings.set("qwertyMidi_activePresetId", presetId)
+  local data = (map[presetId] and map[presetId].data) or {}
+  applyCustomLayout(data)
+  saveSettings()
+end
+
+local function saveCustomLayout(newLayoutData)
+  applyCustomLayout(newLayoutData)
+  saveSettings()
+end
+
+local function savePreset(presetId, name, layoutData)
+  return presetId
+end
+
+local function renamePreset(presetId, newName)
+  return false
+end
+
+local function deletePreset(presetId)
+  return false
+end
+
+local function duplicatePreset(presetId, newName)
+  return presetId
+end
+
+local function resetLayout()
+  applyCustomLayout(nil)
+  saveSettings()
+end
+
+local function updateKeyMapping(code, newBinding)
+  -- Key mappings are managed via JSON layout files
+end
+
+local function getLayoutConfig()
+  local presetsList = getPresetsList()
+  local activePresetId = getActivePresetId()
+  local activeData = getActivePresetData()
+
+  return {
+    customized = false,
+    actionCatalog = getActionCatalog(),
+    presets = presetsList,
+    activePresetId = activePresetId,
+    defaults = {
+      numberRow = defaultNumberRowControls,
+      upperRow = defaultUpperRowKeys,
+      homeRow = defaultHomeRowControls,
+      lowerRow = defaultLowerRowKeys
+    },
+    active = {
+      numberRow = numberRowControls,
+      upperRow = upperRowKeys,
+      homeRow = homeRowControls,
+      lowerRow = lowerRowKeys
+    },
+    customLayout = activeData or {}
+  }
+end
+
+applyCustomLayout(getActivePresetData())
+
+local arpAdvancedControlKeysMap = {
+  -- Arp Rate
+  [18] = { key = "1", name = "Rate 1/4",   action = "setArpRate_5" },
+  [19] = { key = "2", name = "Rate 1/8",   action = "setArpRate_6" },
+  [20] = { key = "3", name = "Rate 1/16",  action = "setArpRate_7" },
+  [21] = { key = "4", name = "Rate 1/32",  action = "setArpRate_8" },
+
+  -- Arp Direction
+  [12] = { key = "q", name = "Dir UP",     action = "setArpDir_1" },
+  [13] = { key = "w", name = "Dir DOWN",   action = "setArpDir_2" },
+  [14] = { key = "e", name = "Dir UP/DN",  action = "setArpDir_3" },
+  [15] = { key = "r", name = "Dir DN/UP",  action = "setArpDir_4" },
+  [17] = { key = "t", name = "Dir RAND",   action = "setArpDir_7" },
+
+  -- Arp Quantize
+  [6] = { key = "z", name = "Sync OFF",    action = "setArpQuantize_None" },
+  [7] = { key = "x", name = "Sync BEAT",   action = "setArpQuantize_Beat" },
+  [8] = { key = "c", name = "Sync BAR",    action = "setArpQuantize_Bar" },
+
+  -- Arp Latch
+  [49] = { key = "Space", name = "Arp Latch", action = "arpLatchToggle" },
+}
+local arpAdvancedNoteKeysMap = {}
+
+local defaultKeyStepLowerRowControls = {
+  [6]  = { key = "Z", name = "Trk 1: Bass", action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
+  [7]  = { key = "X", name = "Trk 2: Chd",  action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
+  [8]  = { key = "C", name = "Trk 3: Lead", action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
+  [9]  = { key = "V", name = "Trk 4: Arp",  action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
+  [11] = { key = "B", name = "Lock Loop",   action = "lockLoop",   shiftAction = "lockAndSwap", shiftName = "Lock & Swap" },
+  [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
+  [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
+  [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
+  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "decDown", shiftName = "Dec -" },
+  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "decUp", shiftName = "Dec +" }
+}
+
+local function isKsConnected()
+  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
+    return _G.activeWatchers.keystep.isConnected() == true
+  end
+  return state.keystepConnected == true
+end
+
+local function getNoteKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap[code]
+  end
+  local ksConnected = isKsConnected()
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return nil
+  end
+  local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
+  if k and k.baseNote ~= nil then return k end
+  return nil
+end
+
+local function getControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
+  local ksConnected = isKsConnected()
+  if ksConnected and defaultKeyStepLowerRowControls[code] then
+    return defaultKeyStepLowerRowControls[code]
+  end
+  local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
+  return nil
+end
+
+local function getNumberControlKey(code)
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap[code]
+  end
+  local k = numberRowControls[code]
+  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
+  return nil
+end
+
+
+local _cachedActiveNoteKeysMap = nil
+local _cachedActiveControlKeysMap = nil
+local _cachedKsConnected = nil
+
+local function getActiveNoteKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedNoteKeysMap
+  end
+  local ksConnected = isKsConnected()
+  if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
+  _cachedKsConnected = ksConnected
+  local map = {}
+  for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  if not ksConnected then
+    for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
+  end
+  for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
+  _cachedActiveNoteKeysMap = map
+  return map
+end
+
+local function getActiveControlKeysMap()
+  if state.currentMode == "ArpAdvanced" then
+    return arpAdvancedControlKeysMap
+  end
+  local ksConnected = isKsConnected()
+  if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
+  _cachedKsConnected = ksConnected
+  local map = {}
+  for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  if ksConnected then
+    for code, k in pairs(defaultKeyStepLowerRowControls) do map[code] = k end
+  else
+    for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  end
+  for code, k in pairs(numberRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
+  _cachedActiveControlKeysMap = map
+  return map
+end
+
+
+return {
+  state = state,
+  saveSettings = saveSettings,
+  SCALES = SCALES,
+  NOTE_NAMES = NOTE_NAMES,
+  WHITE_KEY_INDEX = WHITE_KEY_INDEX,
+  ACTION_CATALOG = ACTION_CATALOG,
+  defaultNumberRowControls = defaultNumberRowControls,
+  defaultUpperRowKeys = defaultUpperRowKeys,
+  defaultLowerRowKeys = defaultLowerRowKeys,
+  defaultHomeRowControls = defaultHomeRowControls,
+  defaultKeyStepLowerRowControls = defaultKeyStepLowerRowControls,
+  numberRowControls = numberRowControls,
+  upperRowKeys = upperRowKeys,
+  lowerRowKeys = lowerRowKeys,
+  homeRowControls = homeRowControls,
+  applyCustomLayout = applyCustomLayout,
+  saveCustomLayout = saveCustomLayout,
+  selectPreset = selectPreset,
+  savePreset = savePreset,
+  renamePreset = renamePreset,
+  deletePreset = deletePreset,
+  duplicatePreset = duplicatePreset,
+  getPresetsList = getPresetsList,
+  resetLayout = resetLayout,
+  updateKeyMapping = updateKeyMapping,
+  getLayoutConfig = getLayoutConfig,
+  getNoteKey = getNoteKey,
+  getControlKey = getControlKey,
+  getNumberControlKey = getNumberControlKey,
+  getActiveNoteKeysMap = getActiveNoteKeysMap,
+  getActiveControlKeysMap = getActiveControlKeysMap,
+  isKeyStepConnected = isKsConnected
+}
+
+end
+
+__modules["controls"] = function()
+local config = __require("config")
+local midi = __require("midi")
+local transposer = __require("transposer")
+local arpeggiator = __require("arpeggiator")
+local quantizer = __require("quantizer")
+local hud = __require("hud")
+
+local state = config.state
+local SCALES = config.SCALES
+local NOTE_NAMES = config.NOTE_NAMES
+
+local function getActiveArpRateIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpRateIdx) or state.arpRateIdx or 5
+end
+
+local function setActiveArpRate(rateIdx)
+  if arpeggiator.setTrackArpRate then
+    return arpeggiator.setTrackArpRate(rateIdx, state.activeTrack or 1)
+  end
+
+  state.arpRateIdx = math.max(1, math.min(#state.ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
+  arpeggiator.applyBpmChange()
+  return nil, state.arpRateIdx
+end
+
+local function getActiveArpDirectionIdx()
+  local trk = state.tracks and state.tracks[state.activeTrack or 1]
+  return (trk and trk.arpDirectionIdx) or state.arpDirectionIdx or 1
+end
+
+local function setActiveArpDirection(dirIdx, targetTrackIdx)
+  if arpeggiator.setTrackArpDirection then
+    return arpeggiator.setTrackArpDirection(dirIdx, targetTrackIdx or state.activeTrack or 1)
+  end
+
+  local trkId = targetTrackIdx or state.activeTrack or 1
+  local normalizedDirIdx = math.max(1, math.min(#state.ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
+  state.arpDirectionIdx = normalizedDirIdx
+  local trk = state.tracks and state.tracks[trkId]
+  if trk then
+    trk.arpDirectionIdx = normalizedDirIdx
+    hs.settings.set("qwertyMidi_track" .. trkId .. "ArpDirectionIdx", normalizedDirIdx)
+  end
+  hs.settings.set("qwertyMidi_arpDirectionIdx", normalizedDirIdx)
+  return trk, normalizedDirIdx
+end
+
+_G.activeWatchers = _G.activeWatchers or {}
+
+-- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
+if _G._qmidiRepeatTimers then
+  for code, entry in pairs(_G._qmidiRepeatTimers) do
+    pcall(function()
+      if entry.timer then entry.timer:stop() end
+      if entry.interval then entry.interval:stop() end
+    end)
+  end
+end
+_G._qmidiRepeatTimers = {}
+local controlRepeatTimers = _G._qmidiRepeatTimers
+
+local function stopControlRepeat(code)
+  if code and controlRepeatTimers[code] then
+    pcall(function()
+      if controlRepeatTimers[code].timer then
+        controlRepeatTimers[code].timer:stop()
+      end
+      if controlRepeatTimers[code].interval then
+        controlRepeatTimers[code].interval:stop()
+      end
+    end)
+    controlRepeatTimers[code] = nil
+  end
+end
+
+local function stopAllControlRepeats()
+  for code in pairs(controlRepeatTimers) do
+    stopControlRepeat(code)
+  end
+end
+
+local stateUndoStack = {}
+local stateRedoStack = {}
+local isRestoringControllerState = false
+
+local function captureStateSnapshot(label)
+  return {
+    label = label or "State Change",
+    currentRoot = state.currentRoot,
+    currentScaleIdx = state.currentScaleIdx,
+    octaveShift = state.octaveShift,
+    topRowOctaveOffset = state.topRowOctaveOffset,
+    bottomRowOctaveOffset = state.bottomRowOctaveOffset,
+    transposeShift = state.transposeShift,
+    topRowVolume = state.topRowVolume,
+    bottomRowVolume = state.bottomRowVolume,
+    arpEnabled = state.arpEnabled,
+    arpLatchActive = state.arpLatchActive,
+    arpDirectionIdx = state.arpDirectionIdx,
+    arpRateIdx = state.arpRateIdx,
+    arpGatePercent = state.arpGatePercent,
+    arpBpm = state.arpBpm,
+    arpTopEnabled = state.arpTopEnabled,
+    arpBottomEnabled = state.arpBottomEnabled,
+    arpLinked = state.arpLinked,
+    modWheel = state.ccStates[1] or 0,
+    sustainActive = state.sustainActive,
+    chordModeActive = state.chordModeActive
+  }
+end
+
+local function pushStateSnapshot(label)
+  if isRestoringControllerState then return end
+  table.insert(stateUndoStack, captureStateSnapshot(label))
+  stateRedoStack = {}
+end
+
+local function applyStateSnapshot(snap)
+  isRestoringControllerState = true
+
+  -- Capture current values before overwriting so we can skip no-op arp restarts
+  local prevBpm = state.arpBpm
+  local prevGatePercent = state.arpGatePercent
+
+  state.currentRoot = snap.currentRoot
+  state.currentScaleIdx = snap.currentScaleIdx
+  state.octaveShift = snap.octaveShift
+  state.topRowOctaveOffset = snap.topRowOctaveOffset
+  state.bottomRowOctaveOffset = snap.bottomRowOctaveOffset or 0
+  state.transposeShift = snap.transposeShift
+  state.topRowVolume = snap.topRowVolume
+  state.bottomRowVolume = snap.bottomRowVolume
+  state.arpEnabled = snap.arpEnabled
+  state.arpLatchActive = snap.arpLatchActive
+  state.arpDirectionIdx = snap.arpDirectionIdx
+  setActiveArpRate(snap.arpRateIdx)
+  state.arpGatePercent = snap.arpGatePercent
+  state.arpBpm = snap.arpBpm
+  state.arpTopEnabled = snap.arpTopEnabled
+  state.arpBottomEnabled = snap.arpBottomEnabled
+  if snap.arpLinked ~= nil then state.arpLinked = snap.arpLinked end
+  state.ccStates[1] = snap.modWheel
+  
+  if snap.sustainActive ~= nil then state.sustainActive = snap.sustainActive end
+  if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
+
+  arpeggiator.updateLatchedArpNotes()
+  if snap.arpBpm ~= prevBpm then
+    arpeggiator.applyBpmChange()
+  end
+  if snap.arpGatePercent ~= prevGatePercent then
+    arpeggiator.applyGatePercentChange()
+  end
+  midi.sendMidiCC(1, snap.modWheel)
+
+  isRestoringControllerState = false
+  config.saveSettings()
+end
+
+local function undoControllerState(code)
+  if #stateUndoStack == 0 then
+    local spot = {
+      title = "UNDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to undo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateRedoStack, cur)
+
+  local prev = table.remove(stateUndoStack)
+  applyStateSnapshot(prev)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "UNDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Reverted: " .. (prev.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function redoControllerState(code)
+  if #stateRedoStack == 0 then
+    local spot = {
+      title = "REDO STATE",
+      value = "NO HISTORY",
+      subtext = "Nothing to redo",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    return
+  end
+
+  local cur = captureStateSnapshot("Current")
+  table.insert(stateUndoStack, cur)
+
+  local nxt = table.remove(stateRedoStack)
+  applyStateSnapshot(nxt)
+
+  local scaleName = SCALES[state.currentScaleIdx].name
+  local rootName = NOTE_NAMES[state.currentRoot + 1]
+  local spot = {
+    title = "REDO STATE",
+    value = rootName .. " " .. scaleName,
+    subtext = "Re-applied: " .. (nxt.label or "Controller State"),
+    targetId = code and ("key-" .. code) or "header",
+    color = "#d4a359"
+  }
+  hud.updateWebviewHud(spot)
+end
+
+local function canApplyShifts(testT, testO, testTop, testBot)
+  local oldT = state.transposeShift
+  local oldO = state.octaveShift
+  local oldTop = state.topRowOctaveOffset
+  local oldBot = state.bottomRowOctaveOffset
+
+  -- Calculate bounds for current state
+  local curMinPitch = math.huge
+  local curMaxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < curMinPitch then curMinPitch = pitch end
+    if pitch > curMaxPitch then curMaxPitch = pitch end
+  end
+
+  -- Calculate bounds for test state
+  state.transposeShift = testT
+  state.octaveShift = testO
+  state.topRowOctaveOffset = testTop
+  state.bottomRowOctaveOffset = testBot
+
+  local minPitch = math.huge
+  local maxPitch = -math.huge
+  for _, kData in pairs(config.getActiveNoteKeysMap()) do
+    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
+    if pitch < minPitch then minPitch = pitch end
+    if pitch > maxPitch then maxPitch = pitch end
+  end
+
+  state.transposeShift = oldT
+  state.octaveShift = oldO
+  state.topRowOctaveOffset = oldTop
+  state.bottomRowOctaveOffset = oldBot
+
+  if minPitch >= 16 and maxPitch <= 113 then
+    return true, testT, testO, testTop, testBot
+  end
+
+  if curMinPitch < 16 or curMaxPitch > 113 then
+    while minPitch < 16 do
+      testO = testO + 12
+      testTop = testTop + 12
+      testBot = testBot + 12
+      minPitch = minPitch + 12
+      maxPitch = maxPitch + 12
+    end
+    while maxPitch > 113 do
+      testO = testO - 12
+      testTop = testTop - 12
+      testBot = testBot - 12
+      minPitch = minPitch - 12
+      maxPitch = maxPitch - 12
+    end
+    return true, testT, testO, testTop, testBot
+  end
+
+  return false, testT, testO, testTop, testBot
+end
+
+local function countTableKeys(t)
+  if not t then return 0 end
+  local count = 0
+  for _ in pairs(t) do count = count + 1 end
+  return count
+end
+
+local function isTrackAudible(trackIdx)
+  if not state.tracks then return true end
+  local trk = state.tracks[trackIdx]
+  if not trk then return true end
+  if trk.muted then return false end
+  local anySolo = false
+  for _, t in pairs(state.tracks) do
+    if t.soloed then anySolo = true; break end
+  end
+  if anySolo then
+    return trk.soloed == true
+  end
+  return true
+end
+
+local function syncTrackAudibility()
+  if not state.tracks then return end
+  for trkId = 1, 4 do
+    local trk = state.tracks[trkId]
+    local ch = trk.channel or (trkId - 1)
+    local audible = isTrackAudible(trkId)
+    if not audible then
+      -- 1. Silence audio in DAW / Logic Pro immediately
+      if midi and midi.silenceChannel then
+        midi.silenceChannel(ch)
+      else
+        midi.sendMidiCC(64, 0, ch)
+        midi.sendMidiCC(120, 0, ch)
+        midi.sendMidiCC(123, 0, ch)
+      end
+      -- Set Channel Volume (CC 7) & Expression (CC 11) to 0 so synth/audio is truly muted
+      midi.sendMidiCC(7, 0, ch)
+      midi.sendMidiCC(11, 0, ch)
+
+      -- Dedicated DAW Controller Assignment CCs:
+      -- CC 108: Track Mute (127 if muted, 0 if unmuted)
+      -- CC 109: Track Solo (127 if soloed, 0 if not soloed)
+      midi.sendMidiCC(108, trk.muted and 127 or 0, ch)
+      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
+
+      -- 2. Silence arpeggiator active notes & gate timers on this track
+      if arpeggiator and arpeggiator.silenceTrack then
+        arpeggiator.silenceTrack(trkId)
+      end
+
+      -- 3. Silence any physically held notes on this track
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.track == trkId then
+          if info.pitches then
+            for _, p in ipairs(info.pitches) do
+              midi.sendMidiNote("noteOff", p, 0, info.channel or ch)
+            end
+          end
+        end
+      end
+
+      -- 4. Silence any sustained notes on this track's channel
+      if trk.sustainedPitches then
+        for _, item in ipairs(trk.sustainedPitches) do
+          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or ch)
+        end
+        trk.sustainedPitches = {}
+      end
+      if state.sustainedPitches then
+        local newSustained = {}
+        for _, item in ipairs(state.sustainedPitches) do
+          if item.channel == ch then
+            midi.sendMidiNote("noteOff", item.pitch, 0, item.channel)
+          else
+            table.insert(newSustained, item)
+          end
+        end
+        state.sustainedPitches = newSustained
+      end
+      trk.activeNotesCount = 0
+    else
+      -- Track became audible!
+      -- 1. Restore DAW Controller Assignment CCs:
+      midi.sendMidiCC(108, 0, ch) -- Mute off
+      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
+
+      -- 2. Restore Channel Volume (CC 7) & Expression (CC 11):
+      local vol = trk.volume or 100
+      local volCc = math.floor(math.min(127, math.max(0, vol * 1.27)))
+      midi.sendMidiCC(7, volCc, ch)
+      midi.sendMidiCC(11, 127, ch)
+
+      -- 3. Resume physically held non-arp keys
+      for code, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and not info.isControl and info.track == trkId and not info.isArpNote then
+          if info.pitches then
+            local vel = transposer.getEffectiveRowVelocity(trkId > 2)
+            for _, p in ipairs(info.pitches) do
+              midi.sendMidiNote("noteOn", p, vel, info.channel or ch)
+            end
+            trk.activeNotesCount = (trk.activeNotesCount or 0) + #info.pitches
+          end
+        end
+      end
+
+      -- 4. Resume arpeggiator if active or if notes are held
+      if trk.arpEnabled then
+        for code, info in pairs(state.pressedKeys) do
+          if type(info) == "table" and not info.isControl and info.track == trkId and info.isArpNote then
+            if info.pitches and arpeggiator and arpeggiator.arpAddNote then
+              for _, p in ipairs(info.pitches) do
+                arpeggiator.arpAddNote(code .. "_" .. p, p, trkId)
+              end
+            end
+          end
+        end
+
+        local hasHeld = countTableKeys(trk.heldNotes) > 0 or trk.locked
+        if hasHeld and not trk.timer and arpeggiator and arpeggiator.startTrackArp then
+          arpeggiator.startTrackArp(trk, true)
+        end
+      end
+    end
+  end
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+  -- Track-dependent key styling is owned by the full HUD payload. A spotlight
+  -- update alone leaves the previous track's CSS variables in place.
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
+end
+
+local function selectTrack(id)
+  local targetId = math.max(1, math.min(4, tonumber(id) or 1))
+  if not (state.tracks and state.tracks[targetId]) then return end
+
+  local isBottomTarget = (targetId <= 2)
+
+  -- Clean up only currently physically held note keys on the targeted row
+  for code, info in pairs(state.pressedKeys) do
+    if type(info) == "table" and not info.isControl then
+      local noteKey = config.getNoteKey(code)
+      local isTopKey = (noteKey and noteKey.isTop) or (info.track and info.track > 2)
+      local shouldClean = isBottomTarget and (not isTopKey) or ((not isBottomTarget) and isTopKey)
+      if shouldClean then
+        if info.pitches then
+          for _, p in ipairs(info.pitches) do
+            midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
+          end
+        end
+        state.pressedKeys[code] = nil
+        local prevTrkId = info.track or (isTopKey and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
+        local prevTrk = state.tracks and state.tracks[prevTrkId]
+        if prevTrk and prevTrk.physicalKeysHeld then
+          prevTrk.physicalKeysHeld[code] = nil
+        end
+      end
+    end
+  end
+
+  state.activeTrack = targetId
+  local trk = state.tracks[targetId]
+  state.arpEnabled = trk.arpEnabled == true
+  state.arpLatchActive = trk.arpLatchActive == true
+  state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
+  state.arpDirectionIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
+  state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
+  state.chordModeActive = trk.chordModeActive == true
+  if trk.chordIdx then state.chordIdx = trk.chordIdx end
+
+  if targetId <= 2 then
+    state.bottomRowTrack = targetId
+    state.bottomRowChannel = trk.channel
+    state.bottomRowOctaveOffset = trk.octaveOffset or 0
+    state.bottomRowVolume = trk.volume or 100
+  else
+    state.topRowTrack = targetId
+    state.topRowChannel = trk.channel
+    state.topRowOctaveOffset = trk.octaveOffset or 12
+    state.topRowVolume = trk.volume or 100
+  end
+  config.saveSettings()
+
+  hud.updateWebviewHud({
+    title = "SELECT TRACK " .. targetId,
+    value = "Track " .. targetId .. ": " .. trk.name .. (trk.locked and " 🔁" or ""),
+    subtext = (targetId <= 2 and "Bottom Row • " or "Top Row • ") .. "MIDI Ch " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp ON" or " • Live Play"),
+    targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[targetId],
+    color = trk.color or "#64d8f0"
+  })
+
+  local sync = _G.activeWatchers and _G.activeWatchers.sync
+  if sync and sync.broadcastState then
+    sync.broadcastState(state)
+  end
+
+  if hudModule and hudModule.fastUpdateArp then
+    hudModule.fastUpdateArp()
+  end
+  if hudModule and hudModule.updateWebviewHud then
+    hudModule.updateWebviewHud(nil, nil, true)
+  end
+  local ks = _G.activeWatchers and _G.activeWatchers.keystep
+  if ks and ks.syncToHud then ks.syncToHud() end
+end
+
+local function adjustTrackVolume(trackId, delta)
+  local id = math.max(1, math.min(4, math.floor(tonumber(trackId) or 0)))
+  local trk = state.tracks and state.tracks[id]
+  if not trk then return false end
+  trk.volume = math.max(0, math.min(127, (tonumber(trk.volume) or 100) + (tonumber(delta) or 0)))
+  if isTrackAudible(id) then midi.sendMidiCC(7, trk.volume, trk.channel or (id - 1)) end
+  if id <= 2 and state.bottomRowTrack == id then state.bottomRowVolume = trk.volume end
+  if id >= 3 and state.topRowTrack == id then state.topRowVolume = trk.volume end
+  config.saveSettings()
+  hud.updateWebviewHud({
+    title = "VOLUME (TRK " .. id .. ")",
+    value = math.floor((trk.volume / 127) * 100 + 0.5) .. "%",
+    subtext = (trk.name or ("Track " .. id)) .. " Volume (CC #7)",
+    targetId = "key-" .. (17 + id),
+    color = trk.color or "#d4a359"
+  })
+  return true
+end
+
+local function applyTransposeDelta(deltaSteps, spotTitle)
+  local curT = tonumber(state.transposeShift) or 0
+  local curO = tonumber(state.octaveShift) or 0
+  local curTop = tonumber(state.topRowOctaveOffset) or 0
+  local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+  local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
+  local newT = curT + deltaSteps
+  local newO = curO
+  while newT < 0 do
+    newT = newT + numIntervals
+    newO = newO - 12
+  end
+  while newT >= numIntervals do
+    newT = newT - numIntervals
+    newO = newO + 12
+  end
+  local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+  if ok then
+    pushStateSnapshot("transpose")
+    state.transposeShift = finalT
+    state.octaveShift = finalO
+    state.topRowOctaveOffset = finalTop
+    state.bottomRowOctaveOffset = finalBot
+    arpeggiator.updateLatchedArpNotes()
+    local degreeNames = {
+      [0] = "Degree 1 (Root)",
+      [1] = "Degree 2",
+      [2] = "Degree 3",
+      [3] = "Degree 4",
+      [4] = "Degree 5",
+      [5] = "Degree 6",
+      [6] = "Degree 7 (Subtonic)"
+    }
+    local degLabel = degreeNames[state.transposeShift] or ("Degree " .. (state.transposeShift + 1))
+    local spot = {
+      title = spotTitle or "TRANSPOSE",
+      value = degLabel,
+      subtext = string.format("Scale Degree %d | Octave %+d", state.transposeShift + 1, math.floor(state.octaveShift / 12)),
+      targetId = "key-38",
+      color = "#64d8f0"
+    }
+    hud.updateWebviewHud(spot)
+  end
+end
+
+local function executeControlAction(act, code)
+  if act == "closeMidiHud" then
+    if _G.closeMidiHud then _G.closeMidiHud("Cmd-Shift-M") end
+    return
+  end
+
+  if act == "undoState" then
+    undoControllerState(code)
+    return
+  elseif act == "redoState" then
+    redoControllerState(code)
+    return
+  elseif string.match(act, "^setArpRate_(%d+)$") then
+    local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
+    setActiveArpRate(rate)
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpDir_(%d+)$") then
+    local dir = tonumber(string.match(act, "^setArpDir_(%d+)$"))
+    state.arpDirectionIdx = dir
+    hud.updateWebviewHud()
+    return
+  elseif string.match(act, "^setArpQuantize_(.+)$") then
+    local quant = string.match(act, "^setArpQuantize_(.+)$")
+    state.arpQuantizeMode = quant
+    hs.settings.set("qwertyMidi_arpQuantizeMode", quant)
+    hud.updateWebviewHud()
+    return
+  elseif act == "arpLatchToggle" then
+    arpeggiator.toggleArpLatch()
+    return
+  end
+
+  -- Top/Bottom ARP controls target the selected track for that row. The
+  -- multi-track engine no longer consumes the legacy row-level flags.
+  if act == "arpTopToggle" or act == "arpBottomToggle" then
+    local rowName = act == "arpTopToggle" and "TOP" or "BOTTOM"
+    local trackId = act == "arpTopToggle" and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trackId]
+    if trk then
+      arpeggiator.toggleArpPower(trackId)
+      state.arpTopEnabled = (state.tracks[state.topRowTrack or 3].arpEnabled == true)
+      state.arpBottomEnabled = (state.tracks[state.bottomRowTrack or 1].arpEnabled == true)
+      hud.updateWebviewHud({
+        title = rowName .. " ROW ARP (TRACK " .. trackId .. ")",
+        value = trk.arpEnabled and (trk.arpLatchActive and "ON • LATCH 🔒" or "ON") or "OFF",
+        subtext = trk.name .. " • " .. (trk.arpEnabled and "Arpeggiating" or "Live Play"),
+        targetId = act == "arpTopToggle" and "arp-top-toggle" or "arp-bottom-toggle",
+        color = trk.color or "#d4a359"
+      })
+    end
+    return
+  end
+
+  -- Record state snapshot before mutating controller parameters
+  if act == "modeDown" or act == "modeUp" or
+     act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
+     act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
+     act == "arpLinkToggle" or act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
+     act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
+     act == "atkDown" or act == "atkUp" or act == "decDown" or act == "decUp" or
+     act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
+     act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
+     act == "botVolDown" or act == "botVolUp" or
+     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" or
+     act == "octaveDown" or act == "octaveUp" then
+    pushStateSnapshot(act)
+  end
+
+  if act == "topOctDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "topOctUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newTop = curTop + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
+      if topTrk then topTrk.octaveOffset = finalTop end
+      config.saveSettings()
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TOP OCTAVE",
+        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
+        subtext = "Top keys shifted",
+        targetId = "octave-indicator-top",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot - 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "botOctUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local newBot = curBot + 12
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
+      if botTrk then botTrk.octaveOffset = finalBot end
+      config.saveSettings()
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "BOT OCTAVE",
+        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
+        subtext = "Bottom keys shifted",
+        targetId = "octave-indicator-bottom",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "trnspDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT - 1
+    local newO = curO
+    if newT <= -numIntervals then
+      newT = newT + numIntervals
+      newO = newO - 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "trnspUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
+    local newT = curT + 1
+    local newO = curO
+    if newT >= numIntervals then
+      newT = newT - numIntervals
+      newO = newO + 12
+    end
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.transposeShift = finalT
+      state.octaveShift = finalO
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local spot = {
+        title = "TRANSPOSE",
+        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
+        subtext = "Scale notes shifted",
+        targetId = "header",
+        color = "#d4a359"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "octaveDown" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop - 12) or curTop
+    local newBot = (not isTop) and (curBot - 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[activeTrkId]
+      if actTrk then
+        actTrk.octaveOffset = isTop and finalTop or finalBot
+      end
+      config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
+      local spot = {
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "octaveUp" then
+    local curT = tonumber(state.transposeShift) or 0
+    local curO = tonumber(state.octaveShift) or 0
+    local curTop = tonumber(state.topRowOctaveOffset) or 0
+    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
+    local activeTrkId = state.activeTrack or 1
+    local isTop = (activeTrkId > 2)
+    local newTop = isTop and (curTop + 12) or curTop
+    local newBot = (not isTop) and (curBot + 12) or curBot
+    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
+    if ok then
+      pushStateSnapshot(act)
+      state.topRowOctaveOffset = finalTop
+      state.bottomRowOctaveOffset = finalBot
+      arpeggiator.updateLatchedArpNotes()
+      local actTrk = state.tracks and state.tracks[activeTrkId]
+      if actTrk then
+        actTrk.octaveOffset = isTop and finalTop or finalBot
+      end
+      config.saveSettings()
+      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
+      local spot = {
+        title = "OCTAVE (TRK " .. activeTrkId .. ")",
+        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
+        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
+        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
+        color = (actTrk and actTrk.color) or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "modeDown" then
+    state.currentScaleIdx = (state.currentScaleIdx - 2) % #SCALES + 1
+    arpeggiator.updateLatchedArpNotes()
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "modeUp" then
+    state.currentScaleIdx = (state.currentScaleIdx % #SCALES) + 1
+    arpeggiator.updateLatchedArpNotes()
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "SCALE / MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "rootDown" then
+    if state.currentRoot == 0 then
+      state.currentRoot = 11
+      state.octaveShift = math.max(-36, state.octaveShift - 12)
+    else
+      state.currentRoot = state.currentRoot - 1
+    end
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "rootUp" then
+    if state.currentRoot == 11 then
+      state.currentRoot = 0
+      state.octaveShift = math.min(36, state.octaveShift + 12)
+    else
+      state.currentRoot = state.currentRoot + 1
+    end
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local spot = {
+      title = "ROOT NOTE",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomScale" then
+    state.currentRoot = math.random(0, 11)
+    state.currentScaleIdx = math.random(1, #SCALES)
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "RANDOM SCALE",
+      value = rootName .. " " .. scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomRoot" then
+    state.currentRoot = math.random(0, 11)
+    arpeggiator.updateLatchedArpNotes()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local spot = {
+      title = "RANDOM ROOT",
+      value = rootName,
+      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
+      targetId = "root-select",
+      color = "#ffd700"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomMode" then
+    state.currentScaleIdx = math.random(1, #SCALES)
+    arpeggiator.updateLatchedArpNotes()
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "RANDOM MODE",
+      value = scaleInfo.name,
+      subtext = scaleInfo.brightTag,
+      targetId = "mode-thumb",
+      color = "#ffd700"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomRhythm" then
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
+    state.arpGatePercent = math.random(25, 120)
+    arpeggiator.applyGatePercentChange()
+    local spot = {
+      title = "RANDOM RHYTHM",
+      value = state.ARP_RATES[state.arpRateIdx].label .. " (" .. math.floor(state.arpGatePercent) .. "%)",
+      subtext = "Rate & Gate Randomized",
+      targetId = "arp-rate-select",
+      color = "#ffd700"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "randomAll" then
+    state.currentRoot = math.random(0, 11)
+    state.currentScaleIdx = math.random(1, #SCALES)
+    state.arpDirectionIdx = math.random(1, #state.ARP_DIRECTIONS)
+    setActiveArpRate(math.random(1, #state.ARP_RATES))
+    state.arpGatePercent = math.random(25, 120)
+    arpeggiator.updateLatchedArpNotes()
+    arpeggiator.applyGatePercentChange()
+    local rootName = NOTE_NAMES[state.currentRoot + 1]
+    local scaleInfo = SCALES[state.currentScaleIdx]
+    local spot = {
+      title = "RANDOM ALL",
+      value = rootName .. " " .. scaleInfo.name,
+      subtext = "Root, Mode & Rhythm Randomized",
+      targetId = "key-1",
+      color = "#ffd700"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpBypassToggle" then
+    state.arpBypassed = not state.arpBypassed
+    local spot = {
+      title = "ARP BYPASS",
+      value = state.arpBypassed and "BYPASS ON (Live Notes)" or "BYPASS OFF (Arp Active)",
+      subtext = state.arpBypassed and "Live key presses bypass arpeggiator" or "Keys trigger arpeggiator normally",
+      targetId = "key-0",
+      color = state.arpBypassed and "#ffd700" or "#50fa7b"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "panic" then
+    -- Stop producers before sending the MIDI panic sweep so no timer or queued
+    -- quantized note can immediately retrigger after the sweep.
+    if arpeggiator.stopAllLoops then arpeggiator.stopAllLoops() end
+    if quantizer.panic then
+      quantizer.panic(function(pitches, channel)
+        for _, pitch in ipairs(pitches or {}) do
+          midi.sendMidiNote("noteOff", pitch, 0, channel or 0)
+        end
+      end)
+    end
+    local ks = _G.activeWatchers and _G.activeWatchers.keystep
+    if ks and ks.panic then ks.panic() end
+    local midiAvailable = midi.getMidiDevice() ~= nil
+    midi.panicAllChannels()
+    state.sustainActive = false
+    state.sustainKeyDownTime = nil
+    state.arpLatchActive = false
+    state.sustainedPitches = {}
+    state.pressedKeys = {}
+    if state.tracks then
+      for _, trk in pairs(state.tracks) do
+        trk.sustainMode = "off"
+        trk.sustainedPitches = {}
+        trk.physicalKeysHeld = {}
+        trk.activeNotesCount = 0
+      end
+    end
+
+    arpeggiator.stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpSequence = {}
+
+    -- Clear repeats
+    stopAllControlRepeats()
+
+    local spot = {
+      title = "MIDI PANIC",
+      value = midiAvailable and "ALL NOTES OFF" or "STATE CLEARED",
+      subtext = midiAvailable and "Panic sent on all MIDI channels" or "MIDI output unavailable; external silence not confirmed",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+    if hudModule and hudModule.updateWebviewHud then
+      hudModule.updateWebviewHud(nil, nil, true)
+    end
+  elseif act == "resetAll" then
+    state.octaveShift = 0
+    state.topRowOctaveOffset = 0
+    state.bottomRowOctaveOffset = 0
+    state.transposeShift = 0
+    state.topRowVolume = 100
+    state.bottomRowVolume = 100
+    state.currentRoot = 0
+    state.currentScaleIdx = 1
+    state.sustainActive = false
+    state.ccStates[1] = 0
+    _G.activeWatchers.modAccumulator = 0
+    arpeggiator.stopArpTimer()
+    state.arpHeldNotes = {}
+    state.arpKeysCurrentlyHeld = {}
+    state.arpEnabled = false
+    state.arpLatchActive = false
+    state.arpTopEnabled = true
+    state.arpBottomEnabled = true
+    midi.sendMidiCC(64, 0)
+    midi.sendMidiCC(1, 0)
+    local spot = {
+      title = "RESET ALL",
+      value = "DEFAULTS RESTORED",
+      subtext = "Everything reset to defaults",
+      targetId = code and ("key-" .. code) or "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "zoomOut" or act == "zoomDown" then
+    state.zoomLevel = math.max(0.5, state.zoomLevel - 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(state.zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "zoomIn" or act == "zoomUp" then
+    state.zoomLevel = math.min(2.0, state.zoomLevel + 0.1)
+    local spot = {
+      title = "HUD ZOOM",
+      value = math.floor(state.zoomLevel * 100) .. "%",
+      subtext = "Scale Factor",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "sustain" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    local now = hs.timer.secondsSinceEpoch()
+    state.sustainKeyDownTime = now
+    state.tabDamping = true
+    if trk then
+      trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
+      -- A short second Tab press is the explicit, visible sustain-off gesture.
+      -- The first tap retains its useful damping behavior.
+      if trk.lastSmartSustainTapAt and (now - trk.lastSmartSustainTapAt) <= 0.35 then
+        trk.sustainMode = "off"
+        trk.lastSmartSustainTapAt = nil
+        state.sustainActive = false
+        cleanupSustainPitches(activeTrkId)
+        config.saveSettings()
+        hud.updateWebviewHud({
+          title = "SUSTAIN OFF (TRK " .. activeTrkId .. ")",
+          value = "OFF",
+          subtext = "Double-tap Tab toggles Smart Sustain off",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = "#b5aba0"
+        })
+      elseif trk.sustainMode == "off" then
+        trk.sustainMode = "smart"
+        state.sustainActive = true
+        config.saveSettings()
+        local spot = {
+          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = "SMART ON",
+          subtext = "Tap Tab to damp · double-tap Tab to turn off",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      else
+        -- Reverse functionality: smart sustain is on, hitting Tab cuts off ringing notes for silence
+        local hadNotes = (trk.sustainedPitches and #trk.sustainedPitches > 0)
+        cleanupSustainPitches(activeTrkId)
+        local spot = {
+          title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
+          value = "CUT OFF",
+          subtext = hadNotes and "Silenced ringing notes; double-tap Tab to turn off" or "Silence; Smart Sustain active (2× Tab = off)",
+          targetId = code and ("key-" .. code) or "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      end
+    end
+  elseif act == "classicSustain" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
+    if trk then
+      trk.classicWasActiveOnPress = (trk.sustainMode == "classic")
+    end
+    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "classic") or state.sustainActive
+    local isClassic = trk and (trk.sustainMode == "classic")
+    local spot = {
+      title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
+      value = isClassic and "CLASSIC ON" or "CLASSIC OFF",
+      subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Shift+Tab to toggle Classic",
+      targetId = code and ("key-" .. code) or "key-48",
+      color = trk and trk.color or "#ff9100"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpToggle" then
+    arpeggiator.toggleArpPower()
+  elseif act == "arpLinkToggle" then
+    arpeggiator.toggleArpLink()
+  elseif act == "chordToggle" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
+    if trk then
+      trk.chordWasActiveOnPress = (trk.chordModeActive == true)
+    end
+    state.chordWasActiveOnPress = (trk and trk.chordModeActive) or state.chordModeActive
+    local isChord = trk and trk.chordModeActive
+    local chordName = state.CHORDS[(trk and trk.chordIdx) or state.chordIdx or 1].name
+    local spot = {
+      title = "CHORD MODE (TRK " .. activeTrkId .. ")",
+      value = isChord and ("ON (" .. chordName .. ")") or "OFF",
+      subtext = isChord and ("Track " .. activeTrkId .. " chords enabled") or ("Track " .. activeTrkId .. " single notes"),
+      targetId = "header",
+      color = isChord and "#d4a359" or "#b5aba0"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordUp" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.chordIdx = ((trk.chordIdx or 1) % #state.CHORDS) + 1
+      state.chordIdx = trk.chordIdx
+    else
+      state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
+      value = chordName,
+      subtext = "Cycle chord type for Track " .. activeTrkId,
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.chordIdx = (((trk.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
+      state.chordIdx = trk.chordIdx
+    else
+      state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
+      value = chordName,
+      subtext = "Cycle chord type for Track " .. activeTrkId,
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "modWheelDown" then
+    local currentVal = state.ccStates[1] or 0
+    local newVal = math.max(0, currentVal - 4)
+    state.ccStates[1] = newVal
+    _G.activeWatchers.modAccumulator = newVal
+    midi.sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "modWheelUp" or act == "modWheel" then
+    local currentVal = state.ccStates[1] or 0
+    local newVal = math.min(127, currentVal + 4)
+    state.ccStates[1] = newVal
+    _G.activeWatchers.modAccumulator = newVal
+    midi.sendMidiCC(1, newVal)
+    local spot = {
+      title = "MOD WHEEL",
+      value = math.floor((newVal / 127) * 100) .. "%",
+      subtext = "CC #1 Intensity",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "topVolDown" then
+    state.topRowVolume = math.max(0, state.topRowVolume - 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      if isTrackAudible(topTrkId) then
+        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      end
+    end
+    config.saveSettings()
+    local spot = {
+      title = "TOP ROW VOL",
+      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "topVolUp" then
+    state.topRowVolume = math.min(127, state.topRowVolume + 4)
+    local topTrkId = state.topRowTrack or 3
+    local trk = state.tracks and state.tracks[topTrkId]
+    if trk then
+      trk.volume = state.topRowVolume
+      if isTrackAudible(topTrkId) then
+        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
+      end
+    end
+    config.saveSettings()
+    local spot = {
+      title = "TOP ROW VOL",
+      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
+      subtext = (trk and trk.name or "Upper Keys") .. " Level",
+      targetId = "vol-indicator-top",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "botVolDown" then
+    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      if isTrackAudible(botTrkId) then
+        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      end
+    end
+    config.saveSettings()
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "botVolUp" then
+    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
+    local botTrkId = state.bottomRowTrack or 1
+    local trk = state.tracks and state.tracks[botTrkId]
+    if trk then
+      trk.volume = state.bottomRowVolume
+      if isTrackAudible(botTrkId) then
+        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
+      end
+    end
+    config.saveSettings()
+    local spot = {
+      title = "BOTTOM ROW VOL",
+      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
+      subtext = (trk and trk.name or "Lower Keys") .. " Level",
+      targetId = "vol-indicator-bottom",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "volDown" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.max(0, (trk.volume or 100) - 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
+      end
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
+      end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "volUp" or act == "volume" then
+    local activeTrkId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[activeTrkId]
+    if trk then
+      trk.volume = math.min(127, (trk.volume or 100) + 4)
+      if isTrackAudible(trk.id) then
+        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
+      end
+      if activeTrkId <= 2 then
+        state.bottomRowVolume = trk.volume
+      else
+        state.topRowVolume = trk.volume
+      end
+      config.saveSettings()
+      local spot = {
+        title = "VOLUME (TRK " .. activeTrkId .. ")",
+        value = math.floor((trk.volume / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
+        targetId = "header",
+        color = trk.color or "#00e5ff"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "chordUp" then
+    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "chordDown" then
+    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    local chordName = state.CHORDS[state.chordIdx].name
+    local spot = {
+      title = "CHORD TYPE",
+      value = chordName,
+      subtext = "Active Chord Modifier Pattern",
+      targetId = "header",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirDown" then
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = ((currentDir - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    local spot = {
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
+      targetId = "arp-dir-select",
+      color = (trk and trk.color) or "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpDirUp" then
+    local currentDir = getActiveArpDirectionIdx()
+    local nextDir = (currentDir % #state.ARP_DIRECTIONS) + 1
+    setActiveArpDirection(nextDir)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    local spot = {
+      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
+      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
+      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
+      targetId = "arp-dir-select",
+      color = (trk and trk.color) or "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateDown" then
+    setActiveArpRate(math.max(1, getActiveArpRateIdx() - 1))
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpRateUp" then
+    setActiveArpRate(math.min(#state.ARP_RATES, getActiveArpRateIdx() + 1))
+    local spot = {
+      title = "ARP RATE",
+      value = state.ARP_RATES[state.arpRateIdx].label,
+      subtext = "Note Division",
+      targetId = "arp-rate-select",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateDown" then
+    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
+    arpeggiator.applyGatePercentChange()
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
+      subtext = "Gate Duration",
+      targetId = "gate-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "arpGateUp" then
+    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
+    arpeggiator.applyGatePercentChange()
+    local spot = {
+      title = "ARP NOTE LENGTH",
+      value = math.floor(state.arpGatePercent + 0.5) .. "%",
+      subtext = "Gate Duration",
+      targetId = "gate-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmDown" then
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.max(20.0, state.arpBpm - step)
+    arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(-step)
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Step: " .. step .. " BPM",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "bpmUp" then
+    local step = state.bpmStepSize or 10
+    state.arpBpm = math.min(300.0, state.arpBpm + step)
+    arpeggiator.applyBpmChange()
+    arpeggiator.stepLogicBpm(step)
+    local spot = {
+      title = "TEMPO / BPM",
+      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
+      subtext = "Step: " .. step .. " BPM",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+  elseif act == "atkDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.max(0, (trk.attack or 0) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "key-25",
+        color = trk.color or "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "atkUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.attack = math.min(127, (trk.attack or 0) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(24, trk.attack, ch)
+      midi.sendMidiCC(73, trk.attack, ch)
+      config.saveSettings()
+      local spot = {
+        title = "ATTACK (TRK " .. trkId .. ")",
+        value = math.floor((trk.attack / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
+        targetId = "key-29",
+        color = trk.color or "#00e676"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decDown" or act == "relDown" or act == "releaseDown" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.max(0, (trk.decay or 64) - 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "key-25",
+        color = trk.color or "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "decUp" or act == "relUp" or act == "releaseUp" then
+    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkId]
+    if trk then
+      trk.decay = math.min(127, (trk.decay or 64) + 4)
+      local ch = trk.channel or (trkId - 1)
+      midi.sendMidiCC(25, trk.decay, ch)
+      midi.sendMidiCC(26, trk.decay, ch)
+      midi.sendMidiCC(27, trk.decay, ch)
+      midi.sendMidiCC(72, trk.decay, ch)
+      config.saveSettings()
+      local spot = {
+        title = "DECAY & TAIL (TRK " .. trkId .. ")",
+        value = math.floor((trk.decay / 127) * 100) .. "%",
+        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
+        targetId = "key-29",
+        color = trk.color or "#ffd700"
+      }
+      hud.updateWebviewHud(spot)
+    end
+  elseif act == "bpmEdit" then
+    state.bpmInputMode = true
+    state.bpmBeforeEdit = state.arpBpm
+    state.bpmInputBuffer = ""
+    local spot = {
+      title = "EDIT BPM",
+      value = "TYPE TEMPO",
+      subtext = "Type digits & press Enter",
+      targetId = "bpm-value",
+      color = "#d4a359"
+    }
+    hud.updateWebviewHud(spot)
+
+  -- Transposition Actions
+  elseif act == "trnspStep1Up" then
+    applyTransposeDelta(1, "TRNSP +1 STEP")
+  elseif act == "trnspStep1Down" then
+    applyTransposeDelta(-1, "TRNSP -1 STEP")
+  elseif act == "trnspStep2Up" then
+    applyTransposeDelta(2, "TRNSP +2 STEPS (3RD)")
+  elseif act == "trnspStep2Down" then
+    applyTransposeDelta(-2, "TRNSP -2 STEPS (3RD)")
+  elseif act == "trnspStep3Up" then
+    applyTransposeDelta(3, "TRNSP +3 STEPS (4TH)")
+  elseif act == "trnspStep3Down" then
+    applyTransposeDelta(-3, "TRNSP -3 STEPS (4TH)")
+  elseif act == "trnspNearRootUp" then
+    local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
+    local rem = (state.transposeShift % numIntervals + numIntervals) % numIntervals
+    local delta = (rem == 0) and numIntervals or (numIntervals - rem)
+    applyTransposeDelta(delta, "NEAR ROOT ↑")
+  elseif act == "trnspNearSubDown" then
+    local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
+    local subtonic = numIntervals - 1
+    local rem = (state.transposeShift % numIntervals + numIntervals) % numIntervals
+    local delta = (rem - subtonic + numIntervals) % numIntervals
+    if delta == 0 then delta = numIntervals end
+    applyTransposeDelta(-delta, "NEAR SUBTONIC ↓")
+
+  -- Mode Actions (Consolidated on G)
+  elseif act == "modeStep2Up" then
+    state.currentScaleIdx = ((state.currentScaleIdx + 1) % #config.SCALES) + 1
+    arpeggiator.updateLatchedArpNotes()
+    local sc = config.SCALES[state.currentScaleIdx]
+    hud.updateWebviewHud({ title = "MODE +2", value = sc.name, subtext = sc.brightTag, targetId = "key-5", color = "#ffd700" })
+  elseif act == "modeStep2Down" then
+    state.currentScaleIdx = ((state.currentScaleIdx - 3 + #config.SCALES) % #config.SCALES) + 1
+    arpeggiator.updateLatchedArpNotes()
+    local sc = config.SCALES[state.currentScaleIdx]
+    hud.updateWebviewHud({ title = "MODE -2", value = sc.name, subtext = sc.brightTag, targetId = "key-5", color = "#ffd700" })
+  elseif act == "modeSetMajor" then
+    state.currentScaleIdx = 2 -- Major / Ionian
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[2].name, subtext = config.SCALES[2].brightTag, targetId = "key-5", color = "#50fa7b" })
+  elseif act == "modeSetAeolian" then
+    state.currentScaleIdx = 5 -- Natural Minor / Aeolian
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[5].name, subtext = config.SCALES[5].brightTag, targetId = "key-5", color = "#64d8f0" })
+  elseif act == "modeSetLydian" then
+    state.currentScaleIdx = 1 -- Lydian
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[1].name, subtext = config.SCALES[1].brightTag, targetId = "key-5", color = "#ffb86c" })
+  elseif act == "modeSetLocrian" then
+    state.currentScaleIdx = 7 -- Locrian
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[7].name, subtext = config.SCALES[7].brightTag, targetId = "key-5", color = "#bd93f9" })
+
+  -- Root Actions (Consolidated on H)
+  elseif act == "rootFifthUp" then
+    state.currentRoot = (state.currentRoot + 7) % 12
+    arpeggiator.updateLatchedArpNotes()
+    local name = config.NOTE_NAMES[state.currentRoot + 1]
+    hud.updateWebviewHud({ title = "ROOT +5TH", value = name, subtext = "Circle of Fifths Clockwise", targetId = "key-4", color = "#ffd700" })
+  elseif act == "rootFifthDown" then
+    state.currentRoot = (state.currentRoot + 5) % 12
+    arpeggiator.updateLatchedArpNotes()
+    local name = config.NOTE_NAMES[state.currentRoot + 1]
+    hud.updateWebviewHud({ title = "ROOT -5TH", value = name, subtext = "Circle of Fifths Counter-Clockwise", targetId = "key-4", color = "#ffd700" })
+  elseif act == "rootSetC" then
+    state.currentRoot = 0
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "ROOT SNAP", value = "C", subtext = "Concert Pitch Root", targetId = "key-4", color = "#50fa7b" })
+  elseif act == "rootSetA" then
+    state.currentRoot = 9
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "ROOT SNAP", value = "A", subtext = "Natural Minor Anchor", targetId = "key-4", color = "#64d8f0" })
+  elseif act == "rootOctaveUp" then
+    executeControlAction("octaveUp", code)
+  elseif act == "rootOctaveDown" then
+    executeControlAction("octaveDown", code)
+
+  -- Octave Reset (Consolidated on D)
+  elseif act == "octReset" then
+    state.octaveShift = 0
+    state.topRowOctaveOffset = 0
+    state.bottomRowOctaveOffset = 0
+    arpeggiator.updateLatchedArpNotes()
+    hud.updateWebviewHud({ title = "OCTAVE RESET", value = "0 Oct", subtext = "All Octave Shifts Centered", targetId = "key-2", color = "#50fa7b" })
+
+  -- Master Arp & Track Loop Lock (Consolidated on B)
+  elseif act == "lockLoop" then
+    local curId = state.activeTrack or 1
+    local trk = state.tracks and state.tracks[curId]
+    if trk then
+      trk.locked = true
+      trk.arpEnabled = true
+      trk.arpLatchActive = true
+      state.arpEnabled = true
+      state.arpLatchActive = true
+      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-11", color = trk.color or "#ffd700" })
+    end
+  elseif act == "lockAndSwap" then
+    local curId = state.activeTrack or 1
+    local curTrk = state.tracks and state.tracks[curId]
+    if curTrk then
+      curTrk.locked = true
+      curTrk.arpEnabled = true
+      curTrk.arpLatchActive = true
+    end
+    local nextId = (curId % 4) + 1
+    selectTrack(nextId)
+    local nextTrk = state.tracks and state.tracks[nextId]
+    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-11", color = "#ffd700" })
+  elseif act == "lockAllTracks" then
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then
+          t.locked = true
+          t.arpEnabled = true
+          t.arpLatchActive = true
+        end
+      end
+    end
+    state.arpEnabled = true
+    state.arpLatchActive = true
+    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-11", color = "#ffd700" })
+  elseif act == "stopLoops" then
+    arpeggiator.stopAllLoops()
+    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-45", color = "#ff5555" })
+  elseif act == "freezeAll" then
+    state.arpLatchActive = true
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
+      end
+    end
+    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-11", color = "#64d8f0" })
+
+  -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
+  elseif act == "botTrackToggle" then
+    local nextId = (state.bottomRowTrack == 1) and 2 or 1
+    selectTrack(nextId)
+  elseif act == "botTrackLock" then
+    local trkId = state.activeTrack or 1
+    if trkId > 2 then trkId = 1 end
+    if state.tracks and state.tracks[trkId] then
+      state.tracks[trkId].locked = not state.tracks[trkId].locked
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
+    end
+  elseif act == "topTrackToggle" then
+    local nextId = (state.topRowTrack == 3) and 4 or 3
+    selectTrack(nextId)
+  elseif act == "topTrackLock" then
+    local trkId = state.activeTrack or 3
+    if trkId <= 2 then trkId = 3 end
+    if state.tracks and state.tracks[trkId] then
+      state.tracks[trkId].locked = not state.tracks[trkId].locked
+      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
+    end
+  elseif act == "trackFocusCycle" then
+    local nextId = (state.activeTrack % 4) + 1
+    selectTrack(nextId)
+  elseif act == "allMuteToggle" then
+    local anyUnmuted = false
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        if not t.muted then anyUnmuted = true; break end
+      end
+      for _, t in pairs(state.tracks) do t.muted = anyUnmuted end
+      syncTrackAudibility()
+    end
+    hud.updateWebviewHud({ title = "MASTER MIXER", value = anyUnmuted and "ALL TRACKS MUTED 🔇" or "ALL TRACKS UNMUTED 🔊", subtext = "Global Track Mute", targetId = "key-41", color = anyUnmuted and "#ff5555" or "#50fa7b" })
+  elseif act == "mixReset" then
+    if state.tracks then
+      for _, t in pairs(state.tracks) do
+        t.muted = false
+        t.soloed = false
+        t.volume = 100
+      end
+      syncTrackAudibility()
+    end
+    state.topRowVolume = 100
+    state.bottomRowVolume = 100
+    hud.updateWebviewHud({ title = "MIXER RESET", value = "All Volumes 100%", subtext = "All Mutes & Solos Cleared", targetId = "key-41", color = "#50fa7b" })
+
+  -- Dedicated Track 1-4 Actions
+  elseif string.match(act, "^trkSelect(%d)$") then
+    local id = tonumber(string.match(act, "^trkSelect(%d)$"))
+    selectTrack(id)
+  elseif string.match(act, "^trkMute(%d)$") then
+    local id = tonumber(string.match(act, "^trkMute(%d)$"))
+    local trk = state.tracks and state.tracks[id]
+    if trk then
+      trk.muted = not trk.muted
+      syncTrackAudibility()
+      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.muted and "MUTED 🔇" or "UNMUTED 🔊", subtext = "Mute Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.muted and "#ff5555" or "#50fa7b" })
+    end
+  elseif string.match(act, "^trkSolo(%d)$") then
+    local id = tonumber(string.match(act, "^trkSolo(%d)$"))
+    local trk = state.tracks and state.tracks[id]
+    if trk then
+      trk.soloed = not trk.soloed
+      syncTrackAudibility()
+      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.soloed and "SOLO ON 🌟" or "SOLO OFF", subtext = "Solo Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.soloed and "#ffd700" or "#64d8f0" })
+    end
+  elseif string.match(act, "^trkRec(%d)$") then
+    local id = tonumber(string.match(act, "^trkRec(%d)$"))
+    local trk = state.tracks and state.tracks[id]
+    if trk then
+      trk.armed = not trk.armed
+      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.armed and "ARMED ⏺" or "DISARMED", subtext = "Record Arm", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.armed and "#ff5555" or "#64d8f0" })
+    end
+  elseif string.match(act, "^trkLock(%d)$") then
+    local id = tonumber(string.match(act, "^trkLock(%d)$"))
+    local trk = state.tracks and state.tracks[id]
+    if trk then
+      trk.locked = not trk.locked
+      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.locked and "LOCKED 🔒" or "UNLOCKED 🔓", subtext = "Pattern Hold", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ffd700" })
+    end
+  elseif string.match(act, "^trkClear(%d)$") then
+    local id = tonumber(string.match(act, "^trkClear(%d)$"))
+    arpeggiator.clearTrackArp(id)
+    hud.updateWebviewHud({ title = "CLEAR TRACK " .. id, value = "Pattern Cleared", subtext = "Reset Sequence", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ff5555" })
+  elseif string.match(act, "^trkFocus(%d)$") then
+    local id = tonumber(string.match(act, "^trkFocus(%d)$"))
+    selectTrack(id)
+
+  -- Voicing Actions
+  elseif act == "voicingUp" then
+    state.chordIdx = ((state.chordIdx or 1) % #state.CHORDS) + 1
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing +", targetId = "key-39", color = "#ffd700" })
+  elseif act == "voicingDown" then
+    state.chordIdx = (((state.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing -", targetId = "key-39", color = "#ffd700" })
+  elseif act == "inversionUp" or act == "inversionDown" then
+    hud.updateWebviewHud({ title = "INVERSION", value = "Inversion Modified", subtext = "Pitch Inversion", targetId = "key-39", color = "#ffd700" })
+  elseif act == "chordPower" then
+    state.chordIdx = 4
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    hud.updateWebviewHud({ title = "CHORD VOICING", value = "Power (1-5)", subtext = "Root + Fifth", targetId = "key-39", color = "#ffd700" })
+  elseif act == "chordTriad" then
+    state.chordIdx = 1
+    local trkId = state.activeTrack or 1
+    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
+    config.saveSettings()
+    arpeggiator.updateLatchedArpChordNotes(trkId)
+    hud.updateWebviewHud({ title = "CHORD VOICING", value = "Triad", subtext = "Root + 3rd + 5th", targetId = "key-39", color = "#ffd700" })
+
+  -- Arp Direction Presets (Key 5)
+  elseif act == "arpDirRandom" then
+    setActiveArpDirection(7)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+  elseif act == "arpDirConverge" then
+    setActiveArpDirection(5)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+  elseif act == "arpDirDiverge" then
+    setActiveArpDirection(6)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+  elseif act == "arpDirUpDown" then
+    setActiveArpDirection(3)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+  elseif act == "arpDirDownUp" then
+    setActiveArpDirection(4)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+  elseif act == "arpDirReset" then
+    setActiveArpDirection(1)
+    local trk = state.tracks and state.tracks[state.activeTrack or 1]
+    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP", subtext = "Default Upward", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
+
+  -- Arp Rate Presets (Key 6)
+  elseif act == "arpRateTriplet" then
+    setActiveArpRate(15) -- 1/8T
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8T (Triplet)", subtext = "Triplet Feel", targetId = "key-22", color = "#64d8f0" })
+  elseif act == "arpRateStraight" then
+    setActiveArpRate(6) -- 1/8
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8 (Straight)", subtext = "Straight Feel", targetId = "key-22", color = "#64d8f0" })
+  elseif act == "arpRate16th" then
+    setActiveArpRate(7) -- 1/16
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/16th", subtext = "Sixteenth Notes", targetId = "key-22", color = "#64d8f0" })
+  elseif act == "arpRate8th" then
+    setActiveArpRate(6) -- 1/8
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8th", subtext = "Eighth Notes", targetId = "key-22", color = "#64d8f0" })
+  elseif act == "arpRate32nd" then
+    setActiveArpRate(8) -- 1/32
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/32nd", subtext = "Thirty-Second Notes", targetId = "key-22", color = "#64d8f0" })
+  elseif act == "arpRate4th" then
+    setActiveArpRate(5) -- 1/4
+    hud.updateWebviewHud({ title = "ARP RATE", value = "1/4th", subtext = "Quarter Notes", targetId = "key-22", color = "#64d8f0" })
+
+  -- Arp Gate Presets (Key 7)
+  elseif act == "arpGateStaccato" then
+    state.arpGatePercent = 25.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "25% (Staccato)", subtext = "Short Plucks", targetId = "key-26", color = "#64d8f0" })
+  elseif act == "arpGateLegato" then
+    state.arpGatePercent = 100.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "100% (Legato)", subtext = "Continuous Sustained", targetId = "key-26", color = "#64d8f0" })
+  elseif act == "arpGateOverlap" then
+    state.arpGatePercent = 120.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "120% (Overlap)", subtext = "Overlapping Notes", targetId = "key-26", color = "#64d8f0" })
+  elseif act == "arpGate80" then
+    state.arpGatePercent = 80.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "80%", subtext = "Standard Gate", targetId = "key-26", color = "#64d8f0" })
+  elseif act == "arpGate50" then
+    state.arpGatePercent = 50.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "50%", subtext = "Medium Gate", targetId = "key-26", color = "#64d8f0" })
+  elseif act == "arpGateReset" then
+    state.arpGatePercent = 80.0
+    arpeggiator.applyGatePercentChange()
+    hud.updateWebviewHud({ title = "ARP GATE", value = "80%", subtext = "Default Gate Reset", targetId = "key-26", color = "#64d8f0" })
+
+  -- Arp Sync & Clock (Key 8)
+  elseif act == "splitArpToggle" then
+    state.arpBottomEnabled = not state.arpBottomEnabled
+    hud.updateWebviewHud({ title = "SPLIT ARP", value = state.arpBottomEnabled and "BOTTOM ROW ACTIVE" or "BOTTOM ROW MUTED", subtext = "Split Keyboard Arp", targetId = "key-28", color = "#64d8f0" })
+  elseif act == "syncBpmToggle" then
+    state.logicSyncEnabled = not state.logicSyncEnabled
+    hud.updateWebviewHud({ title = "DAW SYNC", value = state.logicSyncEnabled and "ON (Logic Pro)" or "OFF (Internal)", subtext = "BPM Clock Source", targetId = "key-28", color = state.logicSyncEnabled and "#50fa7b" or "#ff5555" })
+  elseif act == "freeClockToggle" then
+    state.logicSyncEnabled = false
+    hud.updateWebviewHud({ title = "DAW SYNC", value = "OFF (Free Clock)", subtext = "Internal Clock Only", targetId = "key-28", color = "#ff5555" })
+  elseif act == "topBoostUp" then
+    state.splitArpTopBoost = math.min(50, (state.splitArpTopBoost or 20) + 5)
+    hud.updateWebviewHud({ title = "TOP BOOST", value = "+" .. state.splitArpTopBoost .. " Vel", subtext = "Split Arp Lead Boost", targetId = "key-28", color = "#64d8f0" })
+  elseif act == "topBoostDown" then
+    state.splitArpTopBoost = math.max(0, (state.splitArpTopBoost or 20) - 5)
+    hud.updateWebviewHud({ title = "TOP BOOST", value = "+" .. state.splitArpTopBoost .. " Vel", subtext = "Split Arp Lead Boost", targetId = "key-28", color = "#64d8f0" })
+  elseif act == "clockDiv2" then
+    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) / 2)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "CLOCK /2", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Half-Time", targetId = "key-28", color = "#64d8f0" })
+  elseif act == "clockMul2" then
+    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) * 2)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "CLOCK x2", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Double-Time", targetId = "key-28", color = "#64d8f0" })
+
+  -- Release Presets (Key 9)
+  elseif act == "relMax" then
+    state.ccStates[72] = 127
+    midi.sendMidiCC(72, 127)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "MAX (100%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+  elseif act == "relMin" then
+    state.ccStates[72] = 0
+    midi.sendMidiCC(72, 0)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "MIN (0%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+  elseif act == "relDefault" then
+    state.ccStates[72] = 64
+    midi.sendMidiCC(72, 64)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "DEFAULT (50%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+  elseif act == "rel50" then
+    state.ccStates[72] = 64
+    midi.sendMidiCC(72, 64)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "50%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+  elseif act == "rel75" then
+    state.ccStates[72] = 96
+    midi.sendMidiCC(72, 96)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "75%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+  elseif act == "rel25" then
+    state.ccStates[72] = 32
+    midi.sendMidiCC(72, 32)
+    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "25%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
+
+  -- Volume & Mod Presets (Key 0)
+  elseif act == "vol100" then
+    state.topRowVolume = 127
+    state.bottomRowVolume = 127
+    hud.updateWebviewHud({ title = "MASTER VOLUME", value = "100%", subtext = "Full Velocity", targetId = "key-29", color = "#50fa7b" })
+  elseif act == "vol75" then
+    state.topRowVolume = 95
+    state.bottomRowVolume = 95
+    hud.updateWebviewHud({ title = "MASTER VOLUME", value = "75%", subtext = "Medium Velocity", targetId = "key-29", color = "#64d8f0" })
+  elseif act == "modMax" then
+    state.ccStates[1] = 127
+    _G.activeWatchers.modAccumulator = 127
+    midi.sendMidiCC(1, 127)
+    hud.updateWebviewHud({ title = "MOD WHEEL", value = "100% (127)", subtext = "Max CC #1", targetId = "key-29", color = "#ffd700" })
+  elseif act == "mod0" then
+    state.ccStates[1] = 0
+    _G.activeWatchers.modAccumulator = 0
+    midi.sendMidiCC(1, 0)
+    hud.updateWebviewHud({ title = "MOD WHEEL", value = "0%", subtext = "Min CC #1", targetId = "key-29", color = "#ffd700" })
+
+  -- BPM Presets (Keys - and =)
+  elseif act == "bpmDown10" then
+    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) - 10)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO -10", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM -10", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpmDown20" then
+    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) - 20)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO -20", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM -20", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpmUp10" then
+    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) + 10)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO +10", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM +10", targetId = "key-24", color = "#64d8f0" })
+  elseif act == "bpmUp20" then
+    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) + 20)
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO +20", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM +20", targetId = "key-24", color = "#64d8f0" })
+  elseif act == "bpm120" then
+    state.arpBpm = 120.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO", value = "120 BPM", subtext = "Standard Preset", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpm90" then
+    state.arpBpm = 90.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO", value = "90 BPM", subtext = "Lofi / Hip-hop Preset", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpm70" then
+    state.arpBpm = 70.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO", value = "70 BPM", subtext = "Ballad Preset", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpm140" then
+    state.arpBpm = 140.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO", value = "140 BPM", subtext = "Trap / Dubstep Preset", targetId = "key-24", color = "#64d8f0" })
+  elseif act == "bpm160" then
+    state.arpBpm = 160.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO", value = "160 BPM", subtext = "DnB Preset", targetId = "key-24", color = "#64d8f0" })
+  elseif act == "bpmMin" then
+    state.arpBpm = 20.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO MIN", value = "20 BPM", subtext = "Minimum Tempo", targetId = "key-27", color = "#64d8f0" })
+  elseif act == "bpmMax" then
+    state.arpBpm = 300.0
+    arpeggiator.applyBpmChange()
+    hud.updateWebviewHud({ title = "TEMPO MAX", value = "300 BPM", subtext = "Maximum Tempo", targetId = "key-24", color = "#64d8f0" })
+  elseif act == "tapTempo" then
+    if arpeggiator.tapTempo then
+      arpeggiator.tapTempo()
+    end
+    hud.updateWebviewHud({ title = "TAP TEMPO", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Tap rhythm to set tempo", targetId = "key-24", color = "#ffd700" })
+  end
+
+  config.saveSettings()
+end
+
+local function shouldRepeat(act)
+  if not act then return false end
+  local repeatingActions = {
+    bpmUp = true, bpmDown = true,
+    atkUp = true, atkDown = true, decUp = true, decDown = true,
+    relUp = true, relDown = true, releaseUp = true, releaseDown = true,
+    arpGateUp = true, arpGateDown = true,
+    volUp = true, volDown = true, volume = true,
+    topVolUp = true, topVolDown = true,
+    botVolUp = true, botVolDown = true,
+    modWheelUp = true, modWheelDown = true, modWheel = true
+  }
+  return repeatingActions[act] == true
+end
+
+local function handleKeyDown(code, externalNoteKey)
+  if code == 50 then -- Backtick
+    state.modeSelectHeld = true
+    state.modeWasSelectedDuringHold = false
+    hud.updateWebviewHud()
+    return true
+  end
+
+  if not externalNoteKey and state.modeSelectHeld then
+    -- Mode Selector is Active!
+    if code == 0 then -- 'a' key
+      state.currentMode = "ArpAdvanced"
+      state.modeWasSelectedDuringHold = true
+      -- Release any currently pressed piano keys to prevent stuck notes
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+      hud.updateWebviewHud()
+      return true
+    end
+    -- If it's another key, ignore/block it while mode selector is held
+    return true 
+  end
+
+  if state.pressedKeys[code] then
+    return true
+  end
+
+  local propDef = hud.getProposedActionDef and hud.getProposedActionDef(code)
+  if propDef and (propDef.reserved or propDef.passThrough) then
+    -- Command-layer holes are intentionally visible in the HUD but must never
+    -- fall through into the piano/note mapping when clicked in the webview.
+    state.pressedKeys[code] = { isProposed = true }
+    hud.updateSingleKeyState(code, true, false)
+    return true
+  end
+  local actionToExecute = propDef and propDef.action
+
+  if not actionToExecute or actionToExecute == "" or actionToExecute == "none" then
+    local k = config.getNumberControlKey(code) or config.getControlKey(code)
+    if k then
+      if (state.shiftHeld or state.altHeld) and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
+        actionToExecute = k.shiftAction
+      elseif k.action and k.action ~= "" and k.action ~= "none" then
+        actionToExecute = k.action
+      end
+    end
+  end
+  if externalNoteKey then actionToExecute = nil end
+
+  if actionToExecute and actionToExecute ~= "" and actionToExecute ~= "none" then
+    state.pressedKeys[code] = { isControl = true, action = actionToExecute }
+    hud.updateSingleKeyState(code, true, false)
+    
+    state.controlKeyDownTime = state.controlKeyDownTime or {}
+    state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
+    state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
+    state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
+
+    executeControlAction(actionToExecute, code)
+    if shouldRepeat(actionToExecute) then
+      stopControlRepeat(code)
+      local entry = {}
+      controlRepeatTimers[code] = entry
+      entry.timer = hs.timer.doAfter(0.35, function()
+        if not controlRepeatTimers[code] then return end
+        if state.pressedKeys[code] then
+          entry.interval = hs.timer.doEvery(0.08, function()
+            if not controlRepeatTimers[code] then return end
+            local savedFn = pushStateSnapshot
+            pushStateSnapshot = function() end
+            pcall(executeControlAction, actionToExecute, code)
+            pushStateSnapshot = savedFn
+          end)
+        end
+      end)
+    else
+      stopControlRepeat(code)
+    end
+    return true
+  end
+
+  local noteKey = externalNoteKey or config.getNoteKey(code)
+  if noteKey then
+    local isTop = noteKey.isTop
+    local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
+    local trk = state.tracks and state.tracks[trkIdx]
+    local now = hs.timer.secondsSinceEpoch()
+
+    -- Count physical keys held on this track before registering this key
+    local numPhysHeld = 0
+    if trk and trk.physicalKeysHeld then
+      for _ in pairs(trk.physicalKeysHeld) do
+        numPhysHeld = numPhysHeld + 1
+      end
+    end
+
+    if trk then
+      trk.physicalKeysHeld = trk.physicalKeysHeld or {}
+      trk.physicalKeysHeld[code] = true
+    end
+    local ch = trk and trk.channel or (isTop and (state.topRowChannel or 2) or (state.bottomRowChannel or 0))
+    local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
+
+    -- Track-independent chord mode
+    local isChordActive = (trk and trk.chordModeActive) or state.quoteHeld
+    local chordPitches = isChordActive and transposer.getChordPitches(noteKey.baseNote, isTop, true, trk and trk.chordIdx) or { transposedPitch }
+    local arpActive = trk and trk.arpEnabled or false
+    local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
+
+    -- Track-independent sustain mode
+    local susMode = (trk and trk.sustainMode) or "smart"
+    if state.tabDamping then
+      susMode = "off"
+    end
+    local sustainPedalHeld = false
+    for c, info in pairs(state.pressedKeys) do
+      if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
+        sustainPedalHeld = true
+        break
+      end
+    end
+    if sustainPedalHeld and susMode == "off" and not state.tabDamping then
+      susMode = "smart"
+    end
+
+    -- Smart Sustain Auto-Reset Engine
+    if trk and susMode == "smart" and not isArpNote then
+      local chordWindow = 0.12 -- 120ms grouping window for multi-finger chord strikes
+      local isNewChord = (numPhysHeld == 0) or ((now - (trk.chordStartTime or 0)) > chordWindow)
+      if isNewChord then
+        -- Silence previously sustained pitches on this track that are NOT physically held down right now
+        if trk.sustainedPitches then
+          for _, item in ipairs(trk.sustainedPitches) do
+            local p = item.pitch
+            local itemCh = item.channel or ch
+            local isStillPhysHeld = false
+            for heldCode, _ in pairs(trk.physicalKeysHeld) do
+              if heldCode ~= code then
+                local kInfo = state.pressedKeys[heldCode]
+                if kInfo and kInfo.pitches then
+                  for _, hp in ipairs(kInfo.pitches) do
+                    if hp == p then isStillPhysHeld = true; break end
+                  end
+                end
+              end
+              if isStillPhysHeld then break end
+            end
+            if not isStillPhysHeld then
+              midi.sendMidiNote("noteOff", p, 0, itemCh)
+            end
+          end
+        end
+        trk.sustainedPitches = {}
+        trk.chordStartTime = now
+      end
+      -- Latch new pitches into trk.sustainedPitches
+      trk.sustainedPitches = trk.sustainedPitches or {}
+      for _, p in ipairs(chordPitches) do
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
+          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
+      end
+    elseif trk and susMode == "classic" and not isArpNote then
+      -- Classic cumulative sustain: append without clearing
+      trk.sustainedPitches = trk.sustainedPitches or {}
+      for _, p in ipairs(chordPitches) do
+        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
+          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
+      end
+    end
+
+    local effectiveSustain = (susMode ~= "off")
+    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain,
+      channel = ch, track = trkIdx, isTop = isTop, basePitch = noteKey.baseNote,
+      isChordSource = isChordActive, chordIdx = trk and trk.chordIdx or state.chordIdx }
+    
+    if isArpNote then 
+      for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
+    else 
+      if isTrackAudible(trkIdx) then
+        local quantMode = state.inputQuantizeMode or "Off"
+        local bpm = state.arpBpm or 120.0
+        local vel = transposer.getEffectiveRowVelocity(isTop)
+
+        if trk then trk.activeNotesCount = (trk.activeNotesCount or 0) + #chordPitches end
+
+        quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
+          for _, p in ipairs(pitches) do
+            midi.sendMidiNote("noteOn", p, v, channel)
+          end
+        end)
+      end
+    end
+    if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end
+    if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
+    return true
+  end
+
+  return true
+end
+
+local function handleKeyUp(code, externalNoteKey)
+  if not externalNoteKey and code == 50 then -- Backtick released
+    stopControlRepeat(code)
+    state.modeSelectHeld = false
+    if not state.modeWasSelectedDuringHold then
+      state.currentMode = "Home"
+      local keysToRelease = {}
+      for heldCode, _ in pairs(state.pressedKeys) do
+        table.insert(keysToRelease, heldCode)
+      end
+      for _, heldCode in ipairs(keysToRelease) do
+        handleKeyUp(heldCode)
+      end
+    end
+    hud.updateWebviewHud()
+    return true
+  end
+
+  local keyInfo = state.pressedKeys[code]
+  if keyInfo and type(keyInfo) == "table" and keyInfo.isProposed then
+    state.pressedKeys[code] = nil
+    hud.updateSingleKeyState(code, false, false)
+    return true
+  end
+
+  if keyInfo and type(keyInfo) == "table" and not keyInfo.isControl and keyInfo.pitches then
+    local pitches = keyInfo.pitches
+    local isArpNote = keyInfo.isArpNote
+    local isSustainedNote = keyInfo.isSustainedNote
+    local keyChannel = keyInfo.channel or 0
+    local isTop = keyInfo.isTop
+    local trkId = keyInfo.track or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
+    local trk = state.tracks and state.tracks[trkId]
+    if trk and trk.physicalKeysHeld then
+      trk.physicalKeysHeld[code] = nil
+    end
+    if trk and not isArpNote then
+      trk.activeNotesCount = math.max(0, (trk.activeNotesCount or 0) - #pitches)
+    end
+
+    if isArpNote then
+      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p, trkId) end
+    else
+      local sustainPedalHeld = false
+      for c, info in pairs(state.pressedKeys) do
+        if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
+          sustainPedalHeld = true
+          break
+        end
+      end
+
+      local susMode = (trk and trk.sustainMode) or "smart"
+      if state.tabDamping then susMode = "off" end
+      if sustainPedalHeld and susMode == "off" and not state.tabDamping then susMode = "smart" end
+      local isSustained = (not state.tabDamping) and (isSustainedNote or (susMode ~= "off"))
+
+      quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
+        for _, playedPitch in ipairs(releasedPitches or pitches) do
+          if isSustained and susMode ~= "off" then
+            if trk then
+              trk.sustainedPitches = trk.sustainedPitches or {}
+              local found = false
+              for _, item in ipairs(trk.sustainedPitches) do
+                if item.pitch == playedPitch and item.channel == (channel or keyChannel) then
+                  found = true
+                  break
+                end
+              end
+              if not found then
+                table.insert(trk.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel,
+                  basePitch = keyInfo.basePitch, isTop = keyInfo.isTop, isChordSource = keyInfo.isChordSource,
+                  chordIdx = keyInfo.chordIdx, sourceCode = code })
+              end
+            end
+          else
+            midi.sendMidiNote("noteOff", playedPitch, 0, channel or keyChannel)
+          end
+        end
+      end)
+    end
+    state.pressedKeys[code] = nil
+    if not externalNoteKey then
+      hud.updateSingleKeyState(code, false, false)
+      hud.updateWebviewHud()
+    end
+    return true
+  end
+
+  local noteKey = externalNoteKey or config.getNoteKey(code)
+  if noteKey then
+    -- Fallback if pressedKeys entry was missing
+    local isTop = noteKey.isTop
+    local chordPitches = transposer.getChordPitches(noteKey.baseNote, isTop)
+    local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
+    for _, pitch in ipairs(chordPitches) do
+      midi.sendMidiNote("noteOff", pitch, 0, ch)
+    end
+    hud.updateSingleKeyState(code, false, false)
+    return true
+  end
+
+  local numCtrlKey = config.getNumberControlKey(code)
+  if numCtrlKey then
+    stopControlRepeat(code)
+      state.pressedKeys[code] = nil
+      hud.updateSingleKeyState(code, false, false)
+      hud.updateWebviewHud()
+      return true
+  end
+
+  local function cleanupSustainPitches(targetTrackId)
+    local tracksToClean = targetTrackId and { [targetTrackId] = state.tracks and state.tracks[targetTrackId] } or (state.tracks or {})
+    for tId, trk in pairs(tracksToClean) do
+      if trk and trk.sustainedPitches then
+        for _, item in ipairs(trk.sustainedPitches) do
+          if type(item) == "table" and item.pitch then
+            local pitch = item.pitch
+            local channel = item.channel or trk.channel or 0
+            local isCurrentlyHeld = false
+            for _, kInfo in pairs(state.pressedKeys) do
+              if type(kInfo) == "table" and not kInfo.isControl and kInfo.pitches and kInfo.track == tId then
+                for _, p in ipairs(kInfo.pitches) do
+                  if p == pitch then
+                    isCurrentlyHeld = true
+                    break
+                  end
+                end
+                if isCurrentlyHeld then break end
+              end
+            end
+            local isArpActivePitch = trk.currentPitch and ((type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitch)
+            if not isCurrentlyHeld and not isArpActivePitch then
+              midi.sendMidiNote("noteOff", pitch, 0, channel)
+            end
+          end
+        end
+        trk.sustainedPitches = {}
+      end
+    end
+    if not targetTrackId and state.sustainedPitches then
+      for _, item in ipairs(state.sustainedPitches) do
+        if type(item) == "table" and item.pitch then
+          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or 0)
+        end
+      end
+      state.sustainedPitches = {}
+    end
+  end
+
+  local ctrlKey = config.getControlKey(code)
+  if ctrlKey then
+    stopControlRepeat(code)
+    state.pressedKeys[code] = nil
+    hud.updateSingleKeyState(code, false, false)
+    local act = (keyInfo and keyInfo.action) or ((state.shiftHeld or state.altHeld) and ctrlKey.shiftAction or ctrlKey.action)
+    
+    local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
+    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "sustain" and act ~= "classicSustain" then
+      if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
+        applyStateSnapshot(state.controlKeyDownSnapshots[code])
+        return true
+      end
+    end
+
+    if act == "sustain" then
+      state.tabDamping = false
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if state.altHeld then
+          -- Option + Tab explicitly toggles sustain off / on
+          trk.sustainMode = (trk.sustainMode == "off") and "smart" or "off"
+          if trk.sustainMode == "off" then
+            cleanupSustainPitches(activeTrkId)
+          end
+        end
+        -- Record only short base-layer taps. Holds remain momentary damping,
+        -- and Option+Tab keeps its separately displayed behavior.
+        if not state.altHeld and holdDuration <= 0.25 and trk.sustainMode ~= "off" then
+          trk.lastSmartSustainTapAt = hs.timer.secondsSinceEpoch()
+        elseif holdDuration > 0.25 then
+          trk.lastSmartSustainTapAt = nil
+        end
+        state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
+        local isSmart = (trk.sustainMode == "smart")
+        local isClassic = (trk.sustainMode == "classic")
+        local isSusOn = (trk.sustainMode ~= "off")
+        local spot = {
+          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
+          subtext = isSmart and "Tap Tab to damp · double-tap Tab to turn off" or (isClassic and "Classic sustain active" or "Sustain disabled"),
+          targetId = "key-48",
+          color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
+        }
+        hud.updateWebviewHud(spot)
+      end
+    elseif act == "classicSustain" then
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if trk.classicWasActiveOnPress then
+          trk.sustainMode = "smart"
+        else
+          trk.sustainMode = "classic"
+          for c, kInfo in pairs(state.pressedKeys) do
+            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
+              kInfo.isSustainedNote = true
+              local pitches = kInfo.pitches or { kInfo.pitch }
+              local ch = kInfo.channel or trk.channel or 0
+              for _, p in ipairs(pitches) do
+                if p then
+                  trk.sustainedPitches = trk.sustainedPitches or {}
+                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
+                end
+              end
+            end
+          end
+        end
+        state.sustainActive = (trk.sustainMode ~= "off")
+        config.saveSettings()
+        local isClassic = (trk.sustainMode == "classic")
+        local spot = {
+          title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
+          value = isClassic and "CLASSIC ON" or "SMART ON",
+          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Smart sustain active",
+          targetId = "key-48",
+          color = trk.color or "#00e5ff"
+        }
+        hud.updateWebviewHud(spot)
+      end
+    elseif act == "chordToggle" then
+      local activeTrkId = state.activeTrack or 1
+      local trk = state.tracks and state.tracks[activeTrkId]
+      if trk then
+        if trk.chordWasActiveOnPress then
+          trk.chordModeActive = false
+        else
+          trk.chordModeActive = true
+        end
+        state.chordModeActive = (trk.chordModeActive == true)
+        config.saveSettings()
+        local chordName = state.CHORDS[trk.chordIdx or state.chordIdx or 1].name
+        local spot = {
+          title = "CHORD MODE (TRK " .. activeTrkId .. ")",
+          value = trk.chordModeActive and ("ON (" .. chordName .. ")") or "OFF",
+          subtext = trk.chordModeActive and ("Chords active on Track " .. activeTrkId .. " (" .. ((trk and trk.name) or "") .. ")") or ("Single notes on Track " .. activeTrkId),
+          targetId = "key-39",
+          color = trk.chordModeActive and (trk.color or "#00e5ff") or "#b5aba0"
+        }
+        hud.updateWebviewHud(spot)
+      end
+    else
+      hud.updateWebviewHud()
+    end
+    return true
+  end
+
+  -- Fallback cleanup for unmapped or ignored keys
+  if state.pressedKeys[code] then
+    state.pressedKeys[code] = nil
+  end
+
+  return true
+end
+
+return {
+  selectTrack = selectTrack,
+  adjustTrackVolume = adjustTrackVolume,
+  executeControlAction = executeControlAction,
+  setActiveArpDirection = setActiveArpDirection,
+  getActiveArpDirectionIdx = getActiveArpDirectionIdx,
+  handleKeyDown = handleKeyDown,
+  handleKeyUp = handleKeyUp,
+  handleKeyStepNoteOn = function(note, velocity, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then return end
+    handleKeyDown(token, { baseNote = note, isTop = false })
+  end,
+  handleKeyStepNoteOff = function(note, channel)
+    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
+    if state.pressedKeys[token] then handleKeyUp(token, { baseNote = note, isTop = false }) end
+  end,
+  handleKeyStepDisconnect = function()
+    local held = {}
+    for code in pairs(state.pressedKeys) do
+      if type(code) == "string" and code:match("^keystep_") then held[#held + 1] = code end
+    end
+    for _, code in ipairs(held) do
+      if state.pressedKeys[code] then handleKeyUp(code, { isTop = false }) end
+    end
+  end,
+  stopAllControlRepeats = stopAllControlRepeats,
+  syncTrackAudibility = syncTrackAudibility,
+  isTrackAudible = isTrackAudible
+}
+
+end
+
+__modules["harmony"] = function()
+-- packages/music-engine/harmony.lua
+-- Musical theory, scales, modes, chords, and pitch transposition.
+
+local SCALES = {
+  { name = "Lydian",                  intervals = { 0, 2, 4, 6, 7, 9, 11 }, brightness = 6, brightTag = "BRIGHTEST ☀️" },
+  { name = "Major / Ionian",          intervals = { 0, 2, 4, 5, 7, 9, 11 }, brightness = 5, brightTag = "BRIGHT 🌤" },
+  { name = "Mixolydian",              intervals = { 0, 2, 4, 5, 7, 9, 10 }, brightness = 4, brightTag = "WARM ⛅" },
+  { name = "Dorian",                  intervals = { 0, 2, 3, 5, 7, 9, 10 }, brightness = 3, brightTag = "NEUTRAL ☁️" },
+  { name = "Natural Minor / Aeolian", intervals = { 0, 2, 3, 5, 7, 8, 10 }, brightness = 2, brightTag = "DARK 🌧" },
+  { name = "Phrygian",                intervals = { 0, 1, 3, 5, 7, 8, 10 }, brightness = 1, brightTag = "DARKER 🌩" },
+  { name = "Locrian",                 intervals = { 0, 1, 3, 5, 6, 8, 10 }, brightness = 0, brightTag = "DARKEST 🌑" },
+  { name = "Harmonic Minor",          intervals = { 0, 2, 3, 5, 7, 8, 11 }, brightness = 2, brightTag = "EXOTIC 🔮" },
+  { name = "Melodic Minor",           intervals = { 0, 2, 3, 5, 7, 9, 11 }, brightness = 3, brightTag = "JAZZY 🎷" }
+}
+
+local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+
+local WHITE_KEY_INDEX = {
+  [0] = 0, [1] = -1, [2] = 1, [3] = -1, [4] = 2, [5] = 3,
+  [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
+}
+
+local CHORDS = {
+  { name = "Triad", offsets = { 0, 2, 4 } },
+  { name = "7th", offsets = { 0, 2, 4, 6 } },
+  { name = "9th", offsets = { 0, 2, 4, 6, 8 } },
+  { name = "Power (1-5)", offsets = { 0, 4 } },
+  { name = "Octaves", offsets = { 0, 7 } }
+}
+
+local function noteNumToName(noteNum)
+  local octave = math.floor(noteNum / 12) - 1
+  local noteName = NOTE_NAMES[(noteNum % 12) + 1]
+  return noteName .. octave
+end
+
+local function getIntervalInfo(noteNum, root, scaleIdx)
+  local noteInOctave = noteNum % 12
+  local semitonesFromRoot = (noteInOctave - root + 12) % 12
+  local intervals = SCALES[scaleIdx or 1].intervals
+
+  for idx, interval in ipairs(intervals) do
+    if interval == semitonesFromRoot then
+      return idx, semitonesFromRoot
+    end
+  end
+  return nil, semitonesFromRoot
+end
+
+local function getTransposedPitch(basePitch, isTopRow, state)
+  local topOffset = state.topRowOctaveOffset or 12
+  local botOffset = state.bottomRowOctaveOffset or 0
+  local effectivePitch = basePitch + (isTopRow and topOffset or botOffset)
+  local octave = math.floor(effectivePitch / 12) - 1
+  local noteInOctave = effectivePitch % 12
+  local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
+
+  local root = state.currentRoot or 0
+  local octaveShift = state.octaveShift or 0
+  local transposeShift = state.transposeShift or 0
+  local scaleIdx = state.currentScaleIdx or 1
+
+  if scaleIndex and scaleIndex ~= -1 then
+    local intervals = SCALES[scaleIdx].intervals
+    local numIntervals = #intervals
+    local transposedIndex = scaleIndex + transposeShift
+    local octaveOffset = math.floor(transposedIndex / numIntervals)
+    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
+
+    local targetInterval = intervals[idxInScale]
+    local newPitch = ((octave + 1 + octaveOffset) * 12) + root + targetInterval + octaveShift
+    return newPitch
+  end
+  local fallbackPitch = effectivePitch + root + octaveShift + transposeShift
+  return fallbackPitch
+end
+
+local function getTransposedChordPitches(basePitch, isTopRow, forceChord, state)
+  local rootPitch = getTransposedPitch(basePitch, isTopRow, state)
+  local isChordEnabled = false
+  local activeChordIdx = state and state.chordIdx or 1
+  if type(forceChord) == "table" then
+    isChordEnabled = (forceChord.enabled ~= false)
+    if forceChord.chordIdx then activeChordIdx = forceChord.chordIdx end
+  elseif forceChord == true then
+    isChordEnabled = true
+  elseif forceChord == false then
+    isChordEnabled = false
+  else
+    isChordEnabled = state and (state.quoteHeld or state.chordModeActive)
+  end
+
+  if not isChordEnabled then
+    return { rootPitch }
+  end
+  local chordList = (state and state.CHORDS) or CHORDS
+  local chordDef = chordList[activeChordIdx] or chordList[1]
+  local offsets = chordDef.offsets or { 0 }
+  
+  local topOffset = state.topRowOctaveOffset or 12
+  local botOffset = state.bottomRowOctaveOffset or 0
+  local effectivePitch = basePitch + (isTopRow and topOffset or botOffset)
+  local noteInOctave = effectivePitch % 12
+  local scaleIndex = WHITE_KEY_INDEX[noteInOctave]
+  if not scaleIndex or scaleIndex == -1 then
+    return { rootPitch }
+  end
+  
+  local scaleIdx = state.currentScaleIdx or 1
+  local intervals = SCALES[scaleIdx].intervals
+  local numIntervals = #intervals
+  local transposeShift = state.transposeShift or 0
+  local baseTransposedIndex = scaleIndex + transposeShift
+  local octave = math.floor(effectivePitch / 12) - 1
+  local root = state.currentRoot or 0
+  local octaveShift = state.octaveShift or 0
+  
+  local pitches = {}
+  for _, off in ipairs(offsets) do
+    local transposedIndex = baseTransposedIndex + off
+    local octaveOffset = math.floor(transposedIndex / numIntervals)
+    local idxInScale = (((transposedIndex % numIntervals) + numIntervals) % numIntervals) + 1
+    local targetInterval = intervals[idxInScale]
+    local newPitch = ((octave + 1 + octaveOffset) * 12) + root + targetInterval + octaveShift
+    table.insert(pitches, newPitch)
+  end
+  return pitches
+end
+
+--- Compute diatonic chord pitches and name for nanoKEY Studio pads (1..8)
+-- @param padIdx number (1..8)
+-- @param state table controller state
+-- @return table { pitches = {...}, name = string, roman = string }
+local function getDiatonicPadChord(padIdx, state)
+  state = state or {}
+  padIdx = math.max(1, math.min(8, padIdx or 1))
+
+  local scaleIdx = state.currentScaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local numIntervals = #intervals
+  local root = state.currentRoot or 0
+  local octaveShift = state.octaveShift or 0
+
+  local chordList = state.CHORDS or CHORDS
+  local chordDef = chordList[state.chordIdx or 1] or chordList[1]
+  local offsets = chordDef.offsets or { 0, 2, 4 }
+
+  local degree = padIdx - 1
+  local baseOctave = 48 -- C3 foundation
+
+  local pitches = {}
+  local degreeRootPitch = nil
+
+  for i, off in ipairs(offsets) do
+    local step = degree + off
+    local octOffset = math.floor(step / numIntervals)
+    local idxInScale = (step % numIntervals) + 1
+    local targetInterval = intervals[idxInScale]
+    local pitch = baseOctave + (octOffset * 12) + root + targetInterval + octaveShift
+    table.insert(pitches, pitch)
+    if i == 1 then degreeRootPitch = pitch end
+  end
+
+  -- Determine chord name and quality
+  local rootName = NOTE_NAMES[((degreeRootPitch or baseOctave) % 12) + 1]
+  local quality = ""
+  if #pitches >= 3 then
+    local thirdInterval = (pitches[2] - pitches[1]) % 12
+    local fifthInterval = (pitches[3] - pitches[1]) % 12
+    if thirdInterval == 3 and fifthInterval == 7 then
+      quality = "m"
+    elseif thirdInterval == 4 and fifthInterval == 7 then
+      quality = ""
+    elseif thirdInterval == 3 and fifthInterval == 6 then
+      quality = "dim"
+    elseif thirdInterval == 4 and fifthInterval == 8 then
+      quality = "aug"
+    end
+  end
+
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°", "I" }
+  local roman = ROMAN_NUMERALS[padIdx] or tostring(padIdx)
+  local fullName = rootName .. quality .. (padIdx == 8 and " (8va)" or "")
+
+  return {
+    pitches = pitches,
+    name = fullName,
+    roman = roman,
+    rootPitch = degreeRootPitch
+  }
+end
+
+--- Get scale guide information for a range of MIDI pitches (default 48..72 for nanoKEY Studio)
+-- @param root number 0..11
+-- @param scaleIdx number 1..9
+-- @param minPitch number (default 48)
+-- @param maxPitch number (default 72)
+-- @return table { pitches = { [pitch] = { inScale = bool, isRoot = bool, degree = number, roman = string, noteName = string } }, scaleName = string, rootName = string }
+local function getScaleGuideInfo(root, scaleIdx, minPitch, maxPitch)
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  minPitch = minPitch or 48
+  maxPitch = maxPitch or 72
+
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local intervals = scale.intervals
+  local rootName = NOTE_NAMES[(root % 12) + 1]
+  local ROMAN_NUMERALS = { "I", "ii", "iii", "IV", "V", "vi", "vii°" }
+
+  local intervalToDegree = {}
+  for deg, intv in ipairs(intervals) do
+    intervalToDegree[intv] = deg
+  end
+
+  local pitches = {}
+  for p = minPitch, maxPitch do
+    local noteInOctave = p % 12
+    local semitonesFromRoot = (noteInOctave - root + 12) % 12
+    local isRoot = (semitonesFromRoot == 0)
+    local deg = intervalToDegree[semitonesFromRoot]
+    local inScale = (deg ~= nil)
+    local roman = deg and ROMAN_NUMERALS[deg] or ""
+    local noteName = noteNumToName(p)
+
+    pitches[tostring(p)] = {
+      pitch = p,
+      inScale = inScale,
+      isRoot = isRoot,
+      degree = deg or 0,
+      roman = roman,
+      noteName = noteName
+    }
+  end
+
+  return {
+    root = root,
+    rootName = rootName,
+    scaleIdx = scaleIdx,
+    scaleName = scale.name,
+    pitches = pitches
+  }
+end
+
+local FLAT_NOTE_NAMES = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" }
+local SHARP_NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
+
+local function prefersFlats(root, scaleIdx)
+  local r = (root or 0) % 12
+  local s = scaleIdx or 1
+  -- Keys using flats in major: F (5), Bb (10), Eb (3), Ab (8), Db (1), Gb (6)
+  if s == 1 or s == 2 or s == 3 then -- Lydian, Major, Mixolydian
+    if r == 5 or r == 10 or r == 3 or r == 8 or r == 1 or r == 6 then return true end
+  else -- Minor / Dorian / Phrygian / etc.
+    if r == 0 or r == 2 or r == 5 or r == 7 or r == 10 or r == 3 or r == 8 or r == 1 then return true end
+  end
+  return false
+end
+
+local function getContextualNoteName(pitchClass, root, scaleIdx)
+  local useFlats = prefersFlats(root, scaleIdx)
+  local names = useFlats and FLAT_NOTE_NAMES or SHARP_NOTE_NAMES
+  return names[(pitchClass % 12) + 1]
+end
+
+local CHORD_FORMULAS = {
+  -- Triads
+  ["0,4,7"] = { quality = "", name = "Major", score = 100 },
+  ["0,3,7"] = { quality = "m", name = "Minor", score = 100 },
+  ["0,3,6"] = { quality = "dim", name = "Diminished", score = 95 },
+  ["0,4,8"] = { quality = "aug", name = "Augmented", score = 95 },
+  ["0,5,7"] = { quality = "sus4", name = "Sus4", score = 90 },
+  ["0,2,7"] = { quality = "sus2", name = "Sus2", score = 90 },
+
+  -- 7ths
+  ["0,4,7,11"] = { quality = "maj7", name = "Major 7th", score = 110 },
+  ["0,4,7,10"] = { quality = "7", name = "Dominant 7th", score = 110 },
+  ["0,3,7,10"] = { quality = "m7", name = "Minor 7th", score = 110 },
+  ["0,3,6,10"] = { quality = "m7b5", name = "Half Diminished", score = 105 },
+  ["0,3,6,9"]  = { quality = "dim7", name = "Diminished 7th", score = 105 },
+  ["0,3,7,11"] = { quality = "m(maj7)", name = "Minor Major 7th", score = 100 },
+  ["0,4,8,10"] = { quality = "7#5", name = "Augmented 7th", score = 100 },
+  ["0,4,8,11"] = { quality = "maj7#5", name = "Major 7th #5", score = 100 },
+  ["0,4,7,9"]  = { quality = "6", name = "Major 6th", score = 100 },
+  ["0,3,7,9"]  = { quality = "m6", name = "Minor 6th", score = 100 },
+  ["0,2,4,7"]  = { quality = "add9", name = "Add 9", score = 100 },
+  ["0,2,3,7"]  = { quality = "m(add9)", name = "Minor Add 9", score = 100 },
+  ["0,5,7,10"] = { quality = "7sus4", name = "7 Sus4", score = 100 },
+  ["0,2,7,10"] = { quality = "7sus2", name = "7 Sus2", score = 100 },
+
+  -- 9ths
+  ["0,2,4,7,11"] = { quality = "maj9", name = "Major 9th", score = 120 },
+  ["0,2,4,7,10"] = { quality = "9", name = "Dominant 9th", score = 120 },
+  ["0,2,3,7,10"] = { quality = "m9", name = "Minor 9th", score = 120 },
+  ["0,2,4,7,9"]  = { quality = "6/9", name = "6/9", score = 115 },
+  ["0,2,3,7,9"]  = { quality = "m6/9", name = "Minor 6/9", score = 115 },
+  ["0,1,4,7,10"] = { quality = "7b9", name = "7b9", score = 115 },
+  ["0,3,4,7,10"] = { quality = "7#9", name = "7#9", score = 115 },
+
+  -- Incomplete 7ths (no 5th)
+  ["0,4,10"] = { quality = "7(no5)", name = "7 (no 5)", score = 80 },
+  ["0,4,11"] = { quality = "maj7(no5)", name = "maj7 (no 5)", score = 80 },
+  ["0,3,10"] = { quality = "m7(no5)", name = "m7 (no 5)", score = 80 },
+
+  -- Dyads / 2-note
+  ["0,7"] = { quality = "5", name = "Power 5th", score = 70 },
+  ["0,4"] = { quality = "(no5)", name = "Major 3rd", score = 60 },
+  ["0,3"] = { quality = "m(no5)", name = "Minor 3rd", score = 60 },
+  ["0,5"] = { quality = "sus4(no5)", name = "4th", score = 55 },
+  ["0,2"] = { quality = "sus2(no5)", name = "2nd", score = 55 },
+  ["0,10"] = { quality = "7(no5)", name = "b7", score = 60 },
+  ["0,11"] = { quality = "maj7(no5)", name = "7", score = 60 }
+}
+
+local function detectChord(pitches, root, scaleIdx)
+  if not pitches or #pitches == 0 then return "" end
+
+  root = root or 0
+  scaleIdx = scaleIdx or 1
+  local scale = SCALES[scaleIdx] or SCALES[1]
+  local inScaleMap = {}
+  for _, intv in ipairs(scale.intervals) do
+    inScaleMap[(root + intv) % 12] = true
+  end
+
+  local sortedPitches = {}
+  for _, p in ipairs(pitches) do
+    if type(p) == "number" then table.insert(sortedPitches, p) end
+  end
+  if #sortedPitches == 0 then return "" end
+  table.sort(sortedPitches)
+
+  local bassPitch = sortedPitches[1]
+  local bassPC = bassPitch % 12
+  local bassName = getContextualNoteName(bassPC, root, scaleIdx)
+
+  local uniquePCs = {}
+  local pcPresent = {}
+  for _, p in ipairs(sortedPitches) do
+    local pc = p % 12
+    if not pcPresent[pc] then
+      pcPresent[pc] = true
+      table.insert(uniquePCs, pc)
+    end
+  end
+
+  if #uniquePCs == 1 then
+    return bassName
+  end
+
+  local bestScore = -9999
+  local bestChord = nil
+
+  for _, candidateRoot in ipairs(uniquePCs) do
+    local intervals = {}
+    for _, pc in ipairs(uniquePCs) do
+      table.insert(intervals, (pc - candidateRoot + 12) % 12)
+    end
+    table.sort(intervals)
+    local key = table.concat(intervals, ",")
+
+    local formula = CHORD_FORMULAS[key]
+    if formula then
+      local score = formula.score or 50
+
+      -- Bonus: Root is in the bass
+      if candidateRoot == bassPC then
+        score = score + 30
+      end
+
+      -- Bonus: Root is in the active musical scale
+      if inScaleMap[candidateRoot] then
+        score = score + 20
+      end
+
+      -- Bonus: Root matches active key root
+      if candidateRoot == root then
+        score = score + 15
+      end
+
+      if score > bestScore then
+        bestScore = score
+        bestChord = {
+          root = candidateRoot,
+          quality = formula.quality,
+          name = formula.name,
+          bass = bassPC
+        }
+      end
+    end
+  end
+
+  if not bestChord then
+    -- Fallback: return bass note or interval
+    if #uniquePCs == 2 then
+      local intv = (uniquePCs[2] - uniquePCs[1] + 12) % 12
+      return bassName .. " (+" .. intv .. ")"
+    end
+    return bassName
+  end
+
+  local chordRootName = getContextualNoteName(bestChord.root, root, scaleIdx)
+  local chordStr = chordRootName .. bestChord.quality
+  if bestChord.bass ~= bestChord.root then
+    chordStr = chordStr .. "/" .. bassName
+  end
+
+  return chordStr
+end
+
+return {
+  SCALES = SCALES,
+  NOTE_NAMES = NOTE_NAMES,
+  FLAT_NOTE_NAMES = FLAT_NOTE_NAMES,
+  SHARP_NOTE_NAMES = SHARP_NOTE_NAMES,
+  WHITE_KEY_INDEX = WHITE_KEY_INDEX,
+  CHORDS = CHORDS,
+  noteNumToName = noteNumToName,
+  getIntervalInfo = getIntervalInfo,
+  getTransposedPitch = getTransposedPitch,
+  getTransposedChordPitches = getTransposedChordPitches,
+  getChordPitches = getTransposedChordPitches,
+  getDiatonicPadChord = getDiatonicPadChord,
+  getScaleGuideInfo = getScaleGuideInfo,
+  detectChord = detectChord,
+  getContextualNoteName = getContextualNoteName,
+  prefersFlats = prefersFlats
+}
+
+
+end
+
 __modules["hud"] = function()
 local hsWebview = require("hs.webview")
 local hsUsercontent = require("hs.webview.usercontent")
@@ -1921,7 +7498,7 @@ local sync = __require("sync")
 local logic_names = __require("logic_names")
 local keystep = nil
 pcall(function()
-  keystep = require("keystep")
+  keystep = __require("keystep")
 end)
 
 local function profileLog(msg)
@@ -2416,1682 +7993,3714 @@ return M
 
 end
 
-__modules["arpeggiator"] = function()
-local config = __require("config")
-local midi = __require("midi")
-local transposer = __require("transposer")
+__modules["keystep"] = function()
+-- KeyStep side-channel control interceptor for Hammerspoon.
+--
+-- The KeyStep does not expose its Seq/Arp mode, rate, or time division as
+-- ordinary MIDI CCs. When its sequencer is running, those controls can be
+-- inferred from its sequence notes and MIDI timing clock instead.
 
-local state = config.state
-local upperRowKeys = config.upperRowKeys
-local lowerRowKeys = config.lowerRowKeys
-local ARP_DIRECTIONS = state.ARP_DIRECTIONS
-local ARP_RATES = state.ARP_RATES
-local ARP_GATES = state.ARP_GATES
-local DIGIT_KEYCODES = state.DIGIT_KEYCODES
+local hsMidi = require("hs.midi")
+local Monitor = __require("keystep_ui")
 
+local transposer = nil
+pcall(function() transposer = __require("transposer") end)
 
-local function countTableKeys(t)
-  local count = 0
-  for _ in pairs(t or {}) do count = count + 1 end
-  return count
+local WHITE_KEY_INDEX = {
+  [0] = 0, [1] = -1, [2] = 1, [3] = -1, [4] = 2, [5] = 3,
+  [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
+}
+
+local SHIFT_MODES = {
+  [1]  = { id = "cutoff",  label = "CUTOFF",  cc = 74, default = 100, color = "#00e5ff", desc = "Filter Cutoff" },
+  [3]  = { id = "reverb",  label = "REVERB",  cc = 91, default = 20,  color = "#ff9100", desc = "Reverb Send" },
+  [6]  = { id = "delay",   label = "DELAY",   cc = 92, default = 0,   color = "#d500f9", desc = "Delay Send" },
+  [8]  = { id = "attack",  label = "ATTACK",  cc = 24, default = 0,   color = "#00e676", desc = "Envelope Attack" },
+  [10] = { id = "decay",   label = "DECAY",   cc = 25, default = 64,  color = "#ffd700", desc = "Envelope Decay & Tail" },
+}
+
+local KeyStep = {}
+
+local CLOCK_PULSES_PER_QUARTER = 24
+local CLOCK_SAMPLE_LIMIT = 24
+local CLOCK_RESET_SECONDS = 0.5
+local NOTE_RESET_SECONDS = 2.0
+local SEQUENCE_MARKER_VELOCITY = 1
+
+local MODE_NOTES = {
+  -- C10..G10 (120..127): exact sequencer marker notes emitted by KeyStep 32
+  [120] = 1, [121] = 2, [122] = 3, [123] = 4,
+  [124] = 5, [125] = 6, [126] = 7, [127] = 8,
+  -- Also preserve alternate/legacy octaves (108..115: C8/C9..G8/G9)
+  [108] = 1, [109] = 2, [110] = 3, [111] = 4,
+  [112] = 5, [113] = 6, [114] = 7, [115] = 8,
+}
+
+local DIVISIONS = {
+  { label = "1/4",   pulses = 24, ratio = 1.0,        ccValue = 1 },
+  { label = "1/8",   pulses = 12, ratio = 0.5,        ccValue = 2 },
+  { label = "1/16",  pulses = 6,  ratio = 0.25,       ccValue = 3 },
+  { label = "1/32",  pulses = 3,  ratio = 0.125,      ccValue = 4 },
+  { label = "1/4T",  pulses = 16, ratio = 2 / 3,      ccValue = 5 },
+  { label = "1/8T",  pulses = 8,  ratio = 1 / 3,      ccValue = 6 },
+  { label = "1/16T", pulses = 4,  ratio = 1 / 6,      ccValue = 7 },
+  { label = "1/32T", pulses = 2,  ratio = 1 / 12,     ccValue = 8 },
+}
+
+local inputDevice = nil
+local outputDevice = nil
+local monitor = nil
+local monitorRefreshTimer = nil
+local running = false
+local hudRef = nil
+local noteHandler = nil
+
+local ARP_MODES = {
+  [1] = "Up",
+  [2] = "Down",
+  [3] = "Inclusive",
+  [4] = "Exclusive",
+  [5] = "Random",
+  [6] = "Order",
+  [7] = "Up x2",
+  [8] = "Down x2",
+}
+
+-- KeyStep Rate knob physical range is 30 to 240 BPM.
+-- Linear mapping: 30 BPM -> Rate 0, ~136-137 BPM -> Rate 64 (halfway), 240 BPM -> Rate 127.
+local function bpmToRate(bpm)
+  local b = math.max(30, math.min(240, bpm))
+  return math.floor(((b - 30) / (240 - 30)) * 127 + 0.5)
 end
 
-local function newArpEngine()
+local function rateToBpm(rateVal)
+  local r = math.max(0, math.min(127, rateVal))
+  return math.floor(30 + (r / 127) * (240 - 30) + 0.5)
+end
+
+local function loadSetting(key, default)
+  if hs and hs.settings then
+    local v = hs.settings.get(key)
+    if v ~= nil then return v end
+  end
+  return default
+end
+
+local function persistSetting(key, val)
+  if hs and hs.settings then
+    hs.settings.set(key, val)
+  end
+end
+
+local config = {
+  -- Marker notes are channel-agnostic because direct and sequenced notes
+  -- share the KeyStep User Channel.
+  outputChannel = 0,
+  -- Emit one dedicated CC for Logic Controller Assignments Learn.
+  -- Avoid CC 7 and Arturia's CC 17 so the knob does not change instrument volume directly.
+  rateCc = 107,
+  maxVolumeCc = 127,      -- Full 0..127 MIDI volume range
+  minVolumeCc = 0,
+  -- 8-position stepped knobs mapped to safe unreserved continuous CCs (105, 106)
+  modeCc = 105,
+  divCc = 106,
+  -- MIDI CC data is seven-bit (0..127) mapped across KeyStep's 30..240 BPM range
+  -- with 120 BPM at center (64).
+  rateCcValue = function(bpm)
+    return bpmToRate(bpm)
+  end,
+}
+
+local function rateToVolumeCc(rateVal)
+  local maxV = config.maxVolumeCc or 127
+  local minV = config.minVolumeCc or 0
+  local norm = math.max(0, math.min(127, rateVal)) / 127
+  return math.floor(minV + norm * (maxV - minV) + 0.5)
+end
+
+local MAX_SEQUENCE_HISTORY = 32
+
+local state = {
+  mode = loadSetting("qwertyMidi_ks_mode", 1),
+  division = loadSetting("qwertyMidi_ks_division", "1/16"),
+  bpm = loadSetting("qwertyMidi_ks_bpm", 120),
+  rate = loadSetting("qwertyMidi_ks_rate", 64),
+  smoothBpm = loadSetting("qwertyMidi_ks_bpm", 120),
+  clockHistory = {},
+  connected = false,
+  deviceName = nil,
+  lastEvent = nil,
+  lastEventAt = nil,
+  clockPulseCount = 0,
+  lastRawNote = nil,
+  lastRawNoteChannel = nil,
+  outputDeviceName = nil,
+  lastClockTime = nil,
+  clockDeltas = {},
+  lastSequenceNoteTime = nil,
+  clocksSinceLastNote = 0,
+  pitchBend = 8192,
+  modWheel = 0,
+  sustain = 0,
+  seqArpMode = loadSetting("qwertyMidi_ks_seqArpMode", "arp"),
+  playing = false,
+  transportStatus = "unknown",
+  recording = false,
+  shift = false,
+  hold = false,
+  octave = 0,
+  activeKeys = {},
+  sequenceHistory = {},
+  activeShiftMode = nil,
+  latchedShiftMode = nil,
+  shiftPressTimes = {},
+  shiftControlTweaked = false,
+  heldShiftKeys = {},
+  envelopeStageIdx = loadSetting("qwertyMidi_ks_envelopeStageIdx", 0),
+  heldWhiteKeys = {},
+  paramValues = {
+    cutoff = 100,
+    reverb = 20,
+    delay = 0,
+    release = 40,
+    volume = 100,
+    modwheel = 0,
+  },
+  trackParamValues = {},
+  transposerEnabled = loadSetting("qwertyMidi_ks_transposerEnabled", true),
+  setupAcknowledged = false,
+  setupGuideStep = "hidden",
+}
+
+local function sendToHud(controlId, value, pressed, extra)
+  if hudRef and hudRef.updateKeyStepControl then
+    hudRef.updateKeyStepControl(controlId, value, pressed, extra)
+  end
+end
+
+local function setSetupGuide(step)
+  state.setupGuideStep = step or "hidden"
+  sendToHud("setup_guide", 1, state.setupGuideStep ~= "hidden", { step = state.setupGuideStep })
+end
+
+local function getActiveShiftModeDef()
+  local modeId = state.activeShiftMode or state.latchedShiftMode
+  if not modeId then return nil end
+  for _, m in pairs(SHIFT_MODES) do
+    if m.id == modeId then return m end
+  end
+  return nil
+end
+
+local function getFocusedTrack()
+  local s = _G.activeWatchers and _G.activeWatchers.state
+  local id = s and (tonumber(s.bottomRowTrack) or 1)
+  local trk = s and s.tracks and s.tracks[id or 1]
+  return trk, id
+end
+
+local function currentParamValues()
+  local trk, trackId = getFocusedTrack()
+  if not trackId then return state.paramValues end
+  if not state.trackParamValues[trackId] then
+    local values = {}
+    for _, def in pairs(SHIFT_MODES) do values[def.id] = def.default end
+    values.modwheel = 0
+    state.trackParamValues[trackId] = values
+  end
+  local values = state.trackParamValues[trackId]
+  if trk then
+    if trk.attack ~= nil then values.attack = trk.attack end
+    if trk.decay ~= nil then values.decay = trk.decay end
+    if trk.volume ~= nil then values.volume = trk.volume end
+  end
+  return values
+end
+
+local function effectiveShiftAssignment(modeDef)
+  if not modeDef then
+    local values = currentParamValues()
+    return { cc = 1, label = "MOD", color = "#a0a0ab", value = values.modwheel or 0 }
+  end
+  local values = currentParamValues()
+  return { cc = modeDef.cc, label = modeDef.label, color = modeDef.color,
+    value = values[modeDef.id] or state.paramValues[modeDef.id] or modeDef.default }
+end
+
+local function getOutputChannel()
+  local trk = getFocusedTrack()
+  return (trk and trk.channel) or config.outputChannel
+end
+
+local function resolveHeldShiftMode()
+  local newestTime, newestMode = -1, nil
+  for note, pressedAt in pairs(state.shiftPressTimes) do
+    if pressedAt >= newestTime then
+      local def = SHIFT_MODES[(tonumber(note) or 0) % 12]
+      if def then newestTime, newestMode = pressedAt, def.id end
+    end
+  end
+  state.activeShiftMode = newestMode or state.latchedShiftMode
+end
+
+local function sendShiftModeToHud()
+  local modeDef = getActiveShiftModeDef()
+  local assignment = effectiveShiftAssignment(modeDef)
+  local isLatched = (state.latchedShiftMode ~= nil and state.latchedShiftMode == (modeDef and modeDef.id))
+  sendToHud("shift_mode", modeDef and 1 or 0, modeDef ~= nil, {
+    mode = modeDef and modeDef.id or "default",
+    label = modeDef and modeDef.label or "DEFAULT",
+    cc = assignment.cc,
+    value = assignment.value,
+    color = modeDef and modeDef.color or "#a0a0ab",
+    latched = isLatched,
+    desc = modeDef and (assignment.stage and ("Envelope " .. assignment.stage) or modeDef.desc) or "Mod Wheel"
+  })
+  sendToHud("mod_wheel", assignment.value, true, {
+    cc = assignment.cc, value = assignment.value, mode = modeDef and modeDef.id or "default",
+    label = assignment.label, color = assignment.color, stage = assignment.stage
+  })
+  sendToHud("pitch_assignment", assignment.value, true, {
+    cc = assignment.cc, label = assignment.label, color = assignment.color,
+    mode = modeDef and modeDef.id or "default"
+  })
+end
+
+local function nowSeconds()
+  return hs.timer.absoluteTime() / 1000000000
+end
+
+local function monitorState()
+  local age = nil
+  if state.lastEventAt then
+    age = math.max(0, math.floor(nowSeconds() - state.lastEventAt))
+  end
   return {
-    heldNotes = {},
-    targetHeldNotes = {},
-    keysCurrentlyHeld = {},
-    stepIndex = 1,
-    stepDirection = 1,
-    pos = 0,
-    currentPitch = nil,
-    beatPosition = 0,
-    activeGateTimers = {},
-    gateGeneration = 0,
-    latchClearedForNewChord = false,
+    mode = state.mode,
+    division = state.division,
+    bpm = state.bpm,
+    connected = state.connected,
+    deviceName = state.deviceName,
+    setupGuideStep = state.setupGuideStep or "hidden",
+    lastEvent = state.lastEvent,
+    eventAge = age,
+    clockPulseCount = state.clockPulseCount,
+    lastRawNote = state.lastRawNote,
+    lastRawNoteChannel = state.lastRawNoteChannel,
+    outputDeviceName = state.outputDeviceName,
   }
 end
 
-state.arpEngineTop = newArpEngine()
-state.arpEngineBottom = newArpEngine()
-state.arpEngineLinked = newArpEngine()
-
-local function setHudModule(m)
-  hudModule = m
+local function updateMonitor()
+  if monitor then monitor:update(monitorState()) end
 end
 
-local function updateHud(spotlightInfo, activeArpPitch)
-  if hudModule and hudModule.updateWebviewHud then
-    hudModule.updateWebviewHud(spotlightInfo, activeArpPitch)
-  end
+local function ensureMonitorRefreshTimer()
+  if monitorRefreshTimer then return end
+  monitorRefreshTimer = hs.timer.doEvery(1, updateMonitor)
 end
 
-local function stopEngineState(eng)
-  eng.beatPosition = 0
-  if eng.activeGateTimers then
-    for pitchInfo, entry in pairs(eng.activeGateTimers) do
-      if entry and entry.timer then entry.timer:stop() end
-      local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
-      local ch = entry and entry.channel or 0
-      midi.sendMidiNote("noteOff", pitch, 0, ch)
+local function recordEvent(event, timestamp)
+  state.lastEvent = event
+  state.lastEventAt = timestamp or nowSeconds()
+  updateMonitor()
+end
+
+local function average(values)
+  if #values == 0 then return nil end
+  local total = 0
+  for _, value in ipairs(values) do total = total + value end
+  return total / #values
+end
+
+local function clearClockTiming()
+  state.lastClockTime = nil
+  state.clockDeltas = {}
+  state.clockHistory = {}
+  state.clocksSinceLastNote = 0
+  state.clockWindowStart = nil
+  state.clockWindowCount = 0
+end
+
+local function clearNoteTiming()
+  state.lastSequenceNoteTime = nil
+  state.clocksSinceLastNote = 0
+end
+
+local function getQwertyOutput()
+  local active = _G.activeWatchers and _G.activeWatchers.midiDevice
+  if active then return active end
+
+  for _, deviceName in ipairs(hsMidi.devices() or {}) do
+    if deviceName:match("IAC") or deviceName:match("Bus") then
+      return hsMidi.new(deviceName)
     end
-    eng.activeGateTimers = {}
   end
-  if eng.currentPitch then
-    local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-    local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-    midi.sendMidiNote("noteOff", p, 0, c)
-    eng.currentPitch = nil
-  end
-  eng.stepIndex = 1
-  eng.stepDirection = 1
-  eng.pos = 0
-end
-
-local function stopArpTimer()
-  stopEngineState(state.arpEngineTop)
-  stopEngineState(state.arpEngineBottom)
-  stopEngineState(state.arpEngineLinked)
-  state.arpBeatPosition = 0
-  if state.arpActiveGateTimers then
-    for pitchInfo, entry in pairs(state.arpActiveGateTimers) do
-      if entry and entry.timer then entry.timer:stop() end
-      local pitch = type(pitchInfo) == "table" and pitchInfo.pitch or pitchInfo
-      local ch = entry and entry.channel or 0
-      midi.sendMidiNote("noteOff", pitch, 0, ch)
+  for _, sourceName in ipairs(hsMidi.virtualSources() or {}) do
+    if sourceName:match("IAC") or sourceName:match("Bus") then
+      return hsMidi.newVirtualSource(sourceName)
     end
-    state.arpActiveGateTimers = {}
   end
-  if state.arpGateTimer then
-    state.arpGateTimer:stop()
-    state.arpGateTimer = nil
-  end
-  if state.arpTimer then
-    state.arpTimer:stop()
-    state.arpTimer = nil
-  end
-  if state.arpCurrentPitch then
-    local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-    local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-    midi.sendMidiNote("noteOff", p, 0, c)
-    state.arpCurrentPitch = nil
-  end
-  state.arpStepIndex = 1
-  state.arpStepDirection = 1
-  state.arpPos = 0
+  return nil
 end
 
-local function getArpIntervalSeconds()
-  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
-  return (60.0 / state.arpBpm) * rateFactor
+local function sendCC(controller, value, channel)
+  if not outputDevice then return end
+  outputDevice:sendCommand("controlChange", {
+    controllerNumber = controller,
+    controllerValue = value,
+    channel = channel or config.outputChannel,
+  })
 end
 
-local function arpTickEngine(eng, isTopRow)
-  local rateFactor = ARP_RATES[state.arpRateIdx] and ARP_RATES[state.arpRateIdx].factor or 0.5
-  local prevBeat = math.floor(eng.beatPosition or 0)
-  local prevBar = math.floor((eng.beatPosition or 0) / 4)
-  eng.beatPosition = (eng.beatPosition or 0) + rateFactor
-  local currentBeat = math.floor(eng.beatPosition)
-  local currentBar = math.floor(eng.beatPosition / 4)
-  local doSync = false
-  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then doSync = true
-  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then doSync = true end
-  if doSync then
-    eng.heldNotes = {}
-    if eng.targetHeldNotes then
-      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
-    end
-    local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
-      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
-      stopEngineState(eng)
-      if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 then
-        if state.arpTimer then state.arpTimer:stop(); state.arpTimer = nil end
+local function dispatchShiftCC(shiftDef, ccVal)
+  local assignment = effectiveShiftAssignment(shiftDef)
+  state.shiftControlTweaked = true
+  currentParamValues()[shiftDef.id] = ccVal
+  state.paramValues[shiftDef.id] = ccVal
+  local trk = getFocusedTrack()
+  local ch = getOutputChannel()
+  if shiftDef.id == "decay" then
+    if trk then trk.decay = ccVal end
+    sendCC(25, ccVal, ch)
+    sendCC(26, ccVal, ch)
+    sendCC(27, ccVal, ch)
+    sendCC(72, ccVal, ch)
+  elseif shiftDef.id == "attack" then
+    if trk then trk.attack = ccVal end
+    sendCC(24, ccVal, ch)
+    sendCC(73, ccVal, ch)
+  else
+    sendCC(assignment.cc, ccVal, ch)
+  end
+  return assignment
+end
+
+local lastRateCcValue = nil
+local RATE_CC_DEADBAND = 0
+local function sendRateCc(value)
+  if not outputDevice or not config.rateCc then return end
+  if lastRateCcValue ~= nil and math.abs(value - lastRateCcValue) <= RATE_CC_DEADBAND then
+    return
+  end
+  sendCC(config.rateCc, value)
+  lastRateCcValue = value
+end
+
+local function forwardNote(commandType, metadata)
+  if not outputDevice then return end
+  outputDevice:sendCommand(commandType, {
+    note = metadata.note,
+    velocity = metadata.velocity or 0,
+    channel = metadata.channel or 0,
+  })
+end
+
+local function formatState()
+  return string.format(
+    "[KeyStep] Mode: %s | Div: %s | Rate: %s BPM",
+    state.mode or "?",
+    state.division or "?",
+    state.bpm or "?"
+  )
+end
+
+local lastPublishAt = 0
+local function publishChange(force)
+  local now = nowSeconds()
+  if force or (now - lastPublishAt >= 0.5) then
+    lastPublishAt = now
+    print(formatState())
+  end
+end
+
+local function setMode(mode)
+  if state.mode == mode then return end
+  state.mode = mode
+  persistSetting("qwertyMidi_ks_mode", mode)
+  -- 8-position knob: map 1..8 across full 0..127 CC range
+  local modeCcVal = math.floor(((mode - 1) / 7) * 127 + 0.5)
+  if config.modeCc then sendCC(config.modeCc, modeCcVal) end
+  sendCC(102, mode)
+  publishChange(true)
+  updateMonitor()
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(mode)) or (ARP_MODES[mode] or ("Mode " .. tostring(mode)))
+  sendToHud("mode", mode, true, { mode = mode, modeName = modeName, cc = config.modeCc, ccValue = modeCcVal })
+end
+
+local function setDivision(division)
+  if not division then return end
+  if state.division == division.label then return end
+  state.division = division.label
+  persistSetting("qwertyMidi_ks_division", division.label)
+  -- 8-position knob: map 1..8 across full 0..127 CC range
+  local divCcVal = math.floor(((division.ccValue - 1) / 7) * 127 + 0.5)
+  if config.divCc then sendCC(config.divCc, divCcVal) end
+  sendCC(103, division.ccValue)
+  publishChange(true)
+  updateMonitor()
+  sendToHud("division", division.ccValue, true, { division = division.label, cc = config.divCc, ccValue = divCcVal })
+end
+
+local function setBpm(bpm)
+  local roundedBpm = math.max(30, math.min(240, math.floor(bpm + 0.5)))
+  if state.bpm == roundedBpm then return end
+  state.bpm = roundedBpm
+  state.smoothBpm = roundedBpm
+  persistSetting("qwertyMidi_ks_bpm", roundedBpm)
+  local rateVal = config.rateCcValue(roundedBpm)
+  state.rate = rateVal
+  persistSetting("qwertyMidi_ks_rate", rateVal)
+
+  local shiftDef = getActiveShiftModeDef()
+  if shiftDef then
+    state.shiftControlTweaked = true
+    state.paramValues[shiftDef.id] = rateVal
+    sendCC(shiftDef.cc, rateVal)
+    if shiftDef.id == "volume" then
+      local volCcVal = rateToVolumeCc(rateVal)
+      if _G.activeWatchers and _G.activeWatchers.state then
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
       end
-      updateHud()
+    end
+    sendToHud("rate", rateVal, true, {
+      rate = rateVal,
+      bpm = roundedBpm,
+      cc = shiftDef.cc,
+      ccValue = rateVal,
+      mode = shiftDef.id,
+      label = shiftDef.label
+    })
+    sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, cc = shiftDef.cc, ccValue = rateVal })
+  else
+    local volCcVal = rateToVolumeCc(rateVal)
+    sendRateCc(rateVal)
+    -- Synchronize Master Volume with QWERTY MIDI engine
+    local volChanged = false
+    if _G.activeWatchers and _G.activeWatchers.state then
+      if _G.activeWatchers.state.topRowVolume ~= volCcVal or _G.activeWatchers.state.bottomRowVolume ~= volCcVal then
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
+        volChanged = true
+      end
+    end
+    if volChanged and _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud()
+    end
+    sendToHud("rate", rateVal, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = rateVal })
+    sendToHud("bpm", roundedBpm, true, { rate = rateVal, bpm = roundedBpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = rateVal })
+  end
+  publishChange(false)
+  updateMonitor()
+end
+
+local function setRate(rateVal)
+  local roundedRate = math.max(0, math.min(127, math.floor(rateVal + 0.5)))
+  if state.rate == roundedRate then return end
+  state.rate = roundedRate
+  persistSetting("qwertyMidi_ks_rate", roundedRate)
+  local bpm = rateToBpm(roundedRate)
+  state.bpm = bpm
+  state.smoothBpm = bpm
+  persistSetting("qwertyMidi_ks_bpm", bpm)
+
+  local shiftDef = getActiveShiftModeDef()
+  if shiftDef then
+    state.shiftControlTweaked = true
+    state.paramValues[shiftDef.id] = roundedRate
+    sendCC(shiftDef.cc, roundedRate)
+    if shiftDef.id == "volume" then
+      local volCcVal = rateToVolumeCc(roundedRate)
+      if _G.activeWatchers and _G.activeWatchers.state then
+        _G.activeWatchers.state.bottomRowVolume = volCcVal
+      end
+    end
+    sendToHud("rate", roundedRate, true, {
+      rate = roundedRate,
+      bpm = bpm,
+      cc = shiftDef.cc,
+      ccValue = roundedRate,
+      mode = shiftDef.id,
+      label = shiftDef.label
+    })
+    sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, cc = shiftDef.cc, ccValue = roundedRate })
+  else
+    local volCcVal = rateToVolumeCc(roundedRate)
+    sendRateCc(roundedRate)
+    -- Synchronize Volume with QWERTY MIDI engine
+    local trk = getFocusedTrack()
+    if trk then
+      trk.volume = volCcVal
+      sendCC(7, volCcVal, getOutputChannel())
+    end
+    if _G.activeWatchers and _G.activeWatchers.state then
+      _G.activeWatchers.state.bottomRowVolume = volCcVal
+    end
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud()
+    end
+    sendToHud("rate", roundedRate, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = roundedRate })
+    sendToHud("bpm", bpm, true, { rate = roundedRate, bpm = bpm, volume = volCcVal, cc = config.rateCc or 107, ccValue = roundedRate })
+  end
+  publishChange()
+  updateMonitor()
+end
+
+local function nearestDivision(ratio)
+  local nearest = nil
+  local nearestError = math.huge
+  for _, division in ipairs(DIVISIONS) do
+    local error = math.abs(ratio - division.ratio)
+    if error < nearestError then
+      nearest = division
+      nearestError = error
+    end
+  end
+  return nearest
+end
+
+local function nearestDivisionByPulses(pulses)
+  local nearest = nil
+  local nearestError = math.huge
+  for _, division in ipairs(DIVISIONS) do
+    local err = math.abs(pulses - division.pulses)
+    if err < nearestError then
+      nearest = division
+      nearestError = err
+    end
+  end
+  return nearest
+end
+
+local CLOCK_HISTORY_MAX = 36
+local MIN_WINDOW_PULSES = 4
+local MIN_CLOCK_SPAN_PULSES = 4
+local MAX_CLOCK_SPAN_PULSES = 16
+local MIN_CLOCK_MEDIAN_INTERVALS = 7
+local CLOCK_MEDIAN_WINDOW_SECONDS = 0.20
+
+local function median(values)
+  if #values == 0 then return nil end
+  table.sort(values)
+  local middle = math.floor((#values + 1) / 2)
+  if #values % 2 == 1 then return values[middle] end
+  return (values[middle] + values[middle + 1]) / 2
+end
+
+local function handleClock(timestamp)
+  state.clockPulseCount = state.clockPulseCount + 1
+  state.clocksSinceLastNote = (state.clocksSinceLastNote or 0) + 1
+  recordEvent("MIDI clock", timestamp)
+
+  local previous = state.lastClockTime
+  state.lastClockTime = timestamp
+  local delta = previous and (timestamp - previous) or 0
+  if delta > CLOCK_RESET_SECONDS then
+    state.clockHistory = {}
+    state.clockWindowStart = timestamp
+    state.clockWindowCount = 0
+  end
+
+  local history = state.clockHistory or {}
+  table.insert(history, timestamp)
+  while #history > CLOCK_HISTORY_MAX do
+    table.remove(history, 1)
+  end
+  state.clockHistory = history
+
+  local count = #history
+  local expectedBpm = state.smoothBpm or state.bpm or 120
+  local expectedPulseInterval = 60 / (CLOCK_PULSES_PER_QUARTER * expectedBpm)
+
+  -- Multi-pulse span adapts to tempo: target ~180-200ms span window.
+  -- At high BPM (240 BPM), span = 16 pulses (166ms) cancels out runloop jitter.
+  -- At low BPM (30 BPM), span = 4 pulses (333ms) avoids excessive lag.
+  local span = math.max(
+    MIN_CLOCK_SPAN_PULSES,
+    math.min(MAX_CLOCK_SPAN_PULSES, math.floor(CLOCK_MEDIAN_WINDOW_SECONDS / expectedPulseInterval + 0.5))
+  )
+
+  local numSpans = math.min(MIN_CLOCK_MEDIAN_INTERVALS, count - span)
+  if count >= span + 3 and numSpans >= 3 then
+    -- Measure elapsed duration across sliding spans of `span` pulses.
+    -- Single-pulse deltas suffer ~15-20% runloop quantization jitter at high BPM (10ms pulses),
+    -- which previously caused Rate to jump between 65%, 80%, and 100% with no in-between steps.
+    -- Measuring multi-pulse spans divides endpoint jitter by `span`, reducing error to < 0.8%
+    -- and smoothly resolving every single percentage and CC step.
+    local intervals = {}
+    local first = count - numSpans + 1
+    for i = first, count do
+      local spanDuration = history[i] - history[i - span]
+      if spanDuration > 0 and spanDuration <= (span * CLOCK_RESET_SECONDS) then
+        table.insert(intervals, spanDuration / span)
+      end
+    end
+    local medianInterval = median(intervals)
+    if medianInterval then
+      local instantBpm = 60 / (CLOCK_PULSES_PER_QUARTER * medianInterval)
+
+      -- Valid KeyStep BPM range: 30 to 240
+      if instantBpm >= 25 and instantBpm <= 255 then
+        local currentBpm = state.smoothBpm or state.bpm or 120
+        local diff = math.abs(instantBpm - currentBpm)
+
+        -- Dynamic slew rate: snap immediately on fast knob turns, smooth in steady-state
+        local alpha
+        if diff > 8.0 then
+          alpha = 0.85
+        elseif diff > 3.0 then
+          alpha = 0.55
+        elseif diff > 1.2 then
+          alpha = 0.25
+        else
+          alpha = 0.10
+        end
+
+        currentBpm = currentBpm * (1.0 - alpha) + instantBpm * alpha
+        state.smoothBpm = currentBpm
+
+        -- Deadband / hysteresis to prevent 1-BPM jitter flickering in steady state
+        local lastBpm = state.bpm or 120
+        if math.abs(currentBpm - lastBpm) >= 1.2 then
+          local roundedBpm = math.floor(currentBpm + 0.5)
+          roundedBpm = math.max(30, math.min(240, roundedBpm))
+          setBpm(roundedBpm)
+          state.smoothBpm = currentBpm
+        end
+      end
+    end
+  end
+end
+
+local function handleSequenceNote(note, channel, timestamp)
+  recordEvent("Sequence note " .. tostring(note), timestamp)
+
+  local pulses = state.clocksSinceLastNote or 0
+  state.clocksSinceLastNote = 0
+
+  table.insert(state.sequenceHistory, {
+    note = note,
+    channel = channel,
+    time = timestamp,
+    pulses = pulses
+  })
+  while #state.sequenceHistory > MAX_SEQUENCE_HISTORY do
+    table.remove(state.sequenceHistory, 1)
+  end
+
+  local mode = MODE_NOTES[note]
+  if mode then
+    if state.seqArpMode ~= "seq" then
+      state.seqArpMode = "seq"
+      persistSetting("qwertyMidi_ks_seqArpMode", "seq")
+      sendToHud("seq_arp", 1, true, { mode = "seq" })
+    end
+    setMode(mode)
+  end
+
+  -- If MIDI clock pulses are running, pulse count between sequence notes is exact
+  -- and completely independent of the Rate knob.
+  if pulses and pulses >= 2 and pulses <= 36 then
+    local div = nearestDivisionByPulses(pulses)
+    if div then
+      setDivision(div)
       return
     end
   end
-  local pitchList = {}
-  for code, pitch in pairs(eng.heldNotes) do
-    if pitch then table.insert(pitchList, pitch) end
-  end
-  table.sort(pitchList)
-  if #pitchList == 0 then
-    if eng.activeGateTimers then
-      for pitch, entry in pairs(eng.activeGateTimers) do
-        if entry and entry.timer then entry.timer:stop() end
-        local ch = entry and entry.channel or 0
-        midi.sendMidiNote("noteOff", pitch, 0, ch)
-      end
-      eng.activeGateTimers = {}
-    end
-    if eng.currentPitch then
-      local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-      local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      eng.currentPitch = nil
-      updateHud()
-    end
-    return
-  end
-  if state.arpDirectionIdx == 1 then
-    eng.stepIndex = (eng.pos % #pitchList) + 1
-  elseif state.arpDirectionIdx == 2 then
-    local pos = (eng.pos % #pitchList) + 1
-    eng.stepIndex = #pitchList - pos + 1
-  elseif state.arpDirectionIdx == 3 then
-    if eng.stepIndex > #pitchList then
-      eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
-    elseif eng.stepIndex < 1 then
-      eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1
-    end
-  elseif state.arpDirectionIdx == 4 then
-    if eng.stepIndex > #pitchList or eng.stepIndex < 1 then
-      eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
-    end
-  elseif state.arpDirectionIdx == 5 then
-    local pos = (eng.pos % #pitchList) + 1
-    local idx
-    if pos % 2 == 1 then idx = math.floor(pos / 2) + 1
-    else idx = #pitchList - math.floor(pos / 2) + 1 end
-    eng.stepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif state.arpDirectionIdx == 6 then
-    local pos = (eng.pos % #pitchList) + 1
-    local mid = math.floor((#pitchList + 1) / 2)
-    local idx
-    if pos == 1 then idx = mid
-    elseif pos % 2 == 0 then idx = mid + math.floor(pos / 2)
-    else idx = mid - math.floor(pos / 2) end
-    if idx < 1 or idx > #pitchList then idx = ((pos - 1) % #pitchList) + 1 end
-    eng.stepIndex = idx
-  elseif state.arpDirectionIdx == 7 then
-    eng.stepIndex = math.random(1, #pitchList)
-  end
-  eng.stepIndex = math.max(1, math.min(#pitchList, eng.stepIndex or 1))
-  local nextPitch = pitchList[eng.stepIndex]
-  if state.arpDirectionIdx == 3 then
-    if #pitchList == 1 then eng.stepIndex = 1; eng.stepDirection = 1
-    else
-      eng.stepIndex = eng.stepIndex + eng.stepDirection
-      if eng.stepIndex > #pitchList then eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1
-      elseif eng.stepIndex < 1 then eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1 end
-    end
-  elseif state.arpDirectionIdx == 4 then
-    if #pitchList == 1 then eng.stepIndex = 1; eng.stepDirection = -1
-    else
-      eng.stepIndex = eng.stepIndex + eng.stepDirection
-      if eng.stepIndex < 1 then eng.stepIndex = math.min(#pitchList, 2); eng.stepDirection = 1
-      elseif eng.stepIndex > #pitchList then eng.stepIndex = math.max(1, #pitchList - 1); eng.stepDirection = -1 end
-    end
-  elseif state.arpDirectionIdx == 1 or state.arpDirectionIdx == 2 or state.arpDirectionIdx == 5 or state.arpDirectionIdx == 6 then
-    eng.pos = (eng.pos or 0) + 1
-  end
-  local success, err = pcall(function()
-    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-    local vel = transposer.getEffectiveRowVelocity(isTopRow)
-    local rowCh = isTopRow and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-    local ch = (state.arpChannel ~= nil) and state.arpChannel or rowCh
-    if gateRatio <= 1.0 and eng.currentPitch then
-      local oldP = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-      local oldCh = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-      if eng.activeGateTimers and eng.activeGateTimers[oldP] then
-        if eng.activeGateTimers[oldP].timer then eng.activeGateTimers[oldP].timer:stop() end
-        eng.activeGateTimers[oldP] = nil
-      end
-      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-      eng.currentPitch = nil
-    end
-    local isAudible = true
-    if state.tracks then
-      local trkId = 4
-      for id, t in pairs(state.tracks) do
-        if t.channel == ch then
-          trkId = id
-          break
-        end
-      end
-      local trk = state.tracks[trkId]
-      if trk and trk.muted then isAudible = false end
-      local anySolo = false
-      for _, t in pairs(state.tracks) do
-        if t.soloed then anySolo = true; break end
-      end
-      if anySolo and trk and not trk.soloed then isAudible = false end
-    end
 
-    if isAudible then
-      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-      eng.currentPitch = { pitch = nextPitch, channel = ch }
+  local previous = state.lastSequenceNoteTime
+  state.lastSequenceNoteTime = timestamp
+  if not previous or not state.bpm then return end
 
-      local gateDuration = getArpIntervalSeconds() * gateRatio
-      local pitchToRelease = nextPitch
-      local releaseCh = ch
-      local timer = hs.timer.doAfter(gateDuration, function()
-        local ok, e = pcall(function()
-          midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-          if eng.currentPitch and (type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch) == pitchToRelease then
-            eng.currentPitch = nil
-          end
-          if eng.activeGateTimers then eng.activeGateTimers[pitchToRelease] = nil end
-        end)
-        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
-      end)
-      eng.activeGateTimers = eng.activeGateTimers or {}
-      if eng.activeGateTimers[pitchToRelease] then
-        if eng.activeGateTimers[pitchToRelease].timer then eng.activeGateTimers[pitchToRelease].timer:stop() end
-        eng.activeGateTimers[pitchToRelease] = nil
-      end
-      eng.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh }
-    end
-  end)
-  if not success then print("[Arp Engine Error] " .. tostring(err)) end
-  return nextPitch
+  local noteDelta = timestamp - previous
+  if noteDelta <= 0 or noteDelta > NOTE_RESET_SECONDS then return end
+
+  local quarterNoteSeconds = 60 / state.bpm
+  local ratio = noteDelta / quarterNoteSeconds
+  setDivision(nearestDivision(ratio))
 end
 
-local function isTrackAudible(trkId)
-  if not state.tracks then return true end
-  local trk = state.tracks[trkId]
-  if not trk then return true end
-  if trk.muted then return false end
-  local anySolo = false
-  for _, t in pairs(state.tracks) do
-    if t.soloed then anySolo = true; break end
+local function findDevice(targetName)
+  for _, deviceName in ipairs(hsMidi.devices() or {}) do
+    local lowered = string.lower(deviceName)
+    if lowered == "keystep" or lowered:match("^arturia keystep") then
+      return deviceName
+    end
+    if targetName and lowered == string.lower(targetName) then
+      return deviceName
+    end
   end
-  if anySolo then
-    return trk.soloed == true
+  return nil
+end
+
+function KeyStep.handleMidiEvent(commandType, _, metadata, timestamp)
+  if not running and not inputDevice then return end
+  metadata = metadata or {}
+  timestamp = timestamp or nowSeconds()
+
+  local hex = (metadata.data and type(metadata.data) == "string") and metadata.data:lower() or ""
+  local isClock = (commandType == "systemTimingClock") or (commandType == "systemMessage" and hex:match("f8") ~= nil)
+  local isStart = (commandType == "systemStartSequence" or commandType == "systemContinueSequence") or
+                  (commandType == "systemMessage" and (hex:match("fa") ~= nil or hex:match("fb") ~= nil))
+  local isStop = (commandType == "systemStopSequence") or (commandType == "systemMessage" and hex:match("fc") ~= nil)
+
+  if isClock then
+    handleClock(timestamp)
+  elseif isStart then
+    state.playing = true
+    state.transportStatus = "running"
+    setSetupGuide(state.setupAcknowledged and "hidden" or "kbd_play")
+    clearNoteTiming()
+    recordEvent("Transport started", timestamp)
+    sendToHud("transport", 1, true, { action = "play", status = "running", source = "start" })
+  elseif isStop then
+    state.playing = false
+    state.transportStatus = "stopped"
+    setSetupGuide("transport")
+    clearClockTiming()
+    clearNoteTiming()
+    recordEvent("Transport stopped", timestamp)
+    sendToHud("transport", 0, false, { action = "stop", status = "stopped", source = "stop" })
+  elseif commandType == "pitchWheelChange" then
+    local pitchVal = metadata.pitchChange or 8192
+    state.pitchBend = pitchVal
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
+    end
+    recordEvent("Pitch bend " .. tostring(pitchVal), timestamp)
+  elseif commandType == "controlChange" then
+    local ccNum = metadata.controllerNumber
+    local ccVal = metadata.controllerValue or 0
+    if ccNum == 1 then
+      local shiftDef = getActiveShiftModeDef()
+      if shiftDef then
+        local assignment = dispatchShiftCC(shiftDef, ccVal)
+        sendToHud("mod_wheel", ccVal, true, {
+          cc = assignment.cc,
+          value = ccVal,
+          mode = shiftDef.id,
+          label = assignment.label,
+          stage = assignment.stage,
+          color = shiftDef.color
+        })
+        recordEvent(assignment.label .. " " .. tostring(ccVal) .. " (CC " .. tostring(assignment.cc) .. ")", timestamp)
+      else
+        state.modWheel = ccVal
+        state.paramValues.modwheel = ccVal
+        currentParamValues().modwheel = ccVal
+        if outputDevice then
+          outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = ccVal, channel = getOutputChannel() })
+        end
+        sendToHud("mod_wheel", ccVal, true, { cc = 1, value = ccVal, mode = "default", label = "MOD" })
+        recordEvent("Mod wheel " .. tostring(ccVal), timestamp)
+      end
+    elseif ccNum == 64 then
+      state.sustain = ccVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 64, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      end
+      sendToHud("sustain", ccVal, ccVal >= 64, { cc = 64, value = ccVal })
+      recordEvent("Sustain " .. tostring(ccVal), timestamp)
+    else
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = ccNum, controllerValue = ccVal, channel = metadata.channel or config.outputChannel })
+      end
+    end
+  elseif commandType == "polyphonicKeyPressure" or commandType == "channelPressure" then
+    local pressure = metadata.pressure or metadata.value or 0
+    sendToHud("aftertouch", pressure, true, { note = metadata.note, pressure = pressure })
+  elseif commandType == "noteOn" and (metadata.velocity or 0) > 0 then
+    state.lastRawNote = metadata.note
+    state.lastRawNoteChannel = metadata.channel
+    recordEvent("Note " .. tostring(metadata.note) .. " on MIDI " .. tostring((metadata.channel or 0) + 1), timestamp)
+    if MODE_NOTES[metadata.note] and (metadata.velocity <= SEQUENCE_MARKER_VELOCITY or metadata.note >= 120) then
+      handleSequenceNote(metadata.note, metadata.channel, timestamp)
+    else
+      -- Manual performance notes: strictly excluded from sequencer detection & Time Div inference
+      local pitchClass = metadata.note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
+
+      if not isWhiteKey then
+        -- Black Key: Modal Shift Trigger!
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef then
+          state.shiftPressTimes[metadata.note] = timestamp
+          state.heldShiftKeys[metadata.note] = true
+          state.activeShiftMode = modeDef.id
+          state.shiftControlTweaked = false
+          sendShiftModeToHud()
+          state.activeKeys[metadata.note] = metadata.velocity
+          sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
+            note = metadata.note,
+            velocity = metadata.velocity,
+            channel = metadata.channel,
+            isBlack = true,
+            mode = modeDef.id,
+            label = modeDef.label,
+            color = modeDef.color
+          })
+          recordEvent("Shift " .. modeDef.label .. " (held)", timestamp)
+        end
+      else
+        -- White Key: Transposed In-Scale Performance!
+        if state.setupGuideStep == "kbd_play" then
+          state.setupAcknowledged = true
+          setSetupGuide("hidden")
+        end
+        local playPitch = metadata.note
+        local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+        if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+          playPitch = transposerRef.getTransposedPitch(metadata.note, false)
+        end
+        state.heldWhiteKeys[metadata.note] = playPitch
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
+        if noteHandler and noteHandler.noteOn then
+          noteHandler.noteOn(metadata.note, metadata.velocity, metadata.channel, metadata.note)
+        else
+          forwardNote("noteOn", {
+            note = playPitch,
+            velocity = metadata.velocity,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
+        state.activeKeys[metadata.note] = metadata.velocity
+        sendToHud("key_" .. tostring(metadata.note), metadata.velocity, true, {
+          note = metadata.note,
+          playedPitch = playPitch,
+          velocity = metadata.velocity,
+          channel = metadata.channel,
+          isBlack = false
+        })
+      end
+    end
+  elseif commandType == "noteOff" or (commandType == "noteOn" and (metadata.velocity or 0) == 0) then
+    local isMarker = (metadata.note >= 120 and metadata.note <= 127 and MODE_NOTES[metadata.note] ~= nil) or
+                     (metadata.note >= 108 and metadata.note <= 115 and MODE_NOTES[metadata.note] ~= nil and state.heldWhiteKeys[metadata.note] == nil and state.activeKeys[metadata.note] == nil)
+    if not isMarker then
+      local pitchClass = metadata.note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
+
+      if not isWhiteKey then
+        -- Black Key: Modal Shift Release or Latch Toggle
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef then
+          local pressTime = state.shiftPressTimes[metadata.note] or timestamp
+          local duration = timestamp - pressTime
+          state.shiftPressTimes[metadata.note] = nil
+          state.heldShiftKeys[metadata.note] = nil
+          local anotherHeld = next(state.shiftPressTimes) ~= nil
+          if not anotherHeld and duration < 0.28 and not state.shiftControlTweaked then
+            if state.latchedShiftMode == modeDef.id then state.latchedShiftMode = nil
+            else state.latchedShiftMode = modeDef.id end
+          end
+          resolveHeldShiftMode()
+
+          sendShiftModeToHud()
+          state.activeKeys[metadata.note] = nil
+          sendToHud("key_" .. tostring(metadata.note), 0, false, {
+            note = metadata.note,
+            channel = metadata.channel,
+            isBlack = true
+          })
+          recordEvent("Shift " .. modeDef.label .. " (released)", timestamp)
+        end
+      else
+        -- White Key: Note-Off for exact transposed pitch
+        local playPitch = state.heldWhiteKeys[metadata.note]
+        if not playPitch then
+          local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+          if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+            playPitch = transposerRef.getTransposedPitch(metadata.note, false)
+          else
+            playPitch = metadata.note
+          end
+        end
+        state.heldWhiteKeys[metadata.note] = nil
+        if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
+        if noteHandler and noteHandler.noteOff then
+          noteHandler.noteOff(metadata.note, metadata.channel)
+        else
+          forwardNote("noteOff", {
+            note = playPitch,
+            velocity = 0,
+            channel = metadata.channel or config.outputChannel
+          })
+        end
+        state.activeKeys[metadata.note] = nil
+        sendToHud("key_" .. tostring(metadata.note), 0, false, {
+          note = metadata.note,
+          playedPitch = playPitch,
+          channel = metadata.channel,
+          isBlack = false
+        })
+      end
+    end
   end
+end
+
+function KeyStep.connect(targetName)
+  local deviceName = findDevice(targetName)
+  if not deviceName then
+    print("[KeyStep] Not detected. Waiting for KeyStep or Arturia KeyStep.")
+    return false
+  end
+
+  if not outputDevice then
+    outputDevice = getQwertyOutput()
+    state.outputDeviceName = outputDevice and outputDevice:name() or nil
+  end
+
+  if inputDevice and inputDevice:name() == deviceName then return true end
+
+  inputDevice = hsMidi.new(deviceName)
+  if not inputDevice then
+    print("[KeyStep] Failed to open MIDI input: " .. deviceName)
+    return false
+  end
+
+  running = true
+  inputDevice:callback(function(_, _, commandType, description, metadata)
+    KeyStep.handleMidiEvent(commandType, description, metadata)
+  end)
+  state.connected = true
+  state.deviceName = deviceName
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
+  recordEvent("Listening for MIDI", nowSeconds())
+  print("[KeyStep] Listening on " .. deviceName)
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(true)
+  end
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
+  sendToHud("connection", 1, true, { deviceName = deviceName })
+  sendToHud("mode", state.mode, true, { mode = state.mode, modeName = modeName })
+  sendToHud("division", 3, true, { division = state.division })
+  sendToHud("rate", state.rate or 64, true, { rate = state.rate or 64, bpm = state.bpm })
+  sendToHud("bpm", state.bpm, true, { rate = state.rate or 64, bpm = state.bpm })
+  sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
+  sendToHud("transport", nil, false, { action = "unknown", status = state.transportStatus })
+  sendToHud("octave", state.octave, true, { octave = state.octave })
   return true
 end
 
-local function silenceTrack(trkId)
-  local trk = state.tracks and state.tracks[trkId]
-  if not trk then return end
-  local ch = trk.channel or 0
-  if trk.activeGateTimers then
-    for pitch, entry in pairs(trk.activeGateTimers) do
-      if entry and entry.timer then entry.timer:stop() end
-      local c = entry and entry.channel or ch
-      midi.sendMidiNote("noteOff", pitch, 0, c)
+function KeyStep.disconnect()
+  if noteHandler and noteHandler.disconnect then pcall(noteHandler.disconnect) end
+  for note in pairs(state.activeKeys or {}) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note, disconnected = true })
+  end
+  state.activeKeys = {}
+  state.heldWhiteKeys = {}
+  if inputDevice then inputDevice:callback(nil) end
+  inputDevice = nil
+  state.connected = false
+  state.deviceName = nil
+  state.playing = false
+  state.transportStatus = "unknown"
+  state.setupAcknowledged = false
+  setSetupGuide("hidden")
+  clearClockTiming()
+  clearNoteTiming()
+  recordEvent("MIDI device disconnected", nowSeconds())
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(false)
+  end
+  sendToHud("connection", 0, false, { deviceName = nil })
+end
+
+function KeyStep.isConnected()
+  return inputDevice ~= nil
+end
+
+function KeyStep.setNoteHandler(handler)
+  noteHandler = handler
+end
+
+function KeyStep.panic()
+  -- Release the exact transposed pitches emitted by the side-channel before
+  -- discarding their ownership records.
+  if not outputDevice then outputDevice = getQwertyOutput() end
+  if outputDevice then
+    for _, pitch in pairs(state.heldWhiteKeys) do
+      outputDevice:sendCommand("noteOff", { note = pitch, velocity = 0, channel = config.outputChannel })
     end
-    trk.activeGateTimers = {}
+    outputDevice:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = getOutputChannel() })
   end
-  if trk.currentPitch then
-    local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-    local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
-    midi.sendMidiNote("noteOff", p, 0, c)
-    trk.currentPitch = nil
+  for note in pairs(state.activeKeys) do
+    sendToHud("key_" .. tostring(note), 0, false, { note = note })
   end
-  if midi and midi.silenceChannel then
-    midi.silenceChannel(ch)
+  state.heldWhiteKeys = {}
+  state.shiftPressTimes = {}
+  state.heldShiftKeys = {}
+  state.activeKeys = {}
+  state.activeShiftMode = nil
+  state.latchedShiftMode = nil
+  state.pitchBend = 8192
+  state.sustain = 0
+  state.shiftControlTweaked = false
+  sendShiftModeToHud()
+  sendToHud("pitch_bend", 8192, true, { pitch = 8192 })
+  if hudRef and hudRef.updateChordDisplay then hudRef.updateChordDisplay() end
+end
+
+function KeyStep.analyzeSequenceAndInferKnobs()
+  -- 1. Rate Knob from recent clock pulses
+  if state.clockHistory and #state.clockHistory >= MIN_WINDOW_PULSES then
+    local now = nowSeconds()
+    local lastClock = state.clockHistory[#state.clockHistory]
+    if (now - lastClock) <= 1.5 then
+      local currentBpm = state.smoothBpm or state.bpm
+      if currentBpm and math.abs(currentBpm - (state.bpm or 120)) >= 0.65 then
+        local roundedBpm = math.max(30, math.min(240, math.floor(currentBpm + 0.5)))
+        setBpm(roundedBpm)
+      end
+    end
   end
-  trk.arpIsPlaying = false
-  trk.activeNotesCount = 0
-  if hudModule and hudModule.fastUpdateArp then
-    hudModule.fastUpdateArp()
+
+  -- 2. Mode Knob from most recent sequence marker note
+  if state.sequenceHistory and #state.sequenceHistory > 0 then
+    for i = #state.sequenceHistory, 1, -1 do
+      local item = state.sequenceHistory[i]
+      local markerMode = MODE_NOTES[item.note]
+      if markerMode then
+        if state.seqArpMode ~= "seq" then
+          state.seqArpMode = "seq"
+          persistSetting("qwertyMidi_ks_seqArpMode", "seq")
+          sendToHud("seq_arp", 1, true, { mode = "seq" })
+        end
+        if state.mode ~= markerMode then
+          setMode(markerMode)
+        end
+        break
+      end
+    end
+
+    -- 3. Time Division Knob from recent note pulse deltas
+    local pulseDeltas = {}
+    for i = 1, #state.sequenceHistory do
+      local item = state.sequenceHistory[i]
+      -- Exclude manual performance notes; only evaluate sequencer marker notes
+      if item and (item.note >= 120 or (MODE_NOTES[item.note] and item.note >= 108)) then
+        local p = item.pulses
+        if p and p >= 2 and p <= 48 then
+          table.insert(pulseDeltas, p)
+        end
+      end
+    end
+
+    if #pulseDeltas > 0 then
+      local minP = math.huge
+      for _, p in ipairs(pulseDeltas) do
+        if p < minP then minP = p end
+      end
+      local div = nearestDivisionByPulses(minP)
+      if div and div.label ~= state.division then
+        setDivision(div)
+      end
+    end
   end
 end
 
-local function arpTickTrack(trk)
-  if not trk then return nil end
-  local rateFactor = ARP_RATES[trk.arpRateIdx or state.arpRateIdx] and ARP_RATES[trk.arpRateIdx or state.arpRateIdx].factor or 0.5
-  local prevBeat = math.floor(trk.beatPosition or 0)
-  local prevBar = math.floor((trk.beatPosition or 0) / 4)
-  trk.beatPosition = (trk.beatPosition or 0) + rateFactor
-  local currentBeat = math.floor(trk.beatPosition)
-  local currentBar = math.floor(trk.beatPosition / 4)
-  local doSync = false
-  if state.arpQuantizeMode == "Beat" and currentBeat > prevBeat then doSync = true
-  elseif state.arpQuantizeMode == "Bar" and currentBar > prevBar then doSync = true end
-  if doSync then
-    trk.heldNotes = {}
-    if trk.targetHeldNotes then
-      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
-    end
-    if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
-      stopEngineState(trk)
-      return nil
+function KeyStep.getFullState()
+  local modeName = state.seqArpMode == "seq" and ("Seq " .. tostring(state.mode)) or (ARP_MODES[state.mode] or ("Mode " .. tostring(state.mode)))
+  local divIdx = 3
+  for i, d in ipairs(DIVISIONS) do
+    if d.label == state.division then
+      divIdx = i
+      break
     end
   end
+  local activeDef = getActiveShiftModeDef()
+  return {
+    connected = state.connected,
+    deviceName = state.deviceName,
+    mode = state.mode,
+    modeName = modeName,
+    division = state.division,
+    divIdx = divIdx,
+    rate = state.rate or 64,
+    bpm = state.bpm or 120,
+    seqArp = state.seqArpMode or "arp",
+    playing = state.playing == true,
+    transportStatus = state.transportStatus or "unknown",
+    recording = state.recording == true,
+    hold = state.hold == true,
+    shift = state.shift == true,
+    octave = state.octave or 0,
+    pitchBend = state.pitchBend or 8192,
+    modWheel = state.modWheel or 0,
+    rateCc = config.rateCc or 107,
+    modeCc = config.modeCc or 16,
+    divCc = config.divCc or 17,
+    activeShiftMode = state.activeShiftMode,
+    latchedShiftMode = state.latchedShiftMode,
+    shiftModeDef = activeDef,
+    transposerEnabled = state.transposerEnabled ~= false,
+    paramValues = state.paramValues,
+  }
+end
 
-  local pitchList = {}
-  for code, pitch in pairs(trk.heldNotes or {}) do
-    if pitch then table.insert(pitchList, pitch) end
+function KeyStep.syncToHud()
+  KeyStep.analyzeSequenceAndInferKnobs()
+
+  if not hudRef then return end
+  local s = KeyStep.getFullState()
+  sendToHud("connection", s.connected and 1 or 0, s.connected, { deviceName = s.deviceName })
+  sendToHud("mode", s.mode, true, { mode = s.mode, modeName = s.modeName, cc = config.modeCc, ccValue = math.floor(((s.mode - 1) / 7) * 127 + 0.5) })
+  sendToHud("division", s.divIdx, true, { division = s.division, cc = config.divCc, ccValue = math.floor(((s.divIdx - 1) / 7) * 127 + 0.5) })
+  sendToHud("rate", s.rate, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
+  sendToHud("bpm", s.bpm, true, { rate = s.rate, bpm = s.bpm, cc = config.rateCc or 107, ccValue = s.rate })
+  sendToHud("seq_arp", s.seqArp == "seq" and 1 or 0, true, { mode = s.seqArp })
+  sendToHud("setup_guide", 1, s.setupGuideStep ~= "hidden", { step = s.setupGuideStep })
+  sendToHud("transport", s.playing and 1 or 0, s.playing, { action = s.transportStatus, status = s.transportStatus })
+  sendToHud("octave", s.octave, true, { octave = s.octave })
+  sendToHud("hold", s.hold and 127 or 0, s.hold, { hold = s.hold })
+  sendToHud("shift", s.shift and 1 or 0, s.shift, { shift = s.shift })
+  sendToHud("pitch_bend", s.pitchBend, true, { pitch = s.pitchBend })
+  sendToHud("mod_wheel", s.modWheel, true, { cc = 1, value = s.modWheel })
+  sendToHud("transposer_enabled", s.transposerEnabled and 1 or 0, s.transposerEnabled, {})
+  sendShiftModeToHud()
+end
+
+function KeyStep.setHud(hudInstance)
+  hudRef = hudInstance
+  if hudRef and hudRef.updateConnectionStatus then
+    hudRef.updateConnectionStatus(inputDevice ~= nil)
   end
-  table.sort(pitchList)
+  KeyStep.syncToHud()
+end
 
-  if #pitchList == 0 then
-    if trk.activeGateTimers then
-      for pitch, entry in pairs(trk.activeGateTimers) do
-        if entry and entry.timer then entry.timer:stop() end
-        local ch = entry and entry.channel or trk.channel or 0
-        midi.sendMidiNote("noteOff", pitch, 0, ch)
-      end
-      trk.activeGateTimers = {}
-    end
-    if trk.currentPitch then
-      local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-      local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      trk.currentPitch = nil
-    end
-    trk.arpIsPlaying = false
-    return nil
+function KeyStep.handleGuiAction(actionType, data)
+  data = data or {}
+  if not outputDevice then
+    outputDevice = getQwertyOutput()
   end
+  if actionType == "key" then
+    local note = tonumber(data.note)
+    local isDown = (data.pressed == true)
+    local vel = tonumber(data.velocity) or 100
+    local ch = tonumber(data.channel) or config.outputChannel or 0
+    if note then
+      local pitchClass = note % 12
+      local isWhiteKey = (WHITE_KEY_INDEX[pitchClass] ~= -1)
 
-  local dirIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
-  if dirIdx == 1 then
-    trk.stepIndex = (trk.pos % #pitchList) + 1
-  elseif dirIdx == 2 then
-    local pos = (trk.pos % #pitchList) + 1
-    trk.stepIndex = #pitchList - pos + 1
-  elseif dirIdx == 3 then
-    if trk.stepIndex > #pitchList then
-      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
-    elseif trk.stepIndex < 1 then
-      trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
-    end
-  elseif dirIdx == 4 then
-    if trk.stepIndex > #pitchList or trk.stepIndex < 1 then
-      trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
-    end
-  elseif dirIdx == 5 then
-    local pos = (trk.pos % #pitchList) + 1
-    local idx
-    if pos % 2 == 1 then idx = math.floor(pos / 2) + 1
-    else idx = #pitchList - math.floor(pos / 2) + 1 end
-    trk.stepIndex = math.max(1, math.min(#pitchList, idx))
-  elseif dirIdx == 6 then
-    local pos = (trk.pos % #pitchList) + 1
-    local mid = math.floor((#pitchList + 1) / 2)
-    local idx
-    if pos == 1 then idx = mid
-    elseif pos % 2 == 0 then idx = mid + math.floor(pos / 2)
-    else idx = mid - math.floor(pos / 2) end
-    if idx < 1 or idx > #pitchList then idx = ((pos - 1) % #pitchList) + 1 end
-    trk.stepIndex = idx
-  elseif dirIdx == 7 then
-    trk.stepIndex = math.random(1, #pitchList)
-  end
-  trk.stepIndex = math.max(1, math.min(#pitchList, trk.stepIndex or 1))
-  local nextPitch = pitchList[trk.stepIndex]
-
-  if dirIdx == 3 then
-    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = 1
-    else
-      trk.stepIndex = trk.stepIndex + trk.stepDirection
-      if trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1
-      elseif trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1 end
-    end
-  elseif dirIdx == 4 then
-    if #pitchList == 1 then trk.stepIndex = 1; trk.stepDirection = -1
-    else
-      trk.stepIndex = trk.stepIndex + trk.stepDirection
-      if trk.stepIndex < 1 then trk.stepIndex = math.min(#pitchList, 2); trk.stepDirection = 1
-      elseif trk.stepIndex > #pitchList then trk.stepIndex = math.max(1, #pitchList - 1); trk.stepDirection = -1 end
-    end
-  elseif dirIdx == 1 or dirIdx == 2 or dirIdx == 5 or dirIdx == 6 then
-    trk.pos = (trk.pos or 0) + 1
-  end
-
-  local success, err = pcall(function()
-    local gateRatio = (trk.arpGatePercent or state.arpGatePercent or 80.0) / 100.0
-    local vel = math.floor(math.min(127, (trk.volume or 100) * 1.0))
-    local ch = trk.channel or 0
-
-    if gateRatio <= 1.0 and trk.currentPitch then
-      local oldP = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-      local oldCh = type(trk.currentPitch) == "table" and trk.currentPitch.channel or ch
-      if trk.activeGateTimers and trk.activeGateTimers[oldP] then
-        if trk.activeGateTimers[oldP].timer then trk.activeGateTimers[oldP].timer:stop() end
-        trk.activeGateTimers[oldP] = nil
-      end
-      midi.sendMidiNote("noteOff", oldP, 0, oldCh)
-      trk.currentPitch = nil
-    end
-
-    local isAudible = isTrackAudible(trk.id)
-    if isAudible then
-      midi.sendMidiNote("noteOn", nextPitch, vel, ch)
-      trk.currentPitch = { pitch = nextPitch, channel = ch }
-      trk.arpIsPlaying = true
-
-      local trackRateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
-      local trackStepSec = (60.0 / (state.arpBpm or 120.0)) * trackRateFactor
-      local gateDuration = trackStepSec * gateRatio
-      local pitchToRelease = nextPitch
-      local releaseCh = ch
-      trk.activeGateTimers = trk.activeGateTimers or {}
-      local priorGate = trk.activeGateTimers[pitchToRelease]
-      if priorGate and priorGate.timer then priorGate.timer:stop() end
-      local gateGeneration = (trk.gateGeneration or 0) + 1
-      trk.gateGeneration = gateGeneration
-      local timer = hs.timer.doAfter(gateDuration, function()
-        local ok, e = pcall(function()
-          local activeGate = trk.activeGateTimers and trk.activeGateTimers[pitchToRelease]
-          if activeGate and activeGate.generation == gateGeneration then
-            midi.sendMidiNote("noteOff", pitchToRelease, 0, releaseCh)
-            if trk.currentPitch and (type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitchToRelease then
-              trk.currentPitch = nil
-            end
-            trk.arpIsPlaying = false
-            trk.activeGateTimers[pitchToRelease] = nil
+      if not isWhiteKey then
+        -- Black key clicked on GUI: toggle latch mode!
+        local modeDef = SHIFT_MODES[pitchClass]
+        if modeDef and isDown then
+          if state.latchedShiftMode == modeDef.id then
+            state.latchedShiftMode = nil
+            state.activeShiftMode = nil
+          else
+            state.latchedShiftMode = modeDef.id
+            state.activeShiftMode = modeDef.id
           end
-          if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
-        end)
-        if not ok then print("[Arp Gate Error] " .. tostring(e)) end
-      end)
-      trk.activeGateTimers[pitchToRelease] = { timer = timer, channel = releaseCh, generation = gateGeneration }
-      if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
-    else
-      trk.arpIsPlaying = false
-    end
-  end)
-  if not success then print("[Arp Track Error] " .. tostring(err)) end
-  return nextPitch
-end
-
-local function stopTrackArp(trk)
-  if not trk then return end
-  if trk.timer then
-    trk.timer:stop()
-    trk.timer = nil
-  end
-  silenceTrack(trk.id)
-end
-
-local function startTrackArp(trk, preserveState)
-  if not trk then return end
-  if trk.timer then
-    trk.timer:stop()
-    trk.timer = nil
-  end
-  local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
-  local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
-  if not preserveState then
-    if trk.arpDirectionIdx == 4 then
-      trk.stepIndex = 999 
-      trk.stepDirection = -1
-    else
-      trk.stepIndex = 1
-      trk.stepDirection = 1
-    end
-    trk.pos = 0
-    arpTickTrack(trk)
-  end
-  trk.timer = hs.timer.doEvery(intervalSeconds, function()
-    arpTickTrack(trk)
-  end)
-end
-
-local function isAnyTrackArpActive()
-  if not state.tracks then return false end
-  for _, trk in pairs(state.tracks) do
-    if trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
-      return true
-    end
-  end
-  return false
-end
-
-local function safeEvaluateJS(js)
-  if not _G.activeWatchers.midiWebview then return end
-  local ok, err = pcall(function()
-    _G.activeWatchers.midiWebview:evaluateJavaScript(js)
-  end)
-  if not ok then
-    hudLog("evaluateJavaScript error: " .. tostring(err))
-  end
-  return ok
-end
-
-local function arpTick()
-  local start = hs.timer.absoluteTime()
-  local activeP = nil
-
-  if state.tracks then
-    for i = 1, 4 do
-      local trk = state.tracks[i]
-      if trk and trk.arpEnabled and (countTableKeys(trk.heldNotes) > 0 or trk.locked) then
-        local p = arpTickTrack(trk)
-        if i == (state.activeTrack or 1) then
-          activeP = p
+          sendShiftModeToHud()
         end
-      end
-    end
-  else
-    if not state.arpLinked then
-      local p1 = arpTickEngine(state.arpEngineTop, true)
-      local p2 = arpTickEngine(state.arpEngineBottom, false)
-      activeP = p1 or p2
-    else
-      activeP = arpTickEngine(state.arpEngineTop, false)
-    end
-  end
-
-  if hudModule and hudModule.fastUpdateArp then
-    hudModule.fastUpdateArp()
-  else
-    updateHud(nil, activeP)
-  end
-  
-  local durationMs = (hs.timer.absoluteTime() - start) / 1000000
-  if durationMs > 15 then print(string.format("[Arp Perf Warning] arpTick took %.2f ms", durationMs)) end
-end
-
-local function sendHudPayload(payload)
-  local jsonStr = hs.json.encode(payload)
-  safeEvaluateJS("renderHud(" .. jsonStr .. ")")
-end
-
-local function startArpTimer(preserveState)
-  if state.arpTimer then return end
-  local intervalSeconds = getArpIntervalSeconds()
-  if not preserveState then
-    if state.arpDirectionIdx == 4 then
-      state.arpStepIndex = 999 
-      state.arpStepDirection = -1
-    else
-      state.arpStepIndex = 1
-      state.arpStepDirection = 1
-    end
-    state.arpPos = 0
-    arpTick()
-  end
-  state.arpTimer = hs.timer.doEvery(intervalSeconds, arpTick)
-end
-
-local function arpAddNote(code, pitch, trackIdx)
-  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-  local noteKey = rawCode and config.getNoteKey(rawCode)
-  local isTop = noteKey and noteKey.isTop or false
-  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
-  local trkId = trackIdx or defaultTrk
-  local trk = state.tracks and state.tracks[trkId]
-  if trk then
-    trk.keysCurrentlyHeld = trk.keysCurrentlyHeld or {}
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
-    if isLatched then
-      if numPhysicalHeld == 0 or not trk.latchClearedForNewChord then
-        trk.targetHeldNotes = {}
-        trk.latchClearedForNewChord = true
-        if trk.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
-          local p = type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch
-          local c = type(trk.currentPitch) == "table" and trk.currentPitch.channel or trk.channel or 0
-          midi.sendMidiNote("noteOff", p, 0, c)
-          trk.currentPitch = nil
+        sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, isBlack = true, mode = modeDef and modeDef.id })
+      else
+        -- White key clicked on GUI: play transposed!
+        local playPitch = note
+        local transposerRef = transposer or (_G.activeWatchers and _G.activeWatchers.transposer)
+        if state.transposerEnabled and transposerRef and transposerRef.getTransposedPitch then
+          playPitch = transposerRef.getTransposedPitch(note, false)
         end
+        if outputDevice then
+          outputDevice:sendCommand(isDown and "noteOn" or "noteOff", { note = playPitch, velocity = isDown and vel or 0, channel = ch })
+        end
+        sendToHud("key_" .. tostring(note), isDown and vel or 0, isDown, { note = note, playedPitch = playPitch, velocity = vel, channel = ch, isBlack = false })
       end
     end
-    trk.keysCurrentlyHeld[code] = true
-    trk.targetHeldNotes = trk.targetHeldNotes or {}
-    trk.targetHeldNotes[code] = pitch
-    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-      trk.heldNotes = {}
-      for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
-      if not trk.timer and (trk.arpEnabled or state.arpEnabled) then
-        startTrackArp(trk)
+  elseif actionType == "shift_mode" or actionType == "shiftmode" then
+    local targetMode = data.mode
+    if targetMode == "toggle" or targetMode == "latch" then
+      local mId = data.modeId
+      if state.latchedShiftMode == mId then
+        state.latchedShiftMode = nil
+        state.activeShiftMode = nil
+      else
+        state.latchedShiftMode = mId
+        state.activeShiftMode = mId
       end
-    end
-    return
-  end
-
-  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
-  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
-  if state.arpLatchActive then
-    if numPhysicalHeld == 0 or not eng.latchClearedForNewChord then
-      eng.targetHeldNotes = {}
-      eng.latchClearedForNewChord = true
-      if eng.currentPitch and (not state.arpQuantizeMode or state.arpQuantizeMode == "None") then
-        local p = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-        local c = type(eng.currentPitch) == "table" and eng.currentPitch.channel or 0
-        midi.sendMidiNote("noteOff", p, 0, c)
-        eng.currentPitch = nil
-      end
-    end
-  end
-  eng.keysCurrentlyHeld[code] = true
-  eng.targetHeldNotes = eng.targetHeldNotes or {}
-  eng.targetHeldNotes[code] = pitch
-  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-    eng.heldNotes = {}
-    for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
-    if not state.arpTimer then
-      startArpTimer()
-    end
-  end
-
-  if state.arpLinked then
-    state.arpHeldNotes = state.arpEngineLinked.heldNotes
-    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
-    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
-  end
-end
-
-local function arpRemoveNote(code, trackIdx)
-  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-  local noteKey = rawCode and config.getNoteKey(rawCode)
-  local isTop = noteKey and noteKey.isTop or false
-  local defaultTrk = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
-  local trkId = trackIdx or defaultTrk
-  local trk = state.tracks and state.tracks[trkId]
-  if trk then
-    if trk.keysCurrentlyHeld then
-      trk.keysCurrentlyHeld[code] = nil
-    end
-    local numPhysicalHeld = countTableKeys(trk.keysCurrentlyHeld)
-    local isLatched = (trk.arpLatchActive == true) or (trk.sustainMode and trk.sustainMode ~= "off")
-    if isLatched then
-      if numPhysicalHeld == 0 then
-        trk.latchClearedForNewChord = false
-      end
+    elseif targetMode == "clear" or targetMode == "default" then
+      state.latchedShiftMode = nil
+      state.activeShiftMode = nil
     else
-      if trk.targetHeldNotes then
-        trk.targetHeldNotes[code] = nil
-      end
+      state.activeShiftMode = targetMode
     end
-    if not trk.timer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-      trk.heldNotes = {}
-      if trk.targetHeldNotes then
-        for k,v in pairs(trk.targetHeldNotes) do trk.heldNotes[k] = v end
-      end
-      if countTableKeys(trk.heldNotes) == 0 and not trk.locked then
-        stopTrackArp(trk)
-        updateHud()
-      end
+    sendShiftModeToHud()
+  elseif actionType == "transposer_toggle" or actionType == "transposertoggle" then
+    state.transposerEnabled = not (state.transposerEnabled ~= false)
+    persistSetting("qwertyMidi_ks_transposerEnabled", state.transposerEnabled)
+    sendToHud("transposer_enabled", state.transposerEnabled and 1 or 0, state.transposerEnabled, {})
+  elseif actionType == "pitch" then
+    local pitchVal = tonumber(data.value) or 8192
+    state.pitchBend = pitchVal
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local ccVal = math.floor((pitchVal / 16383) * 127 + 0.5)
+      local assignment = dispatchShiftCC(shiftDef, ccVal)
+      sendToHud("pitch_bend", pitchVal, true, { assignment = true, cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color })
+      sendToHud("mod_wheel", ccVal, true, { cc = assignment.cc, value = ccVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
+    elseif outputDevice then
+      outputDevice:sendCommand("pitchWheelChange", { pitchChange = pitchVal, channel = getOutputChannel() })
+      sendToHud("pitch_bend", pitchVal, true, { pitch = pitchVal })
     end
-    return
-  end
-
-  local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-  local noteKey = rawCode and config.getNoteKey(rawCode)
-  local isTop = noteKey and noteKey.isTop or false
-  local eng = state.arpLinked and state.arpEngineLinked or (isTop and state.arpEngineTop or state.arpEngineBottom)
-  eng.keysCurrentlyHeld[code] = nil
-  local numPhysicalHeld = countTableKeys(eng.keysCurrentlyHeld)
-  if state.arpLatchActive or state.sustainActive then
-    if numPhysicalHeld == 0 then
-      eng.latchClearedForNewChord = false
-    end
-  else
-    if eng.targetHeldNotes then
-      eng.targetHeldNotes[code] = nil
-    end
-  end
-  if not state.arpTimer or state.arpQuantizeMode == "None" or not state.arpQuantizeMode then
-    eng.heldNotes = {}
-    if eng.targetHeldNotes then
-      for k,v in pairs(eng.targetHeldNotes) do eng.heldNotes[k] = v end
-    end
-    if state.arpLinked then
-      if countTableKeys(eng.heldNotes) == 0 then
-        stopEngineState(eng)
-        stopArpTimer()
-        updateHud()
-      end
+  elseif actionType == "mod" then
+    local modVal = tonumber(data.value) or 0
+    local shiftDef = getActiveShiftModeDef()
+    if shiftDef then
+      local assignment = dispatchShiftCC(shiftDef, modVal)
+      sendToHud("mod_wheel", modVal, true, { cc = assignment.cc, value = modVal, label = assignment.label, color = assignment.color, stage = assignment.stage })
     else
-      local otherEng = (eng == state.arpEngineTop) and state.arpEngineBottom or state.arpEngineTop
-      if countTableKeys(eng.heldNotes) == 0 and countTableKeys(otherEng.heldNotes) == 0 then
-        stopEngineState(eng)
-        stopArpTimer()
-        updateHud()
+      state.modWheel = modVal
+      currentParamValues().modwheel = modVal
+      if outputDevice then
+        outputDevice:sendCommand("controlChange", { controllerNumber = 1, controllerValue = modVal, channel = getOutputChannel() })
       end
+      sendToHud("mod_wheel", modVal, true, { cc = 1, value = modVal, label = "MOD" })
+    end
+  elseif actionType == "transport" then
+    local act = tostring(data.action or "play")
+    if act == "play" or act == "play_pause" then
+      state.playing = not state.playing
+      sendToHud("transport", state.playing and 1 or 0, state.playing, { action = state.playing and "play" or "stop" })
+    elseif act == "stop" then
+      state.playing = false
+      sendToHud("transport", 0, false, { action = "stop" })
+    elseif act == "rec" then
+      state.recording = not state.recording
+      sendToHud("record", state.recording and 1 or 0, state.recording, { recording = state.recording })
+    elseif act == "tap" then
+      sendToHud("tap", 1, true, {})
+    end
+  elseif actionType == "hold" then
+    state.hold = not state.hold
+    if outputDevice then
+      outputDevice:sendCommand("controlChange", { controllerNumber = 64, controllerValue = state.hold and 127 or 0, channel = config.outputChannel })
+    end
+    sendToHud("hold", state.hold and 127 or 0, state.hold, { hold = state.hold })
+  elseif actionType == "shift" then
+    state.shift = not state.shift
+    sendToHud("shift", state.shift and 1 or 0, state.shift, { shift = state.shift })
+  elseif actionType == "octave" then
+    local dir = tonumber(data.dir) or 0
+    state.octave = math.max(-2, math.min(2, (state.octave or 0) + dir))
+    sendToHud("octave", state.octave, true, { octave = state.octave })
+  elseif actionType == "mode" then
+    local m = tonumber(data.mode)
+    if m and m >= 1 and m <= 8 then
+      setMode(m)
+    end
+  elseif actionType == "division" then
+    local d = tonumber(data.division)
+    if d and d >= 1 and d <= 8 then
+      setDivision(DIVISIONS[d])
+    end
+  elseif actionType == "seq_arp" or actionType == "seqarp" then
+    state.seqArpMode = (data.mode == "seq" or data.mode == "arp") and data.mode or (state.seqArpMode == "arp" and "seq" or "arp")
+    sendToHud("seq_arp", state.seqArpMode == "seq" and 1 or 0, true, { mode = state.seqArpMode })
+  elseif actionType == "rate" then
+    local rateVal = tonumber(data.rate)
+    local bpm = tonumber(data.bpm)
+    if rateVal and rateVal >= 0 and rateVal <= 127 then
+      setRate(rateVal)
+    elseif bpm and bpm >= 30 and bpm <= 240 then
+      setBpm(bpm)
     end
   end
-
-  if state.arpLinked then
-    state.arpHeldNotes = state.arpEngineLinked.heldNotes
-    state.arpTargetHeldNotes = state.arpEngineLinked.targetHeldNotes
-    state.arpKeysCurrentlyHeld = state.arpEngineLinked.keysCurrentlyHeld
-  end
 end
 
-local function formatBpm(bpm)
-  if bpm == math.floor(bpm) then
-    return tostring(math.floor(bpm))
-  else
-    return string.format("%.1f", bpm)
+function KeyStep.start(options)
+  options = options or {}
+  if options.outputChannel ~= nil then config.outputChannel = options.outputChannel end
+  if options.rateCcValue then config.rateCcValue = options.rateCcValue end
+
+  running = true
+  if options.showMonitor ~= false then
+    KeyStep.showMonitor()
+    ensureMonitorRefreshTimer()
   end
+  outputDevice = options.outputDevice or getQwertyOutput()
+  state.outputDeviceName = outputDevice and outputDevice:name() or nil
+  if not outputDevice then print("[KeyStep] QWERTY MIDI output was not found; notes and CCs cannot be forwarded.") end
+  KeyStep.connect(options.deviceName)
+  updateMonitor()
+  return KeyStep
 end
 
-local function applyBpmChange()
-  if state.tracks then
-    for i = 1, 4 do
-      local trk = state.tracks[i]
-      if trk and trk.timer then
-        trk.timer:stop()
-        local rateFactor = ARP_RATES[trk.arpRateIdx or 5] and ARP_RATES[trk.arpRateIdx or 5].factor or 0.25
-        local newInterval = (60.0 / (state.arpBpm or 120.0)) * rateFactor
-        trk.timer = hs.timer.doEvery(newInterval, function() arpTickTrack(trk) end)
-      end
-    end
-  end
-  if state.arpTimer then
-    state.arpTimer:stop()
-    local newInterval = getArpIntervalSeconds()
-    state.arpTimer = hs.timer.doEvery(newInterval, arpTick)
-  end
+function KeyStep.stop()
+  running = false
+  KeyStep.disconnect()
+  outputDevice = nil
+  state.outputDeviceName = nil
+  if monitor then monitor:hide() end
+  if monitorRefreshTimer then monitorRefreshTimer:stop() end
+  monitorRefreshTimer = nil
 end
 
--- Tracks own their timing.  The header and rate keys control the focused track
--- so a rate change immediately replaces that track's running clock interval.
-local function setTrackArpRate(rateIdx, targetTrackIdx)
-  local normalizedRateIdx = math.max(1, math.min(#ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
-  state.arpRateIdx = normalizedRateIdx
-
-  local trackId = targetTrackIdx or state.activeTrack or 1
-  local trk = state.tracks and state.tracks[trackId]
-  if not trk then
-    if state.arpTimer then applyBpmChange() end
-    return nil, normalizedRateIdx
+function KeyStep.checkConnection()
+  local available = findDevice()
+  if available and not inputDevice then
+    return KeyStep.connect(available)
+  elseif not available and inputDevice then
+    KeyStep.disconnect()
   end
+  return inputDevice ~= nil
+end
 
-  trk.arpRateIdx = normalizedRateIdx
-  if trk.id then
-    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpRateIdx", normalizedRateIdx)
+function KeyStep.getState()
+  return monitorState()
+end
+
+function KeyStep.getHeldPitches()
+  local pitches = {}
+  for _, pitch in pairs(state.heldWhiteKeys or {}) do
+    if type(pitch) == "number" then pitches[#pitches + 1] = pitch end
   end
-  if trk.timer then
-    trk.timer:stop()
-    local rateFactor = ARP_RATES[normalizedRateIdx] and ARP_RATES[normalizedRateIdx].factor or 0.25
-    local intervalSeconds = (60.0 / (state.arpBpm or 120.0)) * rateFactor
-    trk.timer = hs.timer.doEvery(intervalSeconds, function()
-      arpTickTrack(trk)
+  return pitches
+end
+
+function KeyStep.resetTiming()
+  clearClockTiming()
+  clearNoteTiming()
+end
+
+
+function KeyStep.showMonitor()
+  monitor = monitor or Monitor.new()
+  monitor:show(monitorState())
+  ensureMonitorRefreshTimer()
+end
+
+function KeyStep.hideMonitor()
+  if monitor then monitor:hide() end
+end
+
+function KeyStep.toggleMonitor()
+  monitor = monitor or Monitor.new()
+  monitor:toggle(monitorState())
+end
+
+-- Device callbacks are global in hs.midi, so retain one watcher for the
+-- process lifetime and gate its work through the running flag.
+_G.activeWatchers = _G.activeWatchers or {}
+_G.activeWatchers.keyStepController = KeyStep
+if not _G.activeWatchers.keyStepDeviceWatcherRegistered then
+  _G.activeWatchers.keyStepDeviceWatcherRegistered = true
+  hsMidi.deviceCallback(function()
+    local controller = _G.activeWatchers.keyStepController
+    if controller then controller.checkConnection() end
+  end)
+end
+
+KeyStep.bpmToRate = bpmToRate
+KeyStep.rateToBpm = rateToBpm
+KeyStep.rateToVolumeCc = rateToVolumeCc
+KeyStep.getFullState = KeyStep.getFullState
+KeyStep.syncToHud = KeyStep.syncToHud
+KeyStep.analyzeSequenceAndInferKnobs = KeyStep.analyzeSequenceAndInferKnobs
+KeyStep.SHIFT_MODES = SHIFT_MODES
+KeyStep.WHITE_KEY_INDEX = WHITE_KEY_INDEX
+KeyStep.getActiveShiftModeDef = getActiveShiftModeDef
+KeyStep.setTransposer = function(tRef, stateRef)
+  transposer = tRef
+  if stateRef then state.sharedEngineState = stateRef end
+end
+KeyStep.setTransposerEnabled = function(enabled)
+  state.transposerEnabled = (enabled == true)
+  persistSetting("qwertyMidi_ks_transposerEnabled", state.transposerEnabled)
+  sendToHud("transposer_enabled", state.transposerEnabled and 1 or 0, state.transposerEnabled, {})
+end
+
+return KeyStep
+
+end
+
+__modules["keystep_ui"] = function()
+local hsWebview = require("hs.webview")
+local HTML = __require("keystep_ui_html")
+
+local Monitor = {}
+Monitor.__index = Monitor
+
+local function nowSeconds()
+  return hs.timer.absoluteTime() / 1000000000
+end
+
+function Monitor.new()
+  return setmetatable({
+    webview = nil,
+    lastRenderAt = 0,
+    pendingState = nil,
+    renderTimer = nil,
+  }, Monitor)
+end
+
+function Monitor:ensureWebview()
+  if self.webview then return self.webview end
+
+  local screen = hs.screen.mainScreen():frame()
+  local width, height = 530, 420
+  self.webview = hsWebview.new({
+    x = screen.x + screen.w - width - 26,
+    y = screen.y + 56,
+    w = width,
+    h = height,
+  }, { developerExtrasEnabled = true })
+    :windowStyle({ "titled", "closable", "utility" })
+    :windowTitle("KeyStep Monitor")
+    :allowTextEntry(false)
+    :html(HTML)
+    :deleteOnClose(false)
+
+  return self.webview
+end
+
+function Monitor:render()
+  self.renderTimer = nil
+  self.lastRenderAt = nowSeconds()
+  local state = self.pendingState
+  self.pendingState = nil
+  if not state or not self.webview then return end
+
+  local encoded = hs.json.encode(state)
+  if encoded then
+    pcall(function()
+      self.webview:evaluateJavaScript("window.updateKeyStepMonitor(" .. encoded .. ")")
     end)
   end
-
-  return trk, normalizedRateIdx
 end
 
-local function setTrackArpDirection(dirIdx, targetTrackIdx)
-  local normalizedDirIdx = math.max(1, math.min(#ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
-  state.arpDirectionIdx = normalizedDirIdx
-
-  local trackId = targetTrackIdx or state.activeTrack or 1
-  local trk = state.tracks and state.tracks[trackId]
-  if not trk then
-    return nil, normalizedDirIdx
-  end
-
-  trk.arpDirectionIdx = normalizedDirIdx
-  if trk.id then
-    hs.settings.set("qwertyMidi_track" .. trk.id .. "ArpDirectionIdx", normalizedDirIdx)
-  end
-  return trk, normalizedDirIdx
-end
-
-local function applyGatePercentChange()
-  if state.arpTimer then
-    local gateRatio = (state.arpGatePercent or 80.0) / 100.0
-    if not state.arpLinked then
-      if gateRatio <= 1.0 then
-        for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
-          if eng.activeGateTimers then
-            for pitch, entry in pairs(eng.activeGateTimers) do
-              local curPitchNum = type(eng.currentPitch) == "table" and eng.currentPitch.pitch or eng.currentPitch
-              if pitch ~= curPitchNum then
-                if entry and entry.timer then entry.timer:stop() end
-                local ch = entry and entry.channel or 0
-                midi.sendMidiNote("noteOff", pitch, 0, ch)
-                eng.activeGateTimers[pitch] = nil
-              end
-            end
-          end
-        end
-      end
-      return
-    end
-    if state.arpActiveGateTimers then
-      if gateRatio <= 1.0 then
-        for pitch, entry in pairs(state.arpActiveGateTimers) do
-          local curPitchNum = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-          if pitch ~= curPitchNum then
-            if entry and entry.timer then entry.timer:stop() end
-            local ch = entry and entry.channel or 0
-            midi.sendMidiNote("noteOff", pitch, 0, ch)
-            state.arpActiveGateTimers[pitch] = nil
-          end
-        end
-      end
-    end
-  end
-end
-
-local function rebuildNoteTable(noteTable, trk, chordSourcesOnly)
-  local baseCodeCounts = {}
-  local uniqueBaseCodes = {}
-  local keysToRemove = {}
-  for code, _ in pairs(noteTable) do
-    local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-    if rawCode then
-      baseCodeCounts[rawCode] = (baseCodeCounts[rawCode] or 0) + 1
-      uniqueBaseCodes[rawCode] = true
-      table.insert(keysToRemove, code)
-    end
-  end
-
-  for _, code in ipairs(keysToRemove) do
-    noteTable[code] = nil
-  end
-
-  for rawCode, _ in pairs(uniqueBaseCodes) do
-    local noteKey = config.getNoteKey(rawCode)
-    if noteKey then
-      local wasChord = (baseCodeCounts[rawCode] or 1) > 1
-      local isChord = wasChord
-      if isChord then
-        local newPitches = transposer.getChordPitches(noteKey.baseNote, noteKey.isTop,
-          { enabled = true, chordIdx = (trk and trk.chordIdx) or state.chordIdx })
-        for _, p in ipairs(newPitches) do
-          noteTable[tostring(rawCode) .. "_" .. tostring(p)] = p
-        end
-      else
-        local newPitch = transposer.getTransposedPitch(noteKey.baseNote, noteKey.isTop)
-        noteTable[tostring(rawCode) .. "_" .. tostring(newPitch)] = newPitch
-      end
-    end
-  end
-end
-
-local function rebuildHeldVoiceSources()
-  if not (state.tracks and state.pressedKeys) then return end
-  local anySolo = false
-  for _, trk in pairs(state.tracks) do if trk.soloed then anySolo = true; break end end
-
-  for trkId, trk in pairs(state.tracks) do
-    local oldByChannel, newByChannel = {}, {}
-    local function add(set, channel, pitches)
-      set[channel] = set[channel] or {}
-      for _, pitch in ipairs(pitches or {}) do set[channel][pitch] = true end
-    end
-    local function render(source)
-      if not source.basePitch then return source.pitches or { source.pitch } end
-      if source.isChordSource then
-        return transposer.getChordPitches(source.basePitch, source.isTop == true,
-          { enabled = true, chordIdx = trk.chordIdx or source.chordIdx or state.chordIdx })
-      end
-      return { transposer.getTransposedPitch(source.basePitch, source.isTop == true) }
-    end
-
-    for _, info in pairs(state.pressedKeys) do
-      if type(info) == "table" and not info.isControl and not info.isArpNote and info.track == trkId then
-        local channel = info.channel or trk.channel or 0
-        add(oldByChannel, channel, info.pitches)
-        info.pitches = render(info)
-        add(newByChannel, channel, info.pitches)
-      end
-    end
-    local sustainedGroups, rebuiltSustained = {}, {}
-    for index, item in ipairs(trk.sustainedPitches or {}) do
-      local sourceId = item.sourceCode or ("legacy-" .. index)
-      local group = sustainedGroups[sourceId]
-      if not group then
-        group = { source = item, oldPitches = {} }
-        sustainedGroups[sourceId] = group
-      end
-      group.oldPitches[item.pitch] = true
-    end
-    for _, group in pairs(sustainedGroups) do
-      local item = group.source
-      local channel = item.channel or trk.channel or 0
-      local oldPitches = {}
-      for pitch in pairs(group.oldPitches) do table.insert(oldPitches, pitch) end
-      add(oldByChannel, channel, oldPitches)
-      local pitches = render(item)
-      add(newByChannel, channel, pitches)
-      for _, pitch in ipairs(pitches) do
-        local replacement = {}
-        for key, value in pairs(item) do if key ~= "pitches" then replacement[key] = value end end
-        replacement.pitch = pitch
-        replacement.pitches = nil
-        table.insert(rebuiltSustained, replacement)
-      end
-    end
-    trk.sustainedPitches = rebuiltSustained
-
-    for channel, pitches in pairs(oldByChannel) do
-      for pitch in pairs(pitches) do
-        if not (newByChannel[channel] and newByChannel[channel][pitch]) then
-          midi.sendMidiNote("noteOff", pitch, 0, channel)
-        end
-      end
-    end
-    if not trk.muted and (not anySolo or trk.soloed) then
-      local velocity = transposer.getEffectiveRowVelocity(trkId > 2)
-      for channel, pitches in pairs(newByChannel) do
-        for pitch in pairs(pitches) do
-          if not (oldByChannel[channel] and oldByChannel[channel][pitch]) then
-            midi.sendMidiNote("noteOn", pitch, velocity, channel)
-          end
-        end
-      end
-    end
-  end
-end
-
-local function updateLatchedArpNotes()
-  if not state.tracks and not state.arpLinked then
-    for _, eng in ipairs({state.arpEngineTop, state.arpEngineBottom}) do
-      if next(eng.heldNotes) ~= nil then
-        rebuildNoteTable(eng.heldNotes)
-      end
-      if eng.targetHeldNotes and next(eng.targetHeldNotes) ~= nil then
-        rebuildNoteTable(eng.targetHeldNotes)
-      end
-    end
-    return
-  end
-
-  if state.tracks then
-    for _, trk in pairs(state.tracks) do
-      if trk.heldNotes and next(trk.heldNotes) ~= nil then
-        rebuildNoteTable(trk.heldNotes, trk)
-      end
-      if trk.targetHeldNotes and next(trk.targetHeldNotes) ~= nil then
-        rebuildNoteTable(trk.targetHeldNotes, trk)
-      end
-    end
-  end
-
-  if next(state.arpHeldNotes) ~= nil then
-    rebuildNoteTable(state.arpHeldNotes)
-  end
-  if state.arpTargetHeldNotes and next(state.arpTargetHeldNotes) ~= nil then
-    rebuildNoteTable(state.arpTargetHeldNotes)
-  end
-  rebuildHeldVoiceSources()
-end
-
-local function updateLatchedArpChordNotes(targetTrackId)
-  targetTrackId = targetTrackId or state.activeTrack or 1
-  if state.tracks then
-    for trkId, trk in pairs(state.tracks) do
-      if not targetTrackId or targetTrackId == trkId then
-        if trk.heldNotes then rebuildNoteTable(trk.heldNotes, trk, true) end
-        if trk.targetHeldNotes then rebuildNoteTable(trk.targetHeldNotes, trk, true) end
-      end
-    end
+function Monitor:update(state)
+  self:ensureWebview()
+  self.pendingState = state
+  local delay = math.max(0, 0.1 - (nowSeconds() - self.lastRenderAt))
+  if self.renderTimer then return end
+  if delay == 0 then
+    self:render()
   else
-    updateLatchedArpNotes()
-    return
+    self.renderTimer = hs.timer.doAfter(delay, function() self:render() end)
   end
-
-  -- Also reconcile currently held and sustained voices. Chord provenance is kept
-  -- on each source; only the selected track's chordIdx has changed.
-  updateLatchedArpNotes()
 end
 
-local function getArpRowTargetSubtext()
-  if state.tracks then
-    local trk = state.tracks[state.activeTrack or 1]
-    return trk and ("Track " .. trk.id .. ": " .. trk.name) or "Active Track"
-  end
-  if state.arpTopEnabled and state.arpBottomEnabled then
-    return "Top & Bottom Rows"
-  elseif state.arpTopEnabled then
-    return "Top Row Only"
-  elseif state.arpBottomEnabled then
-    return "Bottom Row Only"
+function Monitor:show(state)
+  self:ensureWebview():show()
+  self:update(state)
+end
+
+function Monitor:hide()
+  if self.webview then self.webview:hide() end
+end
+
+function Monitor:toggle(state)
+  self:ensureWebview()
+  if self.webview:isVisible() then
+    self:hide()
   else
-    return "No Rows Active"
+    self:show(state)
   end
 end
 
-local function toggleArpPower(targetTrackIdx)
-  local trkId = targetTrackIdx or state.activeTrack or 1
-  local trk = state.tracks and state.tracks[trkId]
-  if trk then
-    if not trk.arpEnabled then
-      trk.arpEnabled = true
-      trk.arpLatchActive = true
-      trk.latchClearedForNewChord = false
-    elseif trk.arpLatchActive then
-      trk.arpLatchActive = false
-      local newHeld = {}
-      for code, pitch in pairs(trk.heldNotes or {}) do
-        if trk.keysCurrentlyHeld[code] then
-          newHeld[code] = pitch
-        end
-      end
-      trk.heldNotes = newHeld
-      trk.targetHeldNotes = {}
-      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
-      if countTableKeys(trk.heldNotes) == 0 then
-        stopTrackArp(trk)
-      end
-    else
-      trk.arpEnabled = false
-      trk.arpLatchActive = false
-      stopTrackArp(trk)
-      trk.heldNotes = {}
-      trk.keysCurrentlyHeld = {}
-    end
+function Monitor:destroy()
+  if self.renderTimer then self.renderTimer:stop() end
+  self.renderTimer = nil
+  if self.webview then self.webview:delete() end
+  self.webview = nil
+end
 
-    state.arpEnabled = trk.arpEnabled
-    state.arpLatchActive = trk.arpLatchActive
+return Monitor
 
-    local valStr = "ARP: OFF"
-    local subStr = "Track " .. trkId .. " Arp Disabled"
-    if trk.arpEnabled then
-      if trk.arpLatchActive then
-        valStr = "ARP: LATCH 🔒"
-        subStr = "Track " .. trkId .. " (" .. trk.name .. ") LATCH 🔒 • " .. formatBpm(state.arpBpm) .. " BPM"
-      else
-        valStr = "ARP: ON"
-        subStr = "Track " .. trkId .. " (" .. trk.name .. ") ON • " .. formatBpm(state.arpBpm) .. " BPM"
-      end
-    end
+end
 
-    local spot = {
-      title = "TRACK " .. trkId .. " ARP",
-      value = valStr,
-      subtext = subStr,
-      targetId = "key-0",
-      color = trk.color or "#64d8f0"
+__modules["keystep_ui_html"] = function()
+local HTML = [[
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>KeyStep Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #111216;
+      --panel: #1a1c23;
+      --edge: #30333e;
+      --text: #f4f5f8;
+      --muted: #969cab;
+      --accent: #7ce2bd;
+      --warning: #ffc86b;
+      --danger: #ff7b8a;
     }
-    updateHud(spot)
-    config.saveSettings()
-    return
-  end
 
-  if not state.arpEnabled then
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    state.arpLatchClearedForNewChord = false
-  elseif state.arpLatchActive then
-    state.arpLatchActive = false
-    local newHeld = {}
-    for code, pitch in pairs(state.arpHeldNotes) do
-      if state.arpKeysCurrentlyHeld[code] then
-        newHeld[code] = pitch
-      end
-    end
-    state.arpHeldNotes = newHeld
-    
-    local count = countTableKeys(state.arpHeldNotes)
-    if count == 0 then
-      stopArpTimer()
-      if state.arpCurrentPitch then
-        local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-        local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-        midi.sendMidiNote("noteOff", p, 0, c)
-        state.arpCurrentPitch = nil
-      end
-    end
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .monitor {
+      display: grid;
+      gap: 16px;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .header, .status, .metric, .activity {
+      border: 1px solid var(--edge);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+    }
+
+    .eyebrow, .label {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 4px 0 0;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 0 4px rgba(255, 123, 138, 0.12);
+    }
+
+    .connection.connected { color: var(--accent); }
+    .connection.connected .dot {
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(124, 226, 189, 0.12);
+    }
+
+    .status { padding: 14px 16px; }
+    .status-value { margin: 7px 0 0; font-size: 15px; font-weight: 650; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric { min-height: 106px; padding: 14px; }
+    .value { margin: 10px 0 0; font-size: 27px; font-weight: 750; letter-spacing: -0.04em; }
+    .hint { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+
+    .activity { padding: 14px 16px; }
+    .activity-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; font-size: 13px; }
+    .activity-value { overflow: hidden; color: var(--text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .activity-age { flex: 0 0 auto; color: var(--warning); }
+  </style>
+</head>
+<body>
+  <main class="monitor" data-ui="keystep-monitor">
+    <header class="header">
+      <div>
+        <p class="eyebrow">Side-channel parser</p>
+        <h1>Arturia KeyStep</h1>
+      </div>
+      <div class="connection" id="connection">
+        <span class="dot"></span>
+        <span id="connection-text">Waiting for device</span>
+      </div>
+    </header>
+
+    <section class="status">
+      <p class="label">Input</p>
+      <p class="status-value" id="device-name">No matching MIDI device</p>
+      <p class="hint" id="output-device">Output: waiting for QWERTY MIDI device</p>
+    </section>
+
+    <section class="metrics">
+      <article class="metric">
+        <p class="label">Seq / Arp mode</p>
+        <p class="value" id="mode">—</p>
+        <p class="hint">C8–G8 at velocity 1</p>
+      </article>
+      <article class="metric">
+        <p class="label">Time division</p>
+        <p class="value" id="division">—</p>
+        <p class="hint">Straight or triplet</p>
+      </article>
+      <article class="metric">
+        <p class="label">Rate</p>
+        <p class="value" id="bpm">—</p>
+        <p class="hint">BPM from 24 PPQN clock</p>
+      </article>
+    </section>
+
+    <section class="activity">
+      <p class="label">Live activity</p>
+      <div class="activity-row">
+        <span class="activity-value" id="last-event">Awaiting MIDI</span>
+        <span class="activity-age" id="event-age">—</span>
+      </div>
+      <div class="activity-row">
+        <span class="label">Marker rule</span>
+        <span class="activity-value" id="channel">C8–G8 · velocity 1</span>
+      </div>
+      <div class="activity-row">
+        <span class="label">Last note received</span>
+        <span class="activity-value" id="raw-note">Awaiting note</span>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const text = (value, fallback = "—") => value === null || value === undefined ? fallback : String(value);
+
+    window.updateKeyStepMonitor = (state) => {
+      const connected = state.connected === true;
+      const connection = document.getElementById("connection");
+      connection.classList.toggle("connected", connected);
+      document.getElementById("connection-text").textContent = connected ? "Connected" : "Waiting for device";
+      document.getElementById("device-name").textContent = connected ? text(state.deviceName) : "No matching MIDI device";
+      document.getElementById("output-device").textContent = state.outputDeviceName
+        ? `Output: ${state.outputDeviceName}`
+        : "Output: QWERTY MIDI device unavailable";
+      document.getElementById("mode").textContent = state.mode ? `Position ${state.mode}` : "—";
+      document.getElementById("division").textContent = text(state.division);
+      document.getElementById("bpm").textContent = state.bpm ? `${state.bpm} BPM` : "—";
+      document.getElementById("last-event").textContent = text(state.lastEvent, "Awaiting MIDI");
+      document.getElementById("event-age").textContent = Number.isFinite(state.eventAge) ? `${state.eventAge}s ago` : "—";
+      document.getElementById("channel").textContent = `C8–G8 · velocity 1 · ${state.clockPulseCount || 0} clocks`;
+      document.getElementById("raw-note").textContent = Number.isFinite(state.lastRawNote)
+        ? `Note ${state.lastRawNote} on MIDI ${(state.lastRawNoteChannel || 0) + 1}`
+        : "Awaiting note";
+    };
+  </script>
+</body>
+</html>
+]]
+
+return HTML
+
+end
+
+__modules["logic_names"] = function()
+-- src/logic_names.lua
+-- Real-time track name synchronization with Logic Pro
+-- Extracts actual Logic Pro track names via macOS Accessibility (AXUIElement)
+-- with zero MIDI port collision and falls back gracefully when Logic is inactive.
+
+local logic_names = {}
+
+local pollTimer = nil
+local appWatcher = nil
+local lastObservedNames = {}
+local isPolling = false
+
+local function parseTrackHeaderDescription(desc)
+  if not desc or type(desc) ~= "string" then return nil, nil end
+  local numStr = string.match(desc, "Track%s+(%d+)")
+  if not numStr then return nil, nil end
+  local trackNum = tonumber(numStr)
+
+  -- Look for UTF-8 curly quotes \226\128\156 (") and \226\128\157 (")
+  local qStart = string.find(desc, "\226\128\156", 1, true)
+  local qEnd = string.find(desc, "\226\128\157", 1, true)
+  local name = nil
+  if qStart and qEnd and qEnd > qStart then
+    name = string.sub(desc, qStart + 3, qEnd - 1)
   else
-    state.arpEnabled = false
-    state.arpLatchActive = false
-    stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    state.arpEngineTop = newArpEngine()
-    state.arpEngineBottom = newArpEngine()
+    name = string.match(desc, "Track%s+%d+%s+[\"“](.-)[\"”]")
   end
 
-  local valStr = "ARP: OFF"
-  local subStr = "Arp Disabled"
-  if state.arpEnabled then
-    if not state.arpTopEnabled and not state.arpBottomEnabled then
-      valStr = "ARP: ON (MUTED)"
-      subStr = "⚠️ Top & Bottom rows are both disabled"
-    elseif state.arpLatchActive then
-      valStr = "ARP: LATCH 🔒"
-      subStr = "LATCH 🔒 (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
-    else
-      valStr = "ARP: ON"
-      subStr = "ON (" .. getArpRowTargetSubtext() .. ") • " .. formatBpm(state.arpBpm) .. " BPM"
-    end
+  if name and #name > 0 then
+    -- Strip trailing spaces or formatting artifacts
+    name = string.match(name, "^%s*(.-)%s*$")
   end
 
-  local spot = {
-    title = "ARP POWER",
-    value = valStr,
-    subtext = subStr,
-    targetId = "key-0",
-    color = "#d4a359"
-  }
-  updateHud(spot)
-  config.saveSettings()
+  return trackNum, name
 end
 
-local function toggleArpLatch(targetTrackIdx)
-  local trkId = targetTrackIdx or state.activeTrack or 1
-  local trk = state.tracks and state.tracks[trkId]
-  local curLatch = (trk and trk.arpLatchActive) or (state.arpLatchActive == true)
-  local targetLatch = not curLatch
+function logic_names.scanLogicTracks()
+  local app = hs.application.find("Logic Pro")
+  if not app then
+    return nil, "Logic Pro not running"
+  end
 
-  if trk then
-    trk.arpLatchActive = targetLatch
-    if targetLatch then
-      trk.arpEnabled = true
-      trk.latchClearedForNewChord = false
-      -- If notes are currently physically held on the keyboard for this track, latch them now
-      for code, info in pairs(state.pressedKeys) do
-        if type(info) == "table" and not info.isControl and info.pitches then
-          for _, p in ipairs(info.pitches) do
-            local keyId = code .. "_" .. p
-            trk.heldNotes[keyId] = p
-            trk.targetHeldNotes[keyId] = p
-            trk.keysCurrentlyHeld[keyId] = true
-          end
+  local tw = nil
+  local focusedWin = app:focusedWindow()
+  if focusedWin and string.find(tostring(focusedWin:title()), "Tracks") then
+    tw = hs.axuielement.windowElement(focusedWin)
+  end
+
+  if not tw then
+    local ax = hs.axuielement.applicationElement(app)
+    if ax then
+      for _, w in ipairs(ax.AXWindows or {}) do
+        if string.find(tostring(w.AXTitle), "Tracks") then
+          tw = w
+          break
         end
-      end
-      if countTableKeys(trk.heldNotes) > 0 then
-        startTrackArp(trk)
-      end
-    else
-      local newHeld = {}
-      for code, pitch in pairs(trk.heldNotes or {}) do
-        local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-        if trk.keysCurrentlyHeld[code] or (rawCode and state.pressedKeys[rawCode]) then
-          newHeld[code] = pitch
-        end
-      end
-      trk.heldNotes = newHeld
-      trk.targetHeldNotes = {}
-      for k, v in pairs(newHeld) do trk.targetHeldNotes[k] = v end
-      if countTableKeys(trk.heldNotes) == 0 then
-        stopTrackArp(trk)
       end
     end
+  end
+
+  if not tw then
+    return nil, "Tracks window not found"
+  end
+
+  -- Fast direct path test: root/8/2/1/2/1/1
+  local headerGroup = nil
+  local path = { 8, 2, 1, 2, 1, 1 }
+  local h = tw
+  for _, idx in ipairs(path) do
+    local ch = h and h.AXChildren
+    h = ch and ch[idx]
+  end
+  if h and h.AXDescription and string.find(h.AXDescription, "Tracks header") then
+    headerGroup = h
   else
-    state.arpLatchActive = targetLatch
-    if targetLatch then
-      state.arpEnabled = true
-      state.arpLatchClearedForNewChord = false
-    else
-      local newHeld = {}
-      for code, pitch in pairs(state.arpHeldNotes or {}) do
-        if state.arpKeysCurrentlyHeld[code] or state.pressedKeys[code] then
-          newHeld[code] = pitch
-        end
+    local function findHeader(el, depth)
+      if depth > 8 then return nil end
+      local desc = el.AXDescription
+      if desc and string.find(desc, "Tracks header") then
+        return el
       end
-      state.arpHeldNotes = newHeld
-      if countTableKeys(state.arpHeldNotes) == 0 then
-        stopArpTimer()
+      for _, c in ipairs(el.AXChildren or {}) do
+        local res = findHeader(c, depth + 1)
+        if res then return res end
       end
+      return nil
+    end
+    headerGroup = findHeader(tw, 0)
+  end
+
+  if not headerGroup then
+    return nil, "Tracks header not found"
+  end
+
+  local tracks = {}
+  for _, item in ipairs(headerGroup.AXChildren or {}) do
+    local desc = item.AXDescription
+    local num, name = parseTrackHeaderDescription(desc)
+    if num and name and #name > 0 then
+      tracks[num] = name
     end
   end
 
-  state.arpLatchActive = targetLatch
-  if targetLatch then
-    state.arpEnabled = true
-  end
-
-  config.saveSettings()
-
-  local spot = {
-    title = "TRACK " .. trkId .. " LATCH",
-    value = targetLatch and "LATCH 🔒 ON" or "LATCH OFF",
-    subtext = "Track " .. trkId .. " (" .. (trk and trk.name or "Track") .. ") • Latch " .. (targetLatch and "Active 🔒 (held notes loop)" or "Disabled (momentary)"),
-    targetId = "key-0",
-    color = (trk and trk.color) or "#64d8f0"
-  }
-  updateHud(spot)
-  return targetLatch
+  return tracks, nil
 end
 
-local function clearTrackArp(trackId)
-  local trkId = trackId or state.activeTrack or 1
-  local trk = state.tracks and state.tracks[trkId]
-  if trk then
-    stopEngineState(trk)
-    trk.heldNotes = {}
-    trk.targetHeldNotes = {}
-    trk.keysCurrentlyHeld = {}
-    trk.latchClearedForNewChord = false
-    trk.arpEnabled = false
-    trk.arpLatchActive = false
-    trk.locked = false
-    if not isAnyTrackArpActive() then
-      stopArpTimer()
-    end
-    if trkId == state.activeTrack then
-      state.arpEnabled = false
-      state.arpLatchActive = false
-    end
-    updateHud()
-  end
-end
+function logic_names.updateTrackNames(force)
+  if isPolling then return end
+  isPolling = true
 
-local function stopAllLoops()
-  if state.tracks then
-    for _, trk in pairs(state.tracks) do
-      stopEngineState(trk)
-      trk.heldNotes = {}
-      trk.targetHeldNotes = {}
-      trk.keysCurrentlyHeld = {}
-      trk.arpEnabled = false
-      trk.arpLatchActive = false
-      trk.locked = false
-    end
-  end
-  stopArpTimer()
-  state.arpEnabled = false
-  state.arpLatchActive = false
-  updateHud()
-end
-
-local function toggleArp()
-  toggleArpPower()
-end
-
-local function handleBpmInput(code, flags)
-  if code == 53 then -- Escape
-    state.arpBpm = state.bpmBeforeEdit
-    state.bpmInputMode = false
-    state.bpmInputBuffer = ""
-    updateHud()
-    config.saveSettings()
-    return true
-  elseif code == 36 then -- Return
-    if state.bpmInputBuffer ~= "" then
-      local val = tonumber(state.bpmInputBuffer)
-      if val and val >= 20 and val <= 300 then
-        state.arpBpm = val
-      end
-    end
-    local prevBpm = state.bpmBeforeEdit
-    state.bpmInputMode = false
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    setLogicBpmTarget(state.arpBpm, prevBpm)
-    updateHud()
-    config.saveSettings()
-    return true
-  elseif code == 126 then -- Arrow Up
-    local delta = 1
-    if flags.shift then delta = 10
-    elseif flags.alt then delta = 0.1 end
-    state.arpBpm = math.min(300, state.arpBpm + delta)
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    updateHud()
-    return true
-  elseif code == 125 then -- Arrow Down
-    local delta = 1
-    if flags.shift then delta = 10
-    elseif flags.alt then delta = 0.1 end
-    state.arpBpm = math.max(20, state.arpBpm - delta)
-    state.bpmInputBuffer = ""
-    applyBpmChange()
-    updateHud()
-    return true
-  elseif code == 51 then -- Backspace
-    if #state.bpmInputBuffer > 0 then
-      state.bpmInputBuffer = state.bpmInputBuffer:sub(1, -2)
-    end
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer ~= "" and (state.bpmInputBuffer .. " BPM") or "TYPE TEMPO",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  elseif DIGIT_KEYCODES[code] then
-    state.bpmInputBuffer = state.bpmInputBuffer .. DIGIT_KEYCODES[code]
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer .. " BPM",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  elseif code == 47 then -- Period "."
-    if not state.bpmInputBuffer:find("%.") then
-      state.bpmInputBuffer = state.bpmInputBuffer .. "."
-    end
-    local spot = {
-      title = "EDIT BPM",
-      value = state.bpmInputBuffer .. " BPM",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    updateHud(spot)
-    return true
-  end
-
-  state.bpmInputMode = false
-  state.bpmInputBuffer = ""
-  updateHud()
-  return false
-end
-
-local isSyncingLogicBpm = false
-local logicBpmTask = nil
-local logicBpmDebounceTimer = nil
-
-local function setLogicBpmTarget(targetBpm)
-  if not state.logicSyncEnabled then return end
-
-  if logicBpmDebounceTimer then
-    logicBpmDebounceTimer:stop()
-    logicBpmDebounceTimer = nil
-  end
-
-  logicBpmDebounceTimer = hs.timer.doAfter(0.40, function()
-    logicBpmDebounceTimer = nil
-    if logicBpmTask then
-      logicBpmTask:terminate()
-      logicBpmTask = nil
-    end
-
-    isSyncingLogicBpm = true
-
-    local script = string.format([[
-      property minBPM : 5
-      property maxBPM : 990
-
-      on setExactBPM(targetBPM)
-        set targetBPM to targetBPM as integer
-        
-        if targetBPM < minBPM then set targetBPM to minBPM
-        if targetBPM > maxBPM then set targetBPM to maxBPM
-        
-        tell application "System Events"
-          tell process "Logic Pro"
-            set tempoSlider to missing value
-            set allSliders to sliders of group 1 of group 1 of window 1
-            repeat with s in allSliders
-              if description of s is "Tempo" then
-                set tempoSlider to s
-                exit repeat
-              end if
-            end repeat
-            
-            if tempoSlider is missing value then return targetBPM
-            
-            repeat 20 times
-              set currentBPM to (value of tempoSlider) as integer
-              set deltaBPM to targetBPM - currentBPM
-              
-              if deltaBPM = 0 then return currentBPM
-              
-              if deltaBPM > 0 then
-                set goingUp to true
-                set amountLeft to deltaBPM
-              else
-                set goingUp to false
-                set amountLeft to -deltaBPM
-              end if
-              
-              set tenSteps to amountLeft div 10
-              repeat tenSteps times
-                if goingUp then
-                  perform action "AXIncrement" of tempoSlider
-                else
-                  perform action "AXDecrement" of tempoSlider
-                end if
-              end repeat
-              
-              set oneSteps to amountLeft mod 10
-              repeat oneSteps times
-                if goingUp then
-                  set value of tempoSlider to maxBPM
-                else
-                  set value of tempoSlider to minBPM
-                end if
-              end repeat
-            end repeat
-          end tell
-        end tell
-      end setExactBPM
-
-      setExactBPM(%d)
-    ]], math.floor(targetBpm + 0.5))
-
-    logicBpmTask = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
-      isSyncingLogicBpm = false
-      logicBpmTask = nil
-    end, { "-e", script })
-    logicBpmTask:start()
+  local ok, res, err = pcall(function()
+    return logic_names.scanLogicTracks()
   end)
-end
 
-local function stepLogicBpm(delta)
-  setLogicBpmTarget(state.arpBpm)
-end
+  isPolling = false
 
-local function syncLogicBpm()
-  if state.bpmInputMode or not state.logicSyncEnabled or isSyncingLogicBpm or logicBpmDebounceTimer then return end
-  isSyncingLogicBpm = true
+  if not ok or not res then
+    return false
+  end
 
-  local script = [[
-    var bpm = null;
-    try {
-      var se = Application('System Events');
-      var logic = se.processes['Logic Pro'];
-      if (logic && logic.exists()) {
-        var win = logic.windows[0];
-        if (win && win.exists()) {
-          var grp = win.groups[0];
-          if (grp && grp.exists()) {
-            var ctrlBar = grp.uiElements[0];
-            if (ctrlBar && ctrlBar.exists()) {
-              var elems = ctrlBar.uiElements();
-              for (var i = 0; i < elems.length; i++) {
-                if (elems[i].description() === 'Tempo') {
-                  bpm = parseFloat(elems[i].value());
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch(e) {}
-    bpm;
-  ]]
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if not state or not state.tracks then
+    return false
+  end
 
-  local task = hs.task.new("/usr/bin/osascript", function(exitCode, stdOut, stdErr)
-    isSyncingLogicBpm = false
-    if exitCode == 0 and stdOut then
-      local val = tonumber(stdOut:match("^%s*(.-)%s*$"))
-      if val and val >= 20 and val <= 300 and math.abs(state.arpBpm - val) > 0.01 and not logicBpmDebounceTimer then
-        state.arpBpm = val
-        applyBpmChange()
-        updateHud()
+  local changed = false
+  for trkId = 1, 4 do
+    local trk = state.tracks[trkId]
+    if trk then
+      local observed = res[trkId]
+      if observed and observed ~= "" then
+        if trk.name ~= observed or lastObservedNames[trkId] ~= observed then
+          trk.name = observed
+          trk.nameSource = "logic"
+          lastObservedNames[trkId] = observed
+          changed = true
+        end
       end
     end
-  end, { "-l", "JavaScript", "-e", script })
-  task:start()
-end
-
-local function startLogicSync()
-  if not state.logicSyncEnabled or not state.midiActive then return end
-  if not _G.activeWatchers.logicSyncTimer then
-    _G.activeWatchers.logicSyncTimer = hs.timer.doEvery(1.0, syncLogicBpm)
-  elseif not _G.activeWatchers.logicSyncTimer:running() then
-    _G.activeWatchers.logicSyncTimer:start()
   end
-  syncLogicBpm()
-end
 
-local function stopLogicSync()
-  if _G.activeWatchers.logicSyncTimer then
-    _G.activeWatchers.logicSyncTimer:stop()
-  end
-end
-
-local function toggleLogicSync()
-  state.logicSyncEnabled = not state.logicSyncEnabled
-  if state.logicSyncEnabled and state.midiActive then
-    startLogicSync()
-  else
-    stopLogicSync()
-  end
-  local spot = {
-    title = "LOGIC PRO SYNC",
-    value = state.logicSyncEnabled and "SYNC: ON" or "SYNC: OFF",
-    subtext = state.logicSyncEnabled and ("Synced to Logic (" .. formatBpm(state.arpBpm) .. " BPM)") or "Manual BPM Mode",
-    targetId = "bpm-val",
-    color = "#d4a359"
-  }
-  updateHud(spot)
-end
-
-local function initLogicSync()
-  if state.midiActive and state.logicSyncEnabled then
-    startLogicSync()
-  end
-end
-
-initLogicSync()
-
-local function clearRowEngine(isTop)
-  local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-  stopEngineState(eng)
-  eng.heldNotes = {}
-  eng.targetHeldNotes = {}
-  eng.keysCurrentlyHeld = {}
-  eng.latchClearedForNewChord = false
-  local otherEng = isTop and state.arpEngineBottom or state.arpEngineTop
-  if countTableKeys(otherEng.heldNotes) == 0 then
-    if state.arpTimer then
-      state.arpTimer:stop()
-      state.arpTimer = nil
+  if (changed or force) and _G.activeWatchers and _G.activeWatchers.hud then
+    if _G.activeWatchers.hud.updateWebviewHud then
+      _G.activeWatchers.hud.updateWebviewHud(nil, nil, true)
     end
   end
+
+  return changed
 end
 
-local function setArpPowerImplicit(enabled)
-  state.arpEnabled = enabled
-  if not enabled then
-    stopArpTimer()
-    if state.arpCurrentPitch then
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      state.arpCurrentPitch = nil
-    end
-    stopEngineState(state.arpEngineTop)
-    stopEngineState(state.arpEngineBottom)
-  else
-    if countTableKeys(state.arpHeldNotes) > 0 or countTableKeys(state.arpEngineTop.heldNotes) > 0 or countTableKeys(state.arpEngineBottom.heldNotes) > 0 then
-      if not state.arpTimer then startArpTimer() end
-    end
+function logic_names.init()
+  _G.activeWatchers = _G.activeWatchers or {}
+
+  if _G.activeWatchers.logicNamesTimer then
+    _G.activeWatchers.logicNamesTimer:stop()
+    _G.activeWatchers.logicNamesTimer = nil
   end
-  updateHud()
-end
 
-local function toggleArpLink()
-  state.arpLinked = not state.arpLinked
-  if state.arpLinked then
-    state.arpHeldNotes = {}
-    state.arpTargetHeldNotes = state.arpTargetHeldNotes or {}
-    state.arpKeysCurrentlyHeld = {}
-    for k, v in pairs(state.arpEngineTop.heldNotes) do state.arpHeldNotes[k] = v end
-    for k, v in pairs(state.arpEngineBottom.heldNotes) do state.arpHeldNotes[k] = v end
-    for k, v in pairs(state.arpEngineTop.targetHeldNotes or {}) do state.arpTargetHeldNotes[k] = v end
-    for k, v in pairs(state.arpEngineBottom.targetHeldNotes or {}) do state.arpTargetHeldNotes[k] = v end
-    for k, v in pairs(state.arpEngineTop.keysCurrentlyHeld) do state.arpKeysCurrentlyHeld[k] = v end
-    for k, v in pairs(state.arpEngineBottom.keysCurrentlyHeld) do state.arpKeysCurrentlyHeld[k] = v end
-    stopEngineState(state.arpEngineTop)
-    stopEngineState(state.arpEngineBottom)
-    state.arpStepIndex = 1
-    state.arpStepDirection = 1
-    state.arpPos = 0
-    state.arpBeatPosition = 0
-    if countTableKeys(state.arpHeldNotes) == 0 and state.arpTimer then
-      stopArpTimer()
+  if _G.activeWatchers.logicNamesAppWatcher then
+    _G.activeWatchers.logicNamesAppWatcher:stop()
+    _G.activeWatchers.logicNamesAppWatcher = nil
+  end
+
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if state and not state.midiActive then
+    return
+  end
+
+  -- Initial scan
+  logic_names.updateTrackNames(true)
+
+  -- Poll every 2.0s when Logic is running (scan takes ~80ms, non-blocking)
+  pollTimer = hs.timer.new(2.0, function()
+    local app = hs.application.find("Logic Pro")
+    if app then
+      logic_names.updateTrackNames(false)
     end
-  else
-    state.arpEngineTop = newArpEngine()
-    state.arpEngineBottom = newArpEngine()
-    for code, pitch in pairs(state.arpHeldNotes) do
-      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-      local noteKey = rawCode and config.getNoteKey(rawCode)
-      local isTop = noteKey and noteKey.isTop or false
-      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-      eng.heldNotes[code] = pitch
-    end
-    for code, pitch in pairs(state.arpTargetHeldNotes or {}) do
-      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-      local noteKey = rawCode and config.getNoteKey(rawCode)
-      local isTop = noteKey and noteKey.isTop or false
-      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-      eng.targetHeldNotes[code] = pitch
-    end
-    for code, v in pairs(state.arpKeysCurrentlyHeld) do
-      local rawCode = type(code) == "string" and tonumber(code:match("^(%d+)")) or tonumber(code)
-      local noteKey = rawCode and config.getNoteKey(rawCode)
-      local isTop = noteKey and noteKey.isTop or false
-      local eng = isTop and state.arpEngineTop or state.arpEngineBottom
-      eng.keysCurrentlyHeld[code] = v
-    end
-    if state.arpCurrentPitch then
-      local p = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.pitch or state.arpCurrentPitch
-      local c = type(state.arpCurrentPitch) == "table" and state.arpCurrentPitch.channel or 0
-      midi.sendMidiNote("noteOff", p, 0, c)
-      state.arpCurrentPitch = nil
-    end
-    if state.arpActiveGateTimers then
-      for pitch, entry in pairs(state.arpActiveGateTimers) do
-        if entry and entry.timer then entry.timer:stop() end
-        local ch = entry and entry.channel or 0
-        midi.sendMidiNote("noteOff", pitch, 0, ch)
+  end)
+  pollTimer:start()
+  _G.activeWatchers.logicNamesTimer = pollTimer
+
+  -- App watcher to trigger immediate scan when Logic Pro activates or launches
+  appWatcher = hs.application.watcher.new(function(appName, eventType, app)
+    if appName == "Logic Pro" then
+      if eventType == hs.application.watcher.activated or eventType == hs.application.watcher.launched then
+        hs.timer.doAfter(0.3, function()
+          logic_names.updateTrackNames(true)
+        end)
       end
-      state.arpActiveGateTimers = {}
     end
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    state.arpTargetHeldNotes = {}
-    if countTableKeys(state.arpEngineTop.heldNotes) == 0 and countTableKeys(state.arpEngineBottom.heldNotes) == 0 and state.arpTimer then
-      stopArpTimer()
+  end)
+  appWatcher:start()
+  _G.activeWatchers.logicNamesAppWatcher = appWatcher
+
+  print("QWERTY MIDI: Logic Pro track name synchronization active")
+end
+
+function logic_names.stop()
+  if pollTimer then
+    pollTimer:stop()
+    pollTimer = nil
+  end
+  if appWatcher then
+    appWatcher:stop()
+    appWatcher = nil
+  end
+  if _G.activeWatchers then
+    _G.activeWatchers.logicNamesTimer = nil
+    _G.activeWatchers.logicNamesAppWatcher = nil
+  end
+end
+
+logic_names.parseTrackHeaderDescription = parseTrackHeaderDescription
+
+return logic_names
+
+end
+
+__modules["midi"] = function()
+local hsMidi = require("hs.midi")
+
+_G.activeWatchers = _G.activeWatchers or {}
+
+local function getMidiDevice()
+  if _G.activeWatchers.midiDevice then return _G.activeWatchers.midiDevice end
+
+  local devices = hsMidi.devices() or {}
+  local virtualSources = hsMidi.virtualSources() or {}
+
+  for _, devName in ipairs(devices) do
+    if string.find(devName, "IAC") or string.find(devName, "Bus") then
+      _G.activeWatchers.midiDevice = hsMidi.new(devName)
+      return _G.activeWatchers.midiDevice
     end
   end
-  local spot = {
-    title = "ARP LINK",
-    value = state.arpLinked and "LINKED" or "SPLIT",
-    subtext = state.arpLinked and "Top & Bottom share one pattern" or "Top & Bottom run independently",
-    targetId = "header",
-    color = "#d4a359"
-  }
-  updateHud(spot)
-  config.saveSettings()
+
+  for _, devName in ipairs(virtualSources) do
+    if string.find(devName, "IAC") or string.find(devName, "Bus") then
+      _G.activeWatchers.midiDevice = hsMidi.newVirtualSource(devName)
+      return _G.activeWatchers.midiDevice
+    end
+  end
+
+  if #devices > 0 then
+    _G.activeWatchers.midiDevice = hsMidi.new(devices[1])
+  elseif #virtualSources > 0 then
+    _G.activeWatchers.midiDevice = hsMidi.newVirtualSource(virtualSources[1])
+  end
+
+  return _G.activeWatchers.midiDevice
+end
+
+local activeNoteLedger = {} -- [noteNum] = { [channel] = { track = trackId, color = color, vel = vel } }
+
+local function getTrackForChannel(channel)
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if not state then
+    pcall(function()
+      local config = __require("config")
+      state = config and config.state
+    end)
+  end
+  if state and state.tracks then
+    for trkId, trk in pairs(state.tracks) do
+      if trk.channel == channel then
+        return trkId, trk.color or "#00e5ff"
+      end
+    end
+  end
+  local fallbackColors = { [1] = "#00e5ff", [2] = "#ff9100", [3] = "#00e676", [4] = "#d500f9" }
+  local trkId = ((channel or 0) % 4) + 1
+  return trkId, fallbackColors[trkId] or "#00e5ff"
+end
+
+local function getActiveNoteLedger()
+  local snapshot = {}
+  for note, voices in pairs(activeNoteLedger) do
+    for ch, voice in pairs(voices) do
+      snapshot[tostring(note)] = { note = note, channel = ch, track = voice.track, color = voice.color }
+      break
+    end
+  end
+  return snapshot
+end
+
+local function clearActiveNotes()
+  activeNoteLedger = {}
+  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.clearPianoNotes then
+    _G.activeWatchers.hud.clearPianoNotes()
+  end
+end
+
+local function sendMidiNote(cmd, noteNum, vel, channel)
+  if type(noteNum) == "table" then
+    channel = channel or noteNum.channel
+    noteNum = noteNum.pitch
+  end
+  if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
+  local dev = getMidiDevice()
+  local ch = channel or 0
+  local isNoteOn = (cmd == "noteOn" and (vel or 0) > 0)
+  local isNoteOff = (cmd == "noteOff" or (cmd == "noteOn" and (vel or 0) == 0))
+  local trkId, trkColor = getTrackForChannel(ch)
+
+  if dev then
+    if isNoteOff then
+      dev:sendCommand("noteOff", { note = noteNum, velocity = 0, channel = ch })
+      dev:sendCommand("noteOn", { note = noteNum, velocity = 0, channel = ch })
+    else
+      dev:sendCommand("noteOn", { note = noteNum, velocity = vel, channel = ch })
+    end
+  end
+
+  -- Update active note ledger & real-time piano visualizer
+  if isNoteOn then
+    activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
+    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel }
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
+      _G.activeWatchers.hud.updatePianoNote(noteNum, true, trkId, trkColor)
+    end
+  elseif isNoteOff then
+    if activeNoteLedger[noteNum] then
+      activeNoteLedger[noteNum][ch] = nil
+      if next(activeNoteLedger[noteNum]) == nil then
+        activeNoteLedger[noteNum] = nil
+      end
+    end
+    local stillActive = (activeNoteLedger[noteNum] ~= nil)
+    local remainingTrkId = 0
+    local remainingColor = ""
+    if stillActive then
+      for _, voice in pairs(activeNoteLedger[noteNum]) do
+        remainingTrkId = voice.track
+        remainingColor = voice.color
+        break
+      end
+    end
+    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
+      _G.activeWatchers.hud.updatePianoNote(noteNum, stillActive, remainingTrkId, remainingColor)
+    end
+  end
+
+  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastNotes then
+    _G.activeWatchers.sync.broadcastNotes(noteNum, isNoteOn)
+  end
+end
+
+local function sendSustainCC(val)
+  local dev = getMidiDevice()
+  if not dev then return end
+  for ch = 0, 15 do
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = val, channel = ch })
+  end
+end
+
+local function sendMidiCC(controllerNum, val, channel)
+  local dev = getMidiDevice()
+  if dev then
+    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = channel or 0 })
+  end
+end
+
+local function silenceChannel(channel)
+  local dev = getMidiDevice()
+  local ch = channel or 0
+  if dev then
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+  end
+  local notesToRelease = {}
+  for note, voices in pairs(activeNoteLedger) do
+    if voices and voices[ch] then
+      table.insert(notesToRelease, note)
+    end
+  end
+  for _, note in ipairs(notesToRelease) do
+    sendMidiNote("noteOff", note, 0, ch)
+  end
+end
+
+local function panicAllChannels()
+  local dev = getMidiDevice()
+  clearActiveNotes()
+  if not dev then return end
+
+  for ch = 0, 15 do
+    -- Release sustain before explicit note-offs; send the channel-mode fallback
+    -- after individual releases so synths receive both forms of note cleanup.
+    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
+    for note = 0, 127 do
+      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
+    end
+    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
+    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
+    dev:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = ch })
+  end
 end
 
 return {
-  setHudModule = setHudModule,
-  stopArpTimer = stopArpTimer,
-  getArpIntervalSeconds = getArpIntervalSeconds,
-  startArpTimer = startArpTimer,
-  startTrackArp = startTrackArp,
-  stopTrackArp = stopTrackArp,
-  silenceTrack = silenceTrack,
-  isTrackAudible = isTrackAudible,
-  arpTickTrack = arpTickTrack,
-  arpAddNote = arpAddNote,
-  arpRemoveNote = arpRemoveNote,
-  formatBpm = formatBpm,
-  applyBpmChange = applyBpmChange,
-  setTrackArpRate = setTrackArpRate,
-  setTrackArpDirection = setTrackArpDirection,
-  applyGatePercentChange = applyGatePercentChange,
-  updateLatchedArpNotes = updateLatchedArpNotes,
-  updateLatchedArpChordNotes = updateLatchedArpChordNotes,
-  getArpRowTargetSubtext = getArpRowTargetSubtext,
-  toggleArpPower = toggleArpPower,
-  toggleArpLatch = toggleArpLatch,
-  isAnyTrackArpActive = isAnyTrackArpActive,
-  toggleArp = toggleArp,
-  handleBpmInput = handleBpmInput,
-  toggleLogicSync = toggleLogicSync,
-  startLogicSync = startLogicSync,
-  stopLogicSync = stopLogicSync,
-  syncLogicBpm = syncLogicBpm,
-  stepLogicBpm = stepLogicBpm,
-  setLogicBpmTarget = setLogicBpmTarget,
-  toggleArpLink = toggleArpLink,
-  clearRowEngine = clearRowEngine,
-  clearTrackArp = clearTrackArp,
-  stopAllLoops = stopAllLoops,
-  setArpPowerImplicit = setArpPowerImplicit
+  getMidiDevice = getMidiDevice,
+  sendMidiNote = sendMidiNote,
+  sendMidiCC = sendMidiCC,
+  sendSustainCC = sendSustainCC,
+  silenceChannel = silenceChannel,
+  panicAllChannels = panicAllChannels,
+  getActiveNoteLedger = getActiveNoteLedger,
+  clearActiveNotes = clearActiveNotes,
+  getTrackForChannel = getTrackForChannel
 }
+
+end
+
+__modules["quantizer"] = function()
+-- packages/music-engine/quantizer.lua
+-- Real-time input quantization engine for MIDI keys, pads, and chords.
+-- Features legato sustaining during grid anticipation delays to eliminate awkward silent gaps.
+
+local quantizer = {}
+
+local QUANTIZE_FACTORS = {
+  ["Off"]  = nil,
+  ["None"] = nil,
+  ["1/1"]  = 4.0,     -- Whole note
+  ["1/2"]  = 2.0,     -- Half note
+  ["1/4"]  = 1.0,     -- Quarter note
+  ["1/8"]  = 0.5,     -- Eighth note
+  ["1/16"] = 0.25,    -- Sixteenth note
+  ["1/32"] = 0.125    -- Thirty-second note
+}
+
+local gridReferenceTime = hs.timer.absoluteTime() / 1e9
+local pendingEvents = {} -- [eventId] = { pitches = {}, channel = 0, vel = 100, onFired = false, released = false, timer = ... }
+local activePlayingNotes = {} -- [pitch_ch] = count of held instances
+local soundingNotes = {} -- [eventId] = { eventId = ..., pitches = ..., channel = ..., onRelease = ..., keyReleased = ..., graceTimer = ..., heldForPending = ... }
+local panicGeneration = 0
+
+function quantizer.resetGrid()
+  gridReferenceTime = hs.timer.absoluteTime() / 1e9
+end
+
+function quantizer.getQuantizeFactors()
+  return QUANTIZE_FACTORS
+end
+
+--- Calculate delay in seconds until the next quantized grid tick.
+-- @param bpm number
+-- @param mode string (e.g. "1/4", "1/8", "1/16", "Off")
+-- @return number delay in seconds (0 if Off or on-beat)
+function quantizer.calculateDelay(bpm, mode)
+  if not mode or mode == "Off" or mode == "None" then
+    return 0
+  end
+  local factor = QUANTIZE_FACTORS[mode]
+  if not factor then
+    return 0
+  end
+
+  local clampedBpm = math.max(20.0, math.min(999.0, bpm or 120.0))
+  local quarterSec = 60.0 / clampedBpm
+  local stepDuration = quarterSec * factor
+
+  local now = hs.timer.absoluteTime() / 1e9
+  local elapsed = (now - gridReferenceTime) % stepDuration
+  local timeToNext = stepDuration - elapsed
+
+  -- Tolerance window:
+  -- If struck within 12ms before the beat, consider it on the beat now
+  if timeToNext <= 0.012 then
+    return 0
+  end
+  -- If struck within 20ms after the beat, catch up immediately (prevent full step lag)
+  if elapsed <= 0.020 then
+    return 0
+  end
+
+  return timeToNext
+end
+
+--- Schedule or immediately execute a Note On / Chord event through quantization.
+-- When delayed by quantization, sustains currently sounding or just-released notes on the channel
+-- until the new note sounds on the grid, producing a seamless legato transition without silent gaps.
+-- @param eventId string unique identifier (e.g. "pad_1" or "key_48")
+-- @param pitches table list of MIDI note numbers e.g. {48, 52, 55}
+-- @param vel number velocity (1..127)
+-- @param ch number MIDI channel (0..15)
+-- @param bpm number active BPM
+-- @param mode string quantize mode ("Off", "1/4", "1/8", etc.)
+-- @param onTrigger function(pitches, vel, ch) callback executed when note fires
+function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
+  if type(pitches) == "number" then
+    pitches = { pitches }
+  end
+  ch = ch or 0
+  vel = vel or 100
+
+  -- Cancel any previous pending event for this ID
+  if pendingEvents[eventId] then
+    if pendingEvents[eventId].timer then pcall(function() pendingEvents[eventId].timer:stop() end) end
+    if pendingEvents[eventId].gateTimer then pcall(function() pendingEvents[eventId].gateTimer:stop() end) end
+    pendingEvents[eventId] = nil
+  end
+
+  local delay = quantizer.calculateDelay(bpm, mode)
+
+  if delay <= 0 then
+    -- Immediate playback (No quantization or landed on grid)
+    -- Release any notes on this channel that were waiting in release grace
+    for sId, sEntry in pairs(soundingNotes) do
+      if sEntry.channel == ch and sId ~= eventId then
+        if sEntry.graceTimer then
+          pcall(function() sEntry.graceTimer:stop() end)
+          sEntry.graceTimer = nil
+        end
+        if sEntry.keyReleased and sEntry.onRelease then
+          sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          for _, p in ipairs(sEntry.pitches) do
+            local key = p .. "_" .. sEntry.channel
+            if activePlayingNotes[key] then activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1) end
+          end
+          soundingNotes[sId] = nil
+          pendingEvents[sId] = nil
+        end
+      end
+    end
+
+    pendingEvents[eventId] = {
+      eventId = eventId,
+      pitches = pitches,
+      channel = ch,
+      vel = vel,
+      onFired = true,
+      released = false,
+      bpm = bpm,
+      mode = mode
+    }
+    soundingNotes[eventId] = {
+      eventId = eventId,
+      pitches = pitches,
+      channel = ch,
+      bpm = bpm,
+      quantMode = mode,
+      onRelease = nil,
+      keyReleased = false,
+      generation = panicGeneration
+    }
+    for _, p in ipairs(pitches) do
+      local key = p .. "_" .. ch
+      activePlayingNotes[key] = (activePlayingNotes[key] or 0) + 1
+    end
+    if onTrigger then onTrigger(pitches, vel, ch) end
+    return 0
+  else
+    -- Quantized schedule: note is delayed to the grid.
+    -- LEGATO SUSTAIN: Any currently sounding note on this channel (whether still physically held
+    -- or just released in grace) must be sustained until this new note sounds on the grid!
+    for sId, sEntry in pairs(soundingNotes) do
+      if sEntry.channel == ch and sId ~= eventId then
+        if sEntry.graceTimer then
+          pcall(function() sEntry.graceTimer:stop() end)
+          sEntry.graceTimer = nil
+        end
+        sEntry.heldForPending = eventId
+      end
+    end
+
+    local ev = {
+      eventId = eventId,
+      pitches = pitches,
+      channel = ch,
+      vel = vel,
+      onFired = false,
+      released = false,
+      bpm = bpm,
+      mode = mode,
+      generation = panicGeneration
+    }
+    pendingEvents[eventId] = ev
+
+    ev.timer = hs.timer.doAfter(delay, function()
+      if ev.generation ~= panicGeneration then return end
+      ev.timer = nil
+      ev.onFired = true
+
+      -- Collect all notes that were sustained on this channel for this event
+      local notesToRelease = {}
+      for sId, sEntry in pairs(soundingNotes) do
+        if sEntry.heldForPending == eventId then
+          table.insert(notesToRelease, sEntry)
+          sEntry.heldForPending = nil
+        end
+      end
+
+      -- If any sustained note shares pitch(es) with the new note, release the shared pitch
+      -- before triggering the new note so the synth voice re-attacks cleanly.
+      local newPitchSet = {}
+      for _, p in ipairs(pitches) do newPitchSet[p] = true end
+
+      for _, sEntry in ipairs(notesToRelease) do
+        local hasShared = false
+        for _, p in ipairs(sEntry.pitches) do
+          if newPitchSet[p] then hasShared = true; break end
+        end
+        if hasShared and sEntry.onRelease then
+          sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          sEntry.releasedDone = true
+        end
+      end
+
+      -- Sound the new note on the grid tick!
+      for _, p in ipairs(pitches) do
+        local key = p .. "_" .. ch
+        activePlayingNotes[key] = (activePlayingNotes[key] or 0) + 1
+      end
+
+      if onTrigger then onTrigger(pitches, vel, ch) end
+
+      -- Release the remaining sustained notes whose pitches are different (seamless legato transition)
+      for _, sEntry in ipairs(notesToRelease) do
+        if not sEntry.releasedDone then
+          if sEntry.onRelease then
+            sEntry.onRelease(sEntry.pitches, sEntry.channel)
+          end
+        end
+        for _, p in ipairs(sEntry.pitches) do
+          local key = p .. "_" .. sEntry.channel
+          if activePlayingNotes[key] then
+            activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+          end
+        end
+        soundingNotes[sEntry.eventId] = nil
+        pendingEvents[sEntry.eventId] = nil
+      end
+
+      -- Register this new note as actively sounding
+      soundingNotes[eventId] = {
+        eventId = eventId,
+        pitches = pitches,
+        channel = ch,
+        bpm = bpm,
+        quantMode = mode,
+        onRelease = ev.onRelease,
+        keyReleased = ev.released,
+        generation = panicGeneration
+      }
+
+      -- If the user already released this key/pad before the grid arrived (staccato tap),
+      -- hold for minimum musical gate duration, then trigger release.
+      if ev.released then
+        local factor = QUANTIZE_FACTORS[mode] or 1.0
+        local clampedBpm = math.max(20.0, math.min(999.0, bpm or 120.0))
+        local stepSec = (60.0 / clampedBpm) * factor
+        local gateTime = math.max(0.060, stepSec * 0.6) -- 60% of step or min 60ms
+
+        ev.gateTimer = hs.timer.doAfter(gateTime, function()
+          if ev.generation ~= panicGeneration then return end
+          ev.gateTimer = nil
+          if ev.onRelease then ev.onRelease(pitches, ch) end
+          for _, p in ipairs(pitches) do
+            local key = p .. "_" .. ch
+            if activePlayingNotes[key] then
+              activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+            end
+          end
+          soundingNotes[eventId] = nil
+          pendingEvents[eventId] = nil
+        end)
+      end
+    end)
+
+    return delay
+  end
+end
+
+--- Handle Note Off for a quantized event.
+-- If the note is held for a pending quantized note, defers Note-Off until the new note triggers.
+-- If no pending note is yet scheduled, provides a musical grace period so a subsequent note press
+-- can sustain it seamlessly without gaps.
+-- @param eventId string unique identifier
+-- @param onRelease function(pitches, ch) callback executed to send noteOff
+function quantizer.queueNoteOff(eventId, onRelease)
+  local ev = pendingEvents[eventId]
+  local snd = soundingNotes[eventId]
+
+  if ev and not ev.onFired then
+    -- Note hasn't fired yet! When timer fires, the staccato gate logic in queueNoteOn will release it.
+    ev.released = true
+    ev.onRelease = onRelease
+    return
+  end
+
+  if snd then
+    snd.keyReleased = true
+    snd.onRelease = onRelease
+
+    -- If this sounding note is already bound to sustain for a pending event, do not turn it off now!
+    if snd.heldForPending and pendingEvents[snd.heldForPending] then
+      return
+    end
+
+    -- Check if there is already a pending event scheduled on this channel
+    local pendingOnChannel = nil
+    for pId, pEv in pairs(pendingEvents) do
+      if pEv.channel == snd.channel and not pEv.onFired then
+        pendingOnChannel = pId
+        break
+      end
+    end
+
+    if pendingOnChannel then
+      snd.heldForPending = pendingOnChannel
+      return
+    end
+
+    -- No pending event yet on this channel. Check if quantize mode is active:
+    local isQuantized = (snd.quantMode and snd.quantMode ~= "Off" and snd.quantMode ~= "None")
+    if isQuantized then
+      -- Start a release grace timer. If a new note is pressed on this channel within this window,
+      -- this note is sustained until the new note fires on the grid!
+      local factor = QUANTIZE_FACTORS[snd.quantMode] or 1.0
+      local clampedBpm = math.max(20.0, math.min(999.0, snd.bpm or 120.0))
+      local stepSec = (60.0 / clampedBpm) * factor
+      local graceDuration = math.min(0.120, math.max(0.050, stepSec * 0.75))
+
+      local gen = panicGeneration
+      snd.graceTimer = hs.timer.doAfter(graceDuration, function()
+        if gen ~= panicGeneration then return end
+        snd.graceTimer = nil
+        if snd.onRelease then
+          snd.onRelease(snd.pitches, snd.channel)
+        end
+        for _, p in ipairs(snd.pitches) do
+          local key = p .. "_" .. snd.channel
+          if activePlayingNotes[key] then
+            activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+          end
+        end
+        soundingNotes[eventId] = nil
+        pendingEvents[eventId] = nil
+      end)
+    else
+      -- Quantization is Off: release immediately
+      if onRelease then onRelease(snd.pitches, snd.channel) end
+      for _, p in ipairs(snd.pitches) do
+        local key = p .. "_" .. snd.channel
+        if activePlayingNotes[key] then
+          activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+        end
+      end
+      soundingNotes[eventId] = nil
+      pendingEvents[eventId] = nil
+    end
+  else
+    -- Fallback if not tracked in soundingNotes
+    if onRelease and ev then
+      onRelease(ev.pitches, ev.channel)
+      for _, p in ipairs(ev.pitches) do
+        local key = p .. "_" .. ev.channel
+        if activePlayingNotes[key] then
+          activePlayingNotes[key] = math.max(0, activePlayingNotes[key] - 1)
+        end
+      end
+      pendingEvents[eventId] = nil
+    end
+  end
+end
+
+--- Panic / clean all pending quantized events
+function quantizer.panic(onReleaseAll)
+  panicGeneration = panicGeneration + 1
+  for eventId, ev in pairs(pendingEvents) do
+    if ev.timer then
+      pcall(function() ev.timer:stop() end)
+    end
+    if ev.gateTimer then
+      pcall(function() ev.gateTimer:stop() end)
+    end
+    if ev.onFired and onReleaseAll then
+      pcall(function() onReleaseAll(ev.pitches, ev.channel) end)
+    end
+  end
+  for eventId, snd in pairs(soundingNotes) do
+    if snd.graceTimer then
+      pcall(function() snd.graceTimer:stop() end)
+    end
+    if snd.onRelease then
+      pcall(function() snd.onRelease(snd.pitches, snd.channel) end)
+    elseif onReleaseAll then
+      pcall(function() onReleaseAll(snd.pitches, snd.channel) end)
+    end
+  end
+  pendingEvents = {}
+  soundingNotes = {}
+  activePlayingNotes = {}
+end
+
+return quantizer
+
+end
+
+__modules["settings_ui"] = function()
+local hsWebview = require("hs.webview")
+local hsUsercontent = require("hs.webview.usercontent")
+local config = __require("config")
+local state = config.state
+
+local settingsWebview = nil
+
+local function generateSettingsHTML()
+  local bpmStep        = state.bpmStepSize or 10
+  local logicSync      = state.logicSyncEnabled
+  local gate           = state.arpGatePercent or 80
+  local zoom           = state.zoomLevel or 1.0
+  local sensitivity = state.scrollSensitivity or 0.15
+  local acceleration = state.scrollAcceleration or 1.0
+  local initGain = state.scrollInertiaInitial or 1.0
+  local decay = state.scrollInertiaDecay or 0.85
+  local curveExp = state.scrollCurveExponent or 1.0
+
+  -- Build BPM step selected states
+  local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
+  bpmSel[tostring(bpmStep)] = "selected"
+
+  -- Build input quantize selected states
+  local inputQuant = state.inputQuantizeMode or "Off"
+  local quantSel = { ["Off"]="", ["1/1"]="", ["1/2"]="", ["1/4"]="", ["1/8"]="", ["1/16"]="" }
+  quantSel[inputQuant] = "selected"
+
+  -- Build zoom selected states
+  local zoomSel = {}
+  for _, v in ipairs({0.8, 1.0, 1.2, 1.4}) do
+    zoomSel[tostring(v)] = math.abs(zoom - v) < 0.05 and "selected" or ""
+  end
+
+  -- Format floats nicely for slider defaults
+  local sensFmt    = string.format("%.2f", sensitivity)
+  local accFmt     = string.format("%.2f", acceleration)
+  local initFmt    = string.format("%.2f", initGain)
+  local decayFmt   = string.format("%.2f", decay)
+  local curveFmt   = string.format("%.1f", curveExp)
+
+  return string.format([[
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+
+    html, body {
+      width: 100%%;
+      height: 100%%;
+      background: transparent !important;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: Georgia, serif;
+      color: #e2d5c0;
+      font-size: 15px;
+    }
+
+    #panel {
+      position: relative;
+      background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
+      border: 1.5px solid rgba(212, 163, 89, 0.4);
+      border-radius: 16px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
+      padding: 0;
+      width: 100%%;
+      height: 100%%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Title bar ── */
+    #titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px 12px;
+      border-bottom: 1px solid rgba(212, 163, 89, 0.2);
+      cursor: move;
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+
+    #titlebar-label {
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: #d4a359;
+      text-shadow: 0 0 12px rgba(212,163,89,0.4);
+    }
+
+    #close-btn {
+      background: rgba(212,163,89,0.12);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      width: 26px; height: 26px;
+      border-radius: 50%%;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, box-shadow 0.15s;
+      -webkit-app-region: no-drag;
+      flex-shrink: 0;
+      font-family: inherit;
+      outline: none;
+    }
+    #close-btn:hover {
+      background: rgba(212,163,89,0.28);
+      box-shadow: 0 0 8px rgba(212,163,89,0.3);
+    }
+
+    /* ── Scroll area ── */
+    #scroll-area {
+      overflow-y: auto;
+      flex: 1;
+      min-height: 0;
+      padding: 18px 20px 20px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #scroll-area::-webkit-scrollbar {
+      width: 8px;
+    }
+    #scroll-area::-webkit-scrollbar-track {
+      background: rgba(20, 16, 10, 0.4);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb {
+      background: rgba(212, 163, 89, 0.35);
+      border-radius: 4px;
+    }
+    #scroll-area::-webkit-scrollbar-thumb:hover {
+      background: rgba(212, 163, 89, 0.65);
+    }
+
+    /* ── Window Resizers ── */
+    #resize-grip {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: nwse-resize;
+      opacity: 0.55;
+      transition: opacity 0.15s;
+      z-index: 999;
+      -webkit-app-region: no-drag;
+      pointer-events: auto;
+    }
+    #resize-grip:hover {
+      opacity: 1;
+    }
+    #resize-edge-r {
+      position: absolute;
+      top: 16px;
+      right: 0;
+      bottom: 16px;
+      width: 6px;
+      cursor: ew-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
+    }
+    #resize-edge-b {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 0;
+      height: 6px;
+      cursor: ns-resize;
+      z-index: 998;
+      -webkit-app-region: no-drag;
+    }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2.2px;
+      text-transform: uppercase;
+      color: rgba(212,163,89,0.55);
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(212,163,89,0.12);
+    }
+
+    /* ── Row ── */
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .row:last-child { margin-bottom: 0; }
+
+    .row-label { flex: 1; min-width: 0; }
+    .row-label strong { font-weight: 700; font-size: 14px; color: #e2d5c0; display: block; }
+    .row-label span { font-size: 12px; color: rgba(200,185,160,0.55); display: block; margin-top: 2px; }
+
+    /* ── Select ── */
+    select {
+      background: rgba(20,16,10,0.9);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 700;
+      flex-shrink: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+      min-width: 105px;
+      text-align: center;
+    }
+    select:focus { border-color: rgba(212,163,89,0.7); }
+    select option { background: #1a1508; color: #d4a359; }
+
+    /* ── Toggle ── */
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .toggle {
+      position: relative;
+      width: 48px; height: 26px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(30,24,14,0.9);
+      border: 1px solid rgba(212,163,89,0.3);
+      border-radius: 13px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 18px; height: 18px;
+      background: rgba(212,163,89,0.45);
+      border-radius: 50%%;
+      transition: transform 0.2s, background 0.2s;
+      pointer-events: none;
+    }
+    .toggle input:checked ~ .toggle-track {
+      background: rgba(212,163,89,0.18);
+      border-color: rgba(212,163,89,0.7);
+    }
+    .toggle input:checked ~ .toggle-thumb {
+      transform: translateX(22px);
+      background: #d4a359;
+    }
+
+    /* ── Slider ── */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      width: 190px;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 5px;
+      background: rgba(212,163,89,0.18);
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%%;
+      background: #d4a359;
+      border: 1px solid rgba(0,0,0,0.4);
+      box-shadow: 0 0 6px rgba(212,163,89,0.5);
+      cursor: pointer;
+    }
+    .slider-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #d4a359;
+      min-width: 38px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Number input ── */
+    input[type=number] {
+      background: rgba(20,16,10,0.9);
+      border: 1px solid rgba(212,163,89,0.35);
+      color: #d4a359;
+      padding: 6px 10px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 13px;
+      font-family: inherit;
+      font-weight: 700;
+      width: 84px;
+      text-align: center;
+    }
+    input[type=number]:focus { border-color: rgba(212,163,89,0.7); }
+
+    /* ── Divider ── */
+    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 6px 0 20px; }
+  </style>
+</head>
+<body>
+<div id="panel">
+  <div id="titlebar">
+    <div id="titlebar-label">⚙ Settings</div>
+    <button id="close-btn" onclick="send('close')">✕</button>
+  </div>
+
+  <div id="scroll-area">
+
+    <!-- Scroll / Trackpad -->
+    <div class="section">
+      <div class="section-title">Trackpad / Scroll</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Base Sensitivity</strong>
+          <span>Baseline 1:1 speed multiplier for standard finger movements (0.02 - 2.00)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="sensitivitySlider" min="0.02" max="2.00" step="0.01"
+            value="%s"
+            oninput="onSensitivity(this.value)">
+          <div class="slider-val" id="sensitivityVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Speed / Acceleration</strong>
+          <span>Active velocity multiplier while your fingers move on the glass (0.10 - 3.00)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="accelerationSlider" min="0.10" max="3.00" step="0.10"
+            value="%s"
+            oninput="onAcceleration(this.value)">
+          <div class="slider-val" id="accelerationVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Inertia Initial Kick</strong>
+          <span>Initial impulse strength when fingers break contact (0.00 = hard stop)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="initSlider" min="0.00" max="2.00" step="0.01"
+            value="%s"
+            oninput="onInit(this.value)">
+          <div class="slider-val" id="initVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Friction / Decay Rate</strong>
+          <span>Deceleration rate after lift-off (0.10 = instant stop, 0.95 = long glide)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="decaySlider" min="0.10" max="0.99" step="0.01"
+            value="%s"
+            oninput="onDecay(this.value)">
+          <div class="slider-val" id="decayVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Max Inertia Duration</strong>
+          <span>Hard cap on momentum duration (50ms = sharp stop, 500ms = long coast)</span>
+        </div>
+        <input type="number" id="maxInertiaMs" value="%d" min="50" max="600" step="10"
+          onchange="send('setMaxInertia', parseInt(this.value))">
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Low Velocity Cutoff</strong>
+          <span>Cuts off the slow unpredictable tail at the end of momentum</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="inertiaCutoffSlider" min="0.1" max="2.0" step="0.1"
+            value="%s"
+            oninput="onCutoff(this.value)">
+          <div class="slider-val" id="inertiaCutoffVal">%s</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Velocity Curve Exponent</strong>
+          <span>Gesture curve shape (1.0 = linear, 2.0 = exponential ramp-up/down)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" id="curveSlider" min="0.5" max="3.0" step="0.1"
+            value="%s"
+            oninput="onCurve(this.value)">
+          <div class="slider-val" id="curveVal">%s</div>
+        </div>
+      </div>
+      <div style="margin-top: 15px;">
+        <canvas id="physicsCanvas" width="460" height="140" style="background:rgba(20,16,10,0.6); border:1px solid rgba(212,163,89,0.3); border-radius:8px; cursor:crosshair;"></canvas>
+        <div style="font-size: 0.72rem; color: rgba(212,163,89,0.7); margin-top: 6px; display: flex; justify-content: space-between;"><span>── Solid: Response Curve</span><span>- - Dashed: Coasting Tail (with Hard Cutoff)</span><span>Scroll box to test</span></div>
+      </div>
+    </div>
+
+    <!-- Tempo & Sync -->
+    <div class="section">
+      <div class="section-title">Tempo &amp; Sync</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>BPM Step Size</strong>
+          <span>Change per increment / decrement key</span>
+        </div>
+        <select id="bpmStepSize" onchange="send('setBpmStep', parseInt(this.value))">
+          <option value="1" %s>1 BPM</option>
+          <option value="5" %s>5 BPM</option>
+          <option value="10" %s>10 BPM</option>
+          <option value="25" %s>25 BPM</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Input Quantization</strong>
+          <span>Real-time snapping for keys &amp; pads</span>
+        </div>
+        <select id="inputQuantize" onchange="send('setInputQuantize', this.value)">
+          <option value="Off" %s>OFF (Instant)</option>
+          <option value="1/1" %s>1/1 (Whole Note)</option>
+          <option value="1/2" %s>1/2 (Half Note)</option>
+          <option value="1/4" %s>1/4 (Quarter Note)</option>
+          <option value="1/8" %s>1/8 (Eighth Note)</option>
+          <option value="1/16" %s>1/16 (Sixteenth Note)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Sync to Logic Pro</strong>
+          <span>Auto-match BPM with active session</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="logicSync" %s onchange="send('setLogicSync', this.checked)">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <!-- UI Styling -->
+    <div class="section">
+      <div class="section-title">UI Styling</div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Hue</strong>
+          <span>Base color tone (0-360)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="360" step="1" value="%d"
+            oninput="document.getElementById('hueVal').textContent=this.value"
+            onchange="send('setUiActionKeyHue', parseInt(this.value))">
+          <div class="slider-val" id="hueVal">%d</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Saturation</strong>
+          <span>Color intensity (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('satVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeySat', parseInt(this.value))">
+          <div class="slider-val" id="satVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Lightness</strong>
+          <span>Brightness (0-100%%)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0" max="100" step="1" value="%d"
+            oninput="document.getElementById('lightVal').textContent=this.value+'%%'"
+            onchange="send('setUiActionKeyLight', parseInt(this.value))">
+          <div class="slider-val" id="lightVal">%d%%</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Action Key Opacity</strong>
+          <span>Background transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('opVal').textContent=this.value"
+            onchange="send('setUiActionKeyOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="opVal">%.2f</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row-label">
+          <strong>Border Opacity</strong>
+          <span>Border transparency (0.0 - 1.0)</span>
+        </div>
+        <div class="slider-row">
+          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
+            oninput="document.getElementById('bOpVal').textContent=this.value"
+            onchange="send('setUiActionKeyBorderOpacity', parseFloat(this.value))">
+          <div class="slider-val" id="bOpVal">%.2f</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arpeggiator -->
+    <div class="section">
+      <div class="section-title">Arpeggiator</div>
+      <div class="row">
+        <div class="row-label">
+          <strong>Default Gate Length</strong>
+          <span>Note duration as %% of step interval</span>
+        </div>
+        <input type="number" id="gatePercent" value="%d" min="10" max="150" step="5"
+          onchange="send('setGate', parseInt(this.value))">
+      </div>
+    </div>
+
+    <!-- Display -->
+    <div class="section">
+      <div class="section-title">Display</div>
+      <div class="row">
+        <div class="row-label">
+          <strong>HUD Zoom Level</strong>
+          <span>Scale factor for the status dashboard</span>
+        </div>
+        <select id="zoomLevel" onchange="send('setZoom', parseFloat(this.value))">
+          <option value="0.8" %s>80%%</option>
+          <option value="1.0" %s>100%% (Default)</option>
+          <option value="1.2" %s>120%%</option>
+          <option value="1.4" %s>140%%</option>
+        </select>
+      </div>
+    </div>
+
+  </div><!-- /scroll-area -->
+  <div id="resize-edge-r"></div>
+  <div id="resize-edge-b"></div>
+  <div id="resize-grip" title="Drag to resize">
+    <svg width="12" height="12" viewBox="0 0 12 12">
+      <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="6" x2="6" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="10" y1="10" x2="10" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+</div><!-- /panel -->
+
+<script>
+  function send(type, value) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.settingsUserContent) {
+      window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
+    }
+  }
+
+  // Hover detection for native scroll passthrough
+  document.addEventListener('mouseenter', () => send('hoverSettings', true));
+  document.addEventListener('mouseleave', () => send('hoverSettings', false));
+
+  // Interactive Window Resizing
+  function setupResizers() {
+    const handleDrag = (startEv, mode) => {
+      startEv.preventDefault();
+      startEv.stopPropagation();
+      const startX = startEv.screenX;
+      const startY = startEv.screenY;
+      const startW = window.innerWidth;
+      const startH = window.innerHeight;
+
+      document.body.style.cursor = mode === 'corner' ? 'nwse-resize' : (mode === 'x' ? 'ew-resize' : 'ns-resize');
+
+      const onMove = (ev) => {
+        let newW = startW;
+        let newH = startH;
+        if (mode === 'corner' || mode === 'x') {
+          newW = Math.max(460, Math.min(1200, startW + (ev.screenX - startX)));
+        }
+        if (mode === 'corner' || mode === 'y') {
+          newH = Math.max(400, Math.min(1100, startH + (ev.screenY - startY)));
+        }
+        send('resizeWindow', { w: Math.round(newW), h: Math.round(newH) });
+      };
+
+      const onUp = () => {
+        document.body.style.cursor = '';
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        send('saveWindowSize', { w: window.innerWidth, h: window.innerHeight });
+      };
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    };
+
+    const grip = document.getElementById('resize-grip');
+    if (grip) grip.addEventListener('mousedown', (e) => handleDrag(e, 'corner'));
+    const edgeR = document.getElementById('resize-edge-r');
+    if (edgeR) edgeR.addEventListener('mousedown', (e) => handleDrag(e, 'x'));
+    const edgeB = document.getElementById('resize-edge-b');
+    if (edgeB) edgeB.addEventListener('mousedown', (e) => handleDrag(e, 'y'));
+  }
+  setupResizers();
+
+  window.addEventListener('resize', () => {
+    const canvasWrap = canvas.parentElement;
+    if (canvasWrap) {
+      canvas.width = canvasWrap.clientWidth;
+      drawPhysicsCanvas();
+    }
+  });
+  function onSensitivity(v) {
+    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
+    send('setSensitivity', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+  function onAcceleration(v) {
+    document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
+    send('setAcceleration', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+  function onDecay(v) {
+    document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
+    send('setDecay', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+  function onInit(v) {
+    document.getElementById('initVal').textContent = parseFloat(v).toFixed(2);
+    send('setInit', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+  function onCutoff(v) {
+    document.getElementById('inertiaCutoffVal').textContent = parseFloat(v).toFixed(1);
+    send('setCutoff', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+  function onCurve(v) {
+    document.getElementById('curveVal').textContent = parseFloat(v).toFixed(1);
+    send('setCurve', parseFloat(v));
+    drawPhysicsCanvas();
+  }
+
+  const canvas = document.getElementById('physicsCanvas');
+  const ctx = canvas.getContext('2d');
+  let lastX = 0, lastY = 0;
+
+  function drawPhysicsCanvas() {
+    const w = canvas.width, h = canvas.height;
+    const sensitivity = parseFloat(document.getElementById('sensitivitySlider').value);
+    const acceleration = parseFloat(document.getElementById('accelerationSlider').value);
+    const initGain = parseFloat(document.getElementById('initSlider').value);
+    const decay = parseFloat(document.getElementById('decaySlider').value);
+    const curveExp = parseFloat(document.getElementById('curveSlider').value);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(212,163,89,0.3)';
+    ctx.lineWidth = 1;
+    for(let i=0; i<w; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
+    for(let i=0; i<h; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(w,i); ctx.stroke(); }
+
+    ctx.beginPath();
+    ctx.strokeStyle = '#d4a359';
+    ctx.lineWidth = 2;
+    for(let x=0; x<w; x++) {
+      let vel = (x / w);
+      let output = Math.pow(vel, curveExp) * sensitivity * acceleration;
+      let y = h - (output * h * 2);
+      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(212,163,89,0.6)';
+    ctx.setLineDash([5, 5]);
+    const maxInertia = parseFloat(document.getElementById('maxInertiaMs').value);
+    for(let x=0; x<w; x++) {
+      let time = x / w;
+      if (time * 1000 > maxInertia) {
+        ctx.lineTo(x, h * 0.8);
+        continue;
+      }
+      let y = (h * 0.8) - (initGain * Math.pow(decay, time * 10) * h * 0.5);
+      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    ctx.fillStyle = '#d4a359';
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI*2);
+    ctx.fill();
+    setTimeout(drawPhysicsCanvas, 200);
+  });
+
+  drawPhysicsCanvas();
+
+  function syncState(s) {
+    if (!s) return;
+    if (s.bpmStepSize !== undefined) {
+      var el = document.getElementById('bpmStepSize');
+      if (el) el.value = String(s.bpmStepSize);
+    }
+    if (s.inputQuantizeMode !== undefined) {
+      var el = document.getElementById('inputQuantize');
+      if (el) el.value = String(s.inputQuantizeMode);
+    }
+    if (s.logicSyncEnabled !== undefined) {
+      var el = document.getElementById('logicSync');
+      if (el) el.checked = !!s.logicSyncEnabled;
+    }
+    if (s.arpGatePercent !== undefined) {
+      var el = document.getElementById('gatePercent');
+      if (el) el.value = s.arpGatePercent;
+    }
+    if (s.zoomLevel !== undefined) {
+      var el = document.getElementById('zoomLevel');
+      if (el) el.value = String(s.zoomLevel);
+    }
+    if (s.scrollSensitivity !== undefined) {
+      var el = document.getElementById('sensitivitySlider');
+      if (el) el.value = s.scrollSensitivity;
+      var valEl = document.getElementById('sensitivityVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
+    }
+    if (s.scrollAcceleration !== undefined) {
+      var el = document.getElementById('accelerationSlider');
+      if (el) el.value = s.scrollAcceleration;
+      var valEl = document.getElementById('accelerationVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollAcceleration).toFixed(2);
+    }
+    if (s.scrollInertiaInitial !== undefined) {
+      var el = document.getElementById('initSlider');
+      if (el) el.value = s.scrollInertiaInitial;
+      var valEl = document.getElementById('initVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaInitial).toFixed(2);
+    }
+    if (s.scrollInertiaDecay !== undefined) {
+      var el = document.getElementById('decaySlider');
+      if (el) el.value = s.scrollInertiaDecay;
+      var valEl = document.getElementById('decayVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaDecay).toFixed(2);
+    }
+    if (s.scrollMaxInertiaMs !== undefined) {
+      var el = document.getElementById('maxInertiaMs');
+      if (el) el.value = s.scrollMaxInertiaMs;
+    }
+    if (s.scrollInertiaCutoff !== undefined) {
+      var el = document.getElementById('inertiaCutoffSlider');
+      if (el) el.value = s.scrollInertiaCutoff;
+      var valEl = document.getElementById('inertiaCutoffVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaCutoff).toFixed(1);
+    }
+    if (s.scrollCurveExponent !== undefined) {
+      var el = document.getElementById('curveSlider');
+      if (el) el.value = s.scrollCurveExponent;
+      var valEl = document.getElementById('curveVal');
+      if (valEl) valEl.textContent = parseFloat(s.scrollCurveExponent).toFixed(1);
+    }
+    drawPhysicsCanvas();
+  }
+</script>
+</body>
+</html>
+]],
+    -- sensitivity slider
+    sensFmt, sensFmt,
+    -- acceleration slider
+    accFmt, accFmt,
+    initFmt, initFmt,
+    decayFmt, decayFmt,
+    math.floor(state.scrollMaxInertiaMs or 250),
+    string.format("%.1f", state.scrollInertiaCutoff or 0.5), string.format("%.1f", state.scrollInertiaCutoff or 0.5),
+    curveFmt, curveFmt,
+    -- bpm step selects
+    bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
+    -- input quantize selects
+    quantSel["Off"], quantSel["1/1"], quantSel["1/2"], quantSel["1/4"], quantSel["1/8"], quantSel["1/16"],
+    -- logic sync checked
+    logicSync and "checked" or "",
+    -- ui
+    state.uiActionKeyHue or 30, state.uiActionKeyHue or 30,
+    state.uiActionKeySat or 20, state.uiActionKeySat or 20,
+    state.uiActionKeyLight or 75, state.uiActionKeyLight or 75,
+    state.uiActionKeyOpacity or 0.08, state.uiActionKeyOpacity or 0.08,
+    state.uiActionKeyBorderOpacity or 0.6, state.uiActionKeyBorderOpacity or 0.6,
+    -- gate
+    math.floor(gate),
+    -- zoom selects
+    zoomSel["0.8"], zoomSel["1.0"], zoomSel["1.2"], zoomSel["1.4"]
+  )
+end
+
+_G.activeWatchers = _G.activeWatchers or {}
+
+local function createSettingsWebview()
+  if _G.activeWatchers.settingsWebview then
+    return _G.activeWatchers.settingsWebview
+  end
+
+  local uc = hsUsercontent.new("settingsUserContent")
+
+  uc:setCallback(function(message)
+    local body = message.body
+    if not body or not body.type then return end
+    local act = body.type
+    local val = body.value
+
+    if act == "setBpmStep" then
+      local val = tonumber(body.value) or 10
+      state.bpmStepSize = val
+      hs.settings.set("qwertyMidi_bpmStepSize", val)
+    elseif act == "setInputQuantize" then
+      local val = tostring(body.value or "Off")
+      state.inputQuantizeMode = val
+      hs.settings.set("qwertyMidi_inputQuantizeMode", val)
+      pcall(function() __require("hud").updateWebviewHud() end)
+    elseif act == "setGatePercent" then
+      state.arpGatePercent = val
+      hs.settings.set("qwertyMidi_arpGatePercent", val)
+      if state.arpEnabled then
+        __require("arpeggiator").applyGatePercentChange()
+      end
+    elseif act == "setUiActionKeyHue" then
+      state.uiActionKeyHue = val
+      hs.settings.set("qwertyMidi_uiActionKeyHue", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeySat" then
+      state.uiActionKeySat = val
+      hs.settings.set("qwertyMidi_uiActionKeySat", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyLight" then
+      state.uiActionKeyLight = val
+      hs.settings.set("qwertyMidi_uiActionKeyLight", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyOpacity" then
+      state.uiActionKeyOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyOpacity", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setUiActionKeyBorderOpacity" then
+      state.uiActionKeyBorderOpacity = val
+      hs.settings.set("qwertyMidi_uiActionKeyBorderOpacity", val)
+      __require("hud").updateWebviewHud()
+    elseif act == "setLogicSync" then
+      local val = (body.value == true or body.value == "true" or body.value == 1)
+      state.logicSyncEnabled = val
+      hs.settings.set("qwertyMidi_logicSyncEnabled", val)
+    elseif act == "setGate" then
+      local val = tonumber(body.value) or 80.0
+      state.arpGatePercent = math.max(5.0, math.min(150.0, val))
+    elseif act == "setZoom" then
+      local val = tonumber(body.value) or 1.0
+      state.zoomLevel = val
+      hs.settings.set("qwertyMidi_zoomLevel", val)
+    elseif body.type == "setSensitivity" then
+      local val = tonumber(body.value) or 0.15
+      state.scrollSensitivity = val
+      hs.settings.set("qwertyMidi_scrollSensitivity", val)
+    elseif body.type == "setAcceleration" then
+      local val = tonumber(body.value) or 1.0
+      state.scrollAcceleration = val
+      hs.settings.set("qwertyMidi_scrollAcceleration", val)
+    elseif body.type == "setInit" then
+      local val = tonumber(body.value) or 1.0
+      state.scrollInertiaInitial = val
+      hs.settings.set("qwertyMidi_scrollInertiaInitial", val)
+    elseif body.type == "setDecay" then
+      local val = tonumber(body.value) or 0.85
+      state.scrollInertiaDecay = math.max(0.1, math.min(0.99, val))
+      hs.settings.set("qwertyMidi_scrollInertiaDecay", val)
+    elseif body.type == "setCurve" then
+      local val = tonumber(body.value) or 1.0
+      state.scrollCurveExponent = math.max(0.5, math.min(3.0, val))
+      hs.settings.set("qwertyMidi_scrollCurveExponent", val)
+    elseif body.type == "setMaxInertia" then
+      local val = tonumber(body.value) or 250
+      state.scrollMaxInertiaMs = math.max(50, math.min(600, val))
+      hs.settings.set("qwertyMidi_scrollMaxInertiaMs", val)
+    elseif body.type == "setCutoff" then
+      local val = tonumber(body.value) or 0.5
+      state.scrollInertiaCutoff = math.max(0.1, math.min(2.0, val))
+      hs.settings.set("qwertyMidi_scrollInertiaCutoff", val)
+    elseif body.type == "hoverSettings" then
+      _G.activeWatchers.isHoveringSettings = (val == true)
+      return
+    elseif body.type == "resizeWindow" then
+      if _G.activeWatchers.settingsWebview and type(val) == "table" then
+        local curFrame = _G.activeWatchers.settingsWebview:frame()
+        local newW = math.max(460, math.min(1200, tonumber(val.w) or curFrame.w))
+        local newH = math.max(400, math.min(1100, tonumber(val.h) or curFrame.h))
+        _G.activeWatchers.settingsWebview:frame({ x = curFrame.x, y = curFrame.y, w = newW, h = newH })
+      end
+      return
+    elseif body.type == "saveWindowSize" then
+      if type(val) == "table" then
+        hs.settings.set("qwertyMidi_settingsW", tonumber(val.w))
+        hs.settings.set("qwertyMidi_settingsH", tonumber(val.h))
+      end
+      return
+    elseif body.type == "close" then
+      if _G.activeWatchers.settingsWebview then
+        _G.activeWatchers.settingsWebview:hide()
+      end
+      _G.activeWatchers.isHoveringSettings = false
+      return
+    end
+
+    config.saveSettings()
+    local hud = __require("hud")
+    hud.updateWebviewHud()
+  end)
+
+  local savedW = hs.settings.get("qwertyMidi_settingsW") or 528
+  local savedH = hs.settings.get("qwertyMidi_settingsH") or 640
+  local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+  local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+
+  local screen = hs.screen.mainScreen():frame()
+  local x = math.floor(screen.x + (screen.w - w) / 2)
+  local y = math.floor(screen.y + (screen.h - h) / 2)
+
+  local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
+  wv:windowTitle("QWERTY MIDI Settings")
+  -- Borderless transparent floating panel with rounded corners and resize capability
+  wv:windowStyle({ "borderless", "resizable", "nonactivating" })
+  wv:transparent(true)
+  wv:level(hs.drawing.windowLevels.floating + 1)
+  wv:allowTextEntry(true)
+  wv:html(generateSettingsHTML())
+
+  _G.activeWatchers.settingsWebview = wv
+  return wv
+end
+
+local function syncStateToWebview()
+  if not _G.activeWatchers.settingsWebview then return end
+  local s = {
+    bpmStepSize = state.bpmStepSize or 10,
+    inputQuantizeMode = state.inputQuantizeMode or "Off",
+    logicSyncEnabled = state.logicSyncEnabled,
+    arpGatePercent = state.arpGatePercent or 80,
+    zoomLevel = state.zoomLevel or 1.0,
+    scrollSensitivity = state.scrollSensitivity or 0.15,
+    scrollAcceleration = state.scrollAcceleration or 1.0,
+    scrollInertiaInitial = state.scrollInertiaInitial or 1.0,
+    scrollInertiaDecay = state.scrollInertiaDecay or 0.85,
+    scrollCurveExponent = state.scrollCurveExponent or 1.0,
+    scrollMaxInertiaMs = state.scrollMaxInertiaMs or 250,
+    scrollInertiaCutoff = state.scrollInertiaCutoff or 0.5
+  }
+  local jsonStr = hs.json.encode(s)
+  _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
+end
+
+local function toggleSettingsWindow()
+  local wv = createSettingsWebview()
+
+  if wv:isVisible() then
+    wv:hide()
+    _G.activeWatchers.isHoveringSettings = false
+  else
+    local curFrame = wv:frame()
+    local screen = hs.screen.mainScreen():frame()
+    local savedW = hs.settings.get("qwertyMidi_settingsW") or curFrame.w or 528
+    local savedH = hs.settings.get("qwertyMidi_settingsH") or curFrame.h or 640
+    local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
+    local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
+    local x = curFrame.x
+    local y = curFrame.y
+    if x < screen.x or x > screen.x + screen.w - 50 or y < screen.y or y > screen.y + screen.h - 50 then
+      x = math.floor(screen.x + (screen.w - w) / 2)
+      y = math.floor(screen.y + (screen.h - h) / 2)
+    end
+    wv:frame({ x = x, y = y, w = w, h = h })
+
+    syncStateToWebview()
+    wv:show()
+  end
+end
+
+-- Cleanup old instance on reload and pre-warm new settings webview
+if _G.activeWatchers.settingsWebview then
+  _G.activeWatchers.settingsWebview:delete()
+  _G.activeWatchers.settingsWebview = nil
+end
+createSettingsWebview()
+
+return {
+  toggleSettingsWindow = toggleSettingsWindow
+}
+
+end
+
+__modules["sync"] = function()
+-- src/sync.lua
+-- Bidirectional synchronization between QWERTY MIDI (Hammerspoon) and DualSynth (DualSense macOS app)
+-- Uses macOS native NSDistributedNotificationCenter via hs.distributednotifications
+
+local sync = {}
+local arpeggiator = __require("arpeggiator")
+
+local isSyncing = false
+local configRef = nil
+local hudRef = nil
+local controlsRef = nil
+
+local DUALSYNTH_STATE_NOTIFICATION = "DualSynthStateBroadcast"
+local QWERTY_STATE_NOTIFICATION = "QwertyMidiStateBroadcast"
+local QWERTY_NOTE_NOTIFICATION = "QwertyMidiNoteBroadcast"
+
+local function log(msg)
+  print("[Sync]: " .. tostring(msg))
+end
+
+function sync.init(config, hud, controls)
+  configRef = config
+  hudRef = hud
+  controlsRef = controls
+  _G.activeWatchers = _G.activeWatchers or {}
+
+  -- Stop previous watcher if reloading
+  if _G.activeWatchers.dualSynthSyncWatcher then
+    _G.activeWatchers.dualSynthSyncWatcher:stop()
+    _G.activeWatchers.dualSynthSyncWatcher = nil
+  end
+
+  -- 1. Listen for state updates from DualSynth
+  _G.activeWatchers.dualSynthSyncWatcher = hs.distributednotifications.new(function(name, object, userInfo)
+    if isSyncing or not userInfo or not configRef then return end
+    isSyncing = true
+
+    local state = configRef.state
+    local stateChanged = false
+
+    if userInfo.root ~= nil then
+      local rootNum = tonumber(userInfo.root)
+      if rootNum and state.currentRoot ~= rootNum then
+        state.currentRoot = rootNum
+        hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
+        stateChanged = true
+      end
+    end
+
+    if userInfo.scaleIdx ~= nil then
+      local scaleNum = tonumber(userInfo.scaleIdx)
+      if scaleNum then
+        local targetIdx = scaleNum + 1 -- Swift is 0-indexed, Lua is 1-indexed
+        if state.currentScaleIdx ~= targetIdx then
+          state.currentScaleIdx = targetIdx
+          hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
+          stateChanged = true
+        end
+      end
+    end
+
+    if userInfo.bpm ~= nil then
+      local bpmNum = tonumber(userInfo.bpm)
+      if bpmNum and math.abs((state.arpBpm or 120) - bpmNum) > 0.5 then
+        state.arpBpm = bpmNum
+        hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
+        stateChanged = true
+      end
+    end
+
+    if userInfo.octaveShift ~= nil then
+      local octNum = tonumber(userInfo.octaveShift)
+      if octNum and state.octaveShift ~= octNum then
+        state.octaveShift = octNum
+        hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
+        stateChanged = true
+      end
+    end
+
+    if userInfo.chordIdx ~= nil then
+      local chordNum = tonumber(userInfo.chordIdx)
+      if chordNum then
+        local targetChord = chordNum + 1
+        if state.chordIdx ~= targetChord then
+          state.chordIdx = targetChord
+          local activeTrack = state.tracks and state.tracks[state.activeTrack or 1]
+          if activeTrack then activeTrack.chordIdx = targetChord end
+          hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
+          stateChanged = true
+        end
+      end
+    end
+
+    if userInfo.activeTrack ~= nil then
+      local trackId = math.floor(tonumber(userInfo.activeTrack) or 0)
+      if trackId >= 1 and trackId <= 4 and state.activeTrack ~= trackId and controlsRef and controlsRef.selectTrack then
+        controlsRef.selectTrack(trackId)
+        stateChanged = true
+      end
+    end
+
+    if stateChanged then
+      arpeggiator.updateLatchedArpNotes()
+      arpeggiator.updateLatchedArpChordNotes(state.activeTrack or 1)
+      log("Synced state from DualSynth: Root=" .. tostring(state.currentRoot) .. " Scale=" .. tostring(state.currentScaleIdx) .. " BPM=" .. tostring(state.arpBpm))
+      if hudRef and hudRef.updateWebviewHud then
+        hudRef.updateWebviewHud()
+      end
+    end
+
+    isSyncing = false
+  end, DUALSYNTH_STATE_NOTIFICATION)
+
+  if _G.activeWatchers.dualSynthSyncWatcher then
+    _G.activeWatchers.dualSynthSyncWatcher:start()
+    log("Started DualSynth sync listener on " .. DUALSYNTH_STATE_NOTIFICATION)
+  end
+end
+
+-- Broadcast QWERTY state to DualSynth
+function sync.broadcastState(state)
+  if isSyncing or not state then return end
+  local payload = {
+    root = state.currentRoot or 0,
+    scaleIdx = (state.currentScaleIdx or 1) - 1, -- Swift 0-indexed
+    bpm = state.arpBpm or 120,
+    octaveShift = state.octaveShift or 0,
+    chordIdx = (state.chordIdx or 1) - 1,
+    activeTrack = state.activeTrack or 1
+  }
+
+  hs.distributednotifications.post(QWERTY_STATE_NOTIFICATION, nil, payload)
+end
+
+-- Broadcast played notes to DualSynth visualizer
+function sync.broadcastNotes(pitches, isNoteOn)
+  if not pitches then return end
+  if type(pitches) == "number" then
+    pitches = { pitches }
+  end
+  hs.distributednotifications.post(QWERTY_NOTE_NOTIFICATION, nil, {
+    pitches = pitches,
+    isNoteOn = isNoteOn == true
+  })
+end
+
+return sync
 
 end
 
@@ -4100,7 +11709,7 @@ __modules["transposer"] = function()
 -- Transposition and pitch mapping adapter delegating to packages/music-engine/harmony.
 
 local config = __require("config")
-local harmony = require("harmony")
+local harmony = __require("harmony")
 local state = config.state
 
 local function getEffectiveRowVelocity(isTopRow)
@@ -4164,7 +11773,7 @@ return {
 end
 
 __modules["ui_html"] = function()
-local HTML_UI_CONTENT = [[
+local HTML_UI_CONTENT = [===[
 <!DOCTYPE html>
 <html>
 <head>
@@ -11025,5023 +18634,9 @@ document.addEventListener('DOMContentLoaded', () => {
 </body>
 </html>
 
-]]
+]===]
 
 return HTML_UI_CONTENT
-
-end
-
-__modules["settings_ui"] = function()
-local hsWebview = require("hs.webview")
-local hsUsercontent = require("hs.webview.usercontent")
-local config = __require("config")
-local state = config.state
-
-local settingsWebview = nil
-
-local function generateSettingsHTML()
-  local bpmStep        = state.bpmStepSize or 10
-  local logicSync      = state.logicSyncEnabled
-  local gate           = state.arpGatePercent or 80
-  local zoom           = state.zoomLevel or 1.0
-  local sensitivity = state.scrollSensitivity or 0.15
-  local acceleration = state.scrollAcceleration or 1.0
-  local initGain = state.scrollInertiaInitial or 1.0
-  local decay = state.scrollInertiaDecay or 0.85
-  local curveExp = state.scrollCurveExponent or 1.0
-
-  -- Build BPM step selected states
-  local bpmSel = { ["1"]="", ["5"]="", ["10"]="", ["25"]="" }
-  bpmSel[tostring(bpmStep)] = "selected"
-
-  -- Build input quantize selected states
-  local inputQuant = state.inputQuantizeMode or "Off"
-  local quantSel = { ["Off"]="", ["1/1"]="", ["1/2"]="", ["1/4"]="", ["1/8"]="", ["1/16"]="" }
-  quantSel[inputQuant] = "selected"
-
-  -- Build zoom selected states
-  local zoomSel = {}
-  for _, v in ipairs({0.8, 1.0, 1.2, 1.4}) do
-    zoomSel[tostring(v)] = math.abs(zoom - v) < 0.05 and "selected" or ""
-  end
-
-  -- Format floats nicely for slider defaults
-  local sensFmt    = string.format("%.2f", sensitivity)
-  local accFmt     = string.format("%.2f", acceleration)
-  local initFmt    = string.format("%.2f", initGain)
-  local decayFmt   = string.format("%.2f", decay)
-  local curveFmt   = string.format("%.1f", curveExp)
-
-  return string.format([[
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-
-    html, body {
-      width: 100%%;
-      height: 100%%;
-      background: transparent !important;
-      overflow: hidden;
-    }
-
-    body {
-      font-family: Georgia, serif;
-      color: #e2d5c0;
-      font-size: 15px;
-    }
-
-    #panel {
-      position: relative;
-      background: linear-gradient(160deg, #1e1a13 0%%, #151108 100%%);
-      border: 1.5px solid rgba(212, 163, 89, 0.4);
-      border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(212,163,89,0.08);
-      padding: 0;
-      width: 100%%;
-      height: 100%%;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-
-    /* ── Title bar ── */
-    #titlebar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 20px 12px;
-      border-bottom: 1px solid rgba(212, 163, 89, 0.2);
-      cursor: move;
-      -webkit-app-region: drag;
-      flex-shrink: 0;
-    }
-
-    #titlebar-label {
-      font-weight: 700;
-      font-size: 15px;
-      letter-spacing: 1.8px;
-      text-transform: uppercase;
-      color: #d4a359;
-      text-shadow: 0 0 12px rgba(212,163,89,0.4);
-    }
-
-    #close-btn {
-      background: rgba(212,163,89,0.12);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      width: 26px; height: 26px;
-      border-radius: 50%%;
-      font-size: 13px;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: background 0.15s, box-shadow 0.15s;
-      -webkit-app-region: no-drag;
-      flex-shrink: 0;
-      font-family: inherit;
-      outline: none;
-    }
-    #close-btn:hover {
-      background: rgba(212,163,89,0.28);
-      box-shadow: 0 0 8px rgba(212,163,89,0.3);
-    }
-
-    /* ── Scroll area ── */
-    #scroll-area {
-      overflow-y: auto;
-      flex: 1;
-      min-height: 0;
-      padding: 18px 20px 20px;
-      -webkit-overflow-scrolling: touch;
-    }
-
-    #scroll-area::-webkit-scrollbar {
-      width: 8px;
-    }
-    #scroll-area::-webkit-scrollbar-track {
-      background: rgba(20, 16, 10, 0.4);
-      border-radius: 4px;
-    }
-    #scroll-area::-webkit-scrollbar-thumb {
-      background: rgba(212, 163, 89, 0.35);
-      border-radius: 4px;
-    }
-    #scroll-area::-webkit-scrollbar-thumb:hover {
-      background: rgba(212, 163, 89, 0.65);
-    }
-
-    /* ── Window Resizers ── */
-    #resize-grip {
-      position: absolute;
-      right: 4px;
-      bottom: 4px;
-      width: 20px;
-      height: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: nwse-resize;
-      opacity: 0.55;
-      transition: opacity 0.15s;
-      z-index: 999;
-      -webkit-app-region: no-drag;
-      pointer-events: auto;
-    }
-    #resize-grip:hover {
-      opacity: 1;
-    }
-    #resize-edge-r {
-      position: absolute;
-      top: 16px;
-      right: 0;
-      bottom: 16px;
-      width: 6px;
-      cursor: ew-resize;
-      z-index: 998;
-      -webkit-app-region: no-drag;
-    }
-    #resize-edge-b {
-      position: absolute;
-      left: 16px;
-      right: 16px;
-      bottom: 0;
-      height: 6px;
-      cursor: ns-resize;
-      z-index: 998;
-      -webkit-app-region: no-drag;
-    }
-
-    /* ── Section ── */
-    .section {
-      margin-bottom: 20px;
-    }
-    .section-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 2.2px;
-      text-transform: uppercase;
-      color: rgba(212,163,89,0.55);
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid rgba(212,163,89,0.12);
-    }
-
-    /* ── Row ── */
-    .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-    .row:last-child { margin-bottom: 0; }
-
-    .row-label { flex: 1; min-width: 0; }
-    .row-label strong { font-weight: 700; font-size: 14px; color: #e2d5c0; display: block; }
-    .row-label span { font-size: 12px; color: rgba(200,185,160,0.55); display: block; margin-top: 2px; }
-
-    /* ── Select ── */
-    select {
-      background: rgba(20,16,10,0.9);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      padding: 6px 10px;
-      border-radius: 8px;
-      outline: none;
-      font-size: 13px;
-      font-family: inherit;
-      font-weight: 700;
-      flex-shrink: 0;
-      appearance: none;
-      -webkit-appearance: none;
-      cursor: pointer;
-      min-width: 105px;
-      text-align: center;
-    }
-    select:focus { border-color: rgba(212,163,89,0.7); }
-    select option { background: #1a1508; color: #d4a359; }
-
-    /* ── Toggle ── */
-    .toggle-wrap {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-    .toggle {
-      position: relative;
-      width: 48px; height: 26px;
-    }
-    .toggle input { opacity: 0; width: 0; height: 0; }
-    .toggle-track {
-      position: absolute;
-      inset: 0;
-      background: rgba(30,24,14,0.9);
-      border: 1px solid rgba(212,163,89,0.3);
-      border-radius: 13px;
-      cursor: pointer;
-      transition: background 0.2s, border-color 0.2s;
-    }
-    .toggle-thumb {
-      position: absolute;
-      top: 3px; left: 3px;
-      width: 18px; height: 18px;
-      background: rgba(212,163,89,0.45);
-      border-radius: 50%%;
-      transition: transform 0.2s, background 0.2s;
-      pointer-events: none;
-    }
-    .toggle input:checked ~ .toggle-track {
-      background: rgba(212,163,89,0.18);
-      border-color: rgba(212,163,89,0.7);
-    }
-    .toggle input:checked ~ .toggle-thumb {
-      transform: translateX(22px);
-      background: #d4a359;
-    }
-
-    /* ── Slider ── */
-    .slider-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-      width: 190px;
-    }
-    input[type=range] {
-      -webkit-appearance: none;
-      appearance: none;
-      flex: 1;
-      height: 5px;
-      background: rgba(212,163,89,0.18);
-      border-radius: 3px;
-      outline: none;
-      cursor: pointer;
-    }
-    input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 16px; height: 16px;
-      border-radius: 50%%;
-      background: #d4a359;
-      border: 1px solid rgba(0,0,0,0.4);
-      box-shadow: 0 0 6px rgba(212,163,89,0.5);
-      cursor: pointer;
-    }
-    .slider-val {
-      font-size: 13px;
-      font-weight: 700;
-      color: #d4a359;
-      min-width: 38px;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    /* ── Number input ── */
-    input[type=number] {
-      background: rgba(20,16,10,0.9);
-      border: 1px solid rgba(212,163,89,0.35);
-      color: #d4a359;
-      padding: 6px 10px;
-      border-radius: 8px;
-      outline: none;
-      font-size: 13px;
-      font-family: inherit;
-      font-weight: 700;
-      width: 84px;
-      text-align: center;
-    }
-    input[type=number]:focus { border-color: rgba(212,163,89,0.7); }
-
-    /* ── Divider ── */
-    .divider { height: 1px; background: rgba(212,163,89,0.1); margin: 6px 0 20px; }
-  </style>
-</head>
-<body>
-<div id="panel">
-  <div id="titlebar">
-    <div id="titlebar-label">⚙ Settings</div>
-    <button id="close-btn" onclick="send('close')">✕</button>
-  </div>
-
-  <div id="scroll-area">
-
-    <!-- Scroll / Trackpad -->
-    <div class="section">
-      <div class="section-title">Trackpad / Scroll</div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Base Sensitivity</strong>
-          <span>Baseline 1:1 speed multiplier for standard finger movements (0.02 - 2.00)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="sensitivitySlider" min="0.02" max="2.00" step="0.01"
-            value="%s"
-            oninput="onSensitivity(this.value)">
-          <div class="slider-val" id="sensitivityVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Speed / Acceleration</strong>
-          <span>Active velocity multiplier while your fingers move on the glass (0.10 - 3.00)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="accelerationSlider" min="0.10" max="3.00" step="0.10"
-            value="%s"
-            oninput="onAcceleration(this.value)">
-          <div class="slider-val" id="accelerationVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Inertia Initial Kick</strong>
-          <span>Initial impulse strength when fingers break contact (0.00 = hard stop)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="initSlider" min="0.00" max="2.00" step="0.01"
-            value="%s"
-            oninput="onInit(this.value)">
-          <div class="slider-val" id="initVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Friction / Decay Rate</strong>
-          <span>Deceleration rate after lift-off (0.10 = instant stop, 0.95 = long glide)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="decaySlider" min="0.10" max="0.99" step="0.01"
-            value="%s"
-            oninput="onDecay(this.value)">
-          <div class="slider-val" id="decayVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Max Inertia Duration</strong>
-          <span>Hard cap on momentum duration (50ms = sharp stop, 500ms = long coast)</span>
-        </div>
-        <input type="number" id="maxInertiaMs" value="%d" min="50" max="600" step="10"
-          onchange="send('setMaxInertia', parseInt(this.value))">
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Low Velocity Cutoff</strong>
-          <span>Cuts off the slow unpredictable tail at the end of momentum</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="inertiaCutoffSlider" min="0.1" max="2.0" step="0.1"
-            value="%s"
-            oninput="onCutoff(this.value)">
-          <div class="slider-val" id="inertiaCutoffVal">%s</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Velocity Curve Exponent</strong>
-          <span>Gesture curve shape (1.0 = linear, 2.0 = exponential ramp-up/down)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" id="curveSlider" min="0.5" max="3.0" step="0.1"
-            value="%s"
-            oninput="onCurve(this.value)">
-          <div class="slider-val" id="curveVal">%s</div>
-        </div>
-      </div>
-      <div style="margin-top: 15px;">
-        <canvas id="physicsCanvas" width="460" height="140" style="background:rgba(20,16,10,0.6); border:1px solid rgba(212,163,89,0.3); border-radius:8px; cursor:crosshair;"></canvas>
-        <div style="font-size: 0.72rem; color: rgba(212,163,89,0.7); margin-top: 6px; display: flex; justify-content: space-between;"><span>── Solid: Response Curve</span><span>- - Dashed: Coasting Tail (with Hard Cutoff)</span><span>Scroll box to test</span></div>
-      </div>
-    </div>
-
-    <!-- Tempo & Sync -->
-    <div class="section">
-      <div class="section-title">Tempo &amp; Sync</div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>BPM Step Size</strong>
-          <span>Change per increment / decrement key</span>
-        </div>
-        <select id="bpmStepSize" onchange="send('setBpmStep', parseInt(this.value))">
-          <option value="1" %s>1 BPM</option>
-          <option value="5" %s>5 BPM</option>
-          <option value="10" %s>10 BPM</option>
-          <option value="25" %s>25 BPM</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Input Quantization</strong>
-          <span>Real-time snapping for keys &amp; pads</span>
-        </div>
-        <select id="inputQuantize" onchange="send('setInputQuantize', this.value)">
-          <option value="Off" %s>OFF (Instant)</option>
-          <option value="1/1" %s>1/1 (Whole Note)</option>
-          <option value="1/2" %s>1/2 (Half Note)</option>
-          <option value="1/4" %s>1/4 (Quarter Note)</option>
-          <option value="1/8" %s>1/8 (Eighth Note)</option>
-          <option value="1/16" %s>1/16 (Sixteenth Note)</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Sync to Logic Pro</strong>
-          <span>Auto-match BPM with active session</span>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="logicSync" %s onchange="send('setLogicSync', this.checked)">
-          <div class="toggle-track"></div>
-          <div class="toggle-thumb"></div>
-        </label>
-      </div>
-    </div>
-
-    <!-- UI Styling -->
-    <div class="section">
-      <div class="section-title">UI Styling</div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Action Key Hue</strong>
-          <span>Base color tone (0-360)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" min="0" max="360" step="1" value="%d"
-            oninput="document.getElementById('hueVal').textContent=this.value"
-            onchange="send('setUiActionKeyHue', parseInt(this.value))">
-          <div class="slider-val" id="hueVal">%d</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Action Key Saturation</strong>
-          <span>Color intensity (0-100%%)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" min="0" max="100" step="1" value="%d"
-            oninput="document.getElementById('satVal').textContent=this.value+'%%'"
-            onchange="send('setUiActionKeySat', parseInt(this.value))">
-          <div class="slider-val" id="satVal">%d%%</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Action Key Lightness</strong>
-          <span>Brightness (0-100%%)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" min="0" max="100" step="1" value="%d"
-            oninput="document.getElementById('lightVal').textContent=this.value+'%%'"
-            onchange="send('setUiActionKeyLight', parseInt(this.value))">
-          <div class="slider-val" id="lightVal">%d%%</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Action Key Opacity</strong>
-          <span>Background transparency (0.0 - 1.0)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
-            oninput="document.getElementById('opVal').textContent=this.value"
-            onchange="send('setUiActionKeyOpacity', parseFloat(this.value))">
-          <div class="slider-val" id="opVal">%.2f</div>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row-label">
-          <strong>Border Opacity</strong>
-          <span>Border transparency (0.0 - 1.0)</span>
-        </div>
-        <div class="slider-row">
-          <input type="range" min="0.0" max="1.0" step="0.01" value="%.2f"
-            oninput="document.getElementById('bOpVal').textContent=this.value"
-            onchange="send('setUiActionKeyBorderOpacity', parseFloat(this.value))">
-          <div class="slider-val" id="bOpVal">%.2f</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Arpeggiator -->
-    <div class="section">
-      <div class="section-title">Arpeggiator</div>
-      <div class="row">
-        <div class="row-label">
-          <strong>Default Gate Length</strong>
-          <span>Note duration as %% of step interval</span>
-        </div>
-        <input type="number" id="gatePercent" value="%d" min="10" max="150" step="5"
-          onchange="send('setGate', parseInt(this.value))">
-      </div>
-    </div>
-
-    <!-- Display -->
-    <div class="section">
-      <div class="section-title">Display</div>
-      <div class="row">
-        <div class="row-label">
-          <strong>HUD Zoom Level</strong>
-          <span>Scale factor for the status dashboard</span>
-        </div>
-        <select id="zoomLevel" onchange="send('setZoom', parseFloat(this.value))">
-          <option value="0.8" %s>80%%</option>
-          <option value="1.0" %s>100%% (Default)</option>
-          <option value="1.2" %s>120%%</option>
-          <option value="1.4" %s>140%%</option>
-        </select>
-      </div>
-    </div>
-
-  </div><!-- /scroll-area -->
-  <div id="resize-edge-r"></div>
-  <div id="resize-edge-b"></div>
-  <div id="resize-grip" title="Drag to resize">
-    <svg width="12" height="12" viewBox="0 0 12 12">
-      <line x1="10" y1="2" x2="2" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="10" y1="6" x2="6" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="10" y1="10" x2="10" y2="10" stroke="rgba(212,163,89,0.6)" stroke-width="1.5" stroke-linecap="round"/>
-    </svg>
-  </div>
-</div><!-- /panel -->
-
-<script>
-  function send(type, value) {
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.settingsUserContent) {
-      window.webkit.messageHandlers.settingsUserContent.postMessage({ type: type, value: value });
-    }
-  }
-
-  // Hover detection for native scroll passthrough
-  document.addEventListener('mouseenter', () => send('hoverSettings', true));
-  document.addEventListener('mouseleave', () => send('hoverSettings', false));
-
-  // Interactive Window Resizing
-  function setupResizers() {
-    const handleDrag = (startEv, mode) => {
-      startEv.preventDefault();
-      startEv.stopPropagation();
-      const startX = startEv.screenX;
-      const startY = startEv.screenY;
-      const startW = window.innerWidth;
-      const startH = window.innerHeight;
-
-      document.body.style.cursor = mode === 'corner' ? 'nwse-resize' : (mode === 'x' ? 'ew-resize' : 'ns-resize');
-
-      const onMove = (ev) => {
-        let newW = startW;
-        let newH = startH;
-        if (mode === 'corner' || mode === 'x') {
-          newW = Math.max(460, Math.min(1200, startW + (ev.screenX - startX)));
-        }
-        if (mode === 'corner' || mode === 'y') {
-          newH = Math.max(400, Math.min(1100, startH + (ev.screenY - startY)));
-        }
-        send('resizeWindow', { w: Math.round(newW), h: Math.round(newH) });
-      };
-
-      const onUp = () => {
-        document.body.style.cursor = '';
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-        send('saveWindowSize', { w: window.innerWidth, h: window.innerHeight });
-      };
-
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-    };
-
-    const grip = document.getElementById('resize-grip');
-    if (grip) grip.addEventListener('mousedown', (e) => handleDrag(e, 'corner'));
-    const edgeR = document.getElementById('resize-edge-r');
-    if (edgeR) edgeR.addEventListener('mousedown', (e) => handleDrag(e, 'x'));
-    const edgeB = document.getElementById('resize-edge-b');
-    if (edgeB) edgeB.addEventListener('mousedown', (e) => handleDrag(e, 'y'));
-  }
-  setupResizers();
-
-  window.addEventListener('resize', () => {
-    const canvasWrap = canvas.parentElement;
-    if (canvasWrap) {
-      canvas.width = canvasWrap.clientWidth;
-      drawPhysicsCanvas();
-    }
-  });
-  function onSensitivity(v) {
-    document.getElementById('sensitivityVal').textContent = parseFloat(v).toFixed(2);
-    send('setSensitivity', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-  function onAcceleration(v) {
-    document.getElementById('accelerationVal').textContent = parseFloat(v).toFixed(2);
-    send('setAcceleration', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-  function onDecay(v) {
-    document.getElementById('decayVal').textContent = parseFloat(v).toFixed(2);
-    send('setDecay', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-  function onInit(v) {
-    document.getElementById('initVal').textContent = parseFloat(v).toFixed(2);
-    send('setInit', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-  function onCutoff(v) {
-    document.getElementById('inertiaCutoffVal').textContent = parseFloat(v).toFixed(1);
-    send('setCutoff', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-  function onCurve(v) {
-    document.getElementById('curveVal').textContent = parseFloat(v).toFixed(1);
-    send('setCurve', parseFloat(v));
-    drawPhysicsCanvas();
-  }
-
-  const canvas = document.getElementById('physicsCanvas');
-  const ctx = canvas.getContext('2d');
-  let lastX = 0, lastY = 0;
-
-  function drawPhysicsCanvas() {
-    const w = canvas.width, h = canvas.height;
-    const sensitivity = parseFloat(document.getElementById('sensitivitySlider').value);
-    const acceleration = parseFloat(document.getElementById('accelerationSlider').value);
-    const initGain = parseFloat(document.getElementById('initSlider').value);
-    const decay = parseFloat(document.getElementById('decaySlider').value);
-    const curveExp = parseFloat(document.getElementById('curveSlider').value);
-
-    ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(212,163,89,0.3)';
-    ctx.lineWidth = 1;
-    for(let i=0; i<w; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
-    for(let i=0; i<h; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(w,i); ctx.stroke(); }
-
-    ctx.beginPath();
-    ctx.strokeStyle = '#d4a359';
-    ctx.lineWidth = 2;
-    for(let x=0; x<w; x++) {
-      let vel = (x / w);
-      let output = Math.pow(vel, curveExp) * sensitivity * acceleration;
-      let y = h - (output * h * 2);
-      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.strokeStyle = 'rgba(212,163,89,0.6)';
-    ctx.setLineDash([5, 5]);
-    const maxInertia = parseFloat(document.getElementById('maxInertiaMs').value);
-    for(let x=0; x<w; x++) {
-      let time = x / w;
-      if (time * 1000 > maxInertia) {
-        ctx.lineTo(x, h * 0.8);
-        continue;
-      }
-      let y = (h * 0.8) - (initGain * Math.pow(decay, time * 10) * h * 0.5);
-      if(x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    ctx.fillStyle = '#d4a359';
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI*2);
-    ctx.fill();
-    setTimeout(drawPhysicsCanvas, 200);
-  });
-
-  drawPhysicsCanvas();
-
-  function syncState(s) {
-    if (!s) return;
-    if (s.bpmStepSize !== undefined) {
-      var el = document.getElementById('bpmStepSize');
-      if (el) el.value = String(s.bpmStepSize);
-    }
-    if (s.inputQuantizeMode !== undefined) {
-      var el = document.getElementById('inputQuantize');
-      if (el) el.value = String(s.inputQuantizeMode);
-    }
-    if (s.logicSyncEnabled !== undefined) {
-      var el = document.getElementById('logicSync');
-      if (el) el.checked = !!s.logicSyncEnabled;
-    }
-    if (s.arpGatePercent !== undefined) {
-      var el = document.getElementById('gatePercent');
-      if (el) el.value = s.arpGatePercent;
-    }
-    if (s.zoomLevel !== undefined) {
-      var el = document.getElementById('zoomLevel');
-      if (el) el.value = String(s.zoomLevel);
-    }
-    if (s.scrollSensitivity !== undefined) {
-      var el = document.getElementById('sensitivitySlider');
-      if (el) el.value = s.scrollSensitivity;
-      var valEl = document.getElementById('sensitivityVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollSensitivity).toFixed(2);
-    }
-    if (s.scrollAcceleration !== undefined) {
-      var el = document.getElementById('accelerationSlider');
-      if (el) el.value = s.scrollAcceleration;
-      var valEl = document.getElementById('accelerationVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollAcceleration).toFixed(2);
-    }
-    if (s.scrollInertiaInitial !== undefined) {
-      var el = document.getElementById('initSlider');
-      if (el) el.value = s.scrollInertiaInitial;
-      var valEl = document.getElementById('initVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaInitial).toFixed(2);
-    }
-    if (s.scrollInertiaDecay !== undefined) {
-      var el = document.getElementById('decaySlider');
-      if (el) el.value = s.scrollInertiaDecay;
-      var valEl = document.getElementById('decayVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaDecay).toFixed(2);
-    }
-    if (s.scrollMaxInertiaMs !== undefined) {
-      var el = document.getElementById('maxInertiaMs');
-      if (el) el.value = s.scrollMaxInertiaMs;
-    }
-    if (s.scrollInertiaCutoff !== undefined) {
-      var el = document.getElementById('inertiaCutoffSlider');
-      if (el) el.value = s.scrollInertiaCutoff;
-      var valEl = document.getElementById('inertiaCutoffVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollInertiaCutoff).toFixed(1);
-    }
-    if (s.scrollCurveExponent !== undefined) {
-      var el = document.getElementById('curveSlider');
-      if (el) el.value = s.scrollCurveExponent;
-      var valEl = document.getElementById('curveVal');
-      if (valEl) valEl.textContent = parseFloat(s.scrollCurveExponent).toFixed(1);
-    }
-    drawPhysicsCanvas();
-  }
-</script>
-</body>
-</html>
-]],
-    -- sensitivity slider
-    sensFmt, sensFmt,
-    -- acceleration slider
-    accFmt, accFmt,
-    initFmt, initFmt,
-    decayFmt, decayFmt,
-    math.floor(state.scrollMaxInertiaMs or 250),
-    string.format("%.1f", state.scrollInertiaCutoff or 0.5), string.format("%.1f", state.scrollInertiaCutoff or 0.5),
-    curveFmt, curveFmt,
-    -- bpm step selects
-    bpmSel["1"], bpmSel["5"], bpmSel["10"], bpmSel["25"],
-    -- input quantize selects
-    quantSel["Off"], quantSel["1/1"], quantSel["1/2"], quantSel["1/4"], quantSel["1/8"], quantSel["1/16"],
-    -- logic sync checked
-    logicSync and "checked" or "",
-    -- ui
-    state.uiActionKeyHue or 30, state.uiActionKeyHue or 30,
-    state.uiActionKeySat or 20, state.uiActionKeySat or 20,
-    state.uiActionKeyLight or 75, state.uiActionKeyLight or 75,
-    state.uiActionKeyOpacity or 0.08, state.uiActionKeyOpacity or 0.08,
-    state.uiActionKeyBorderOpacity or 0.6, state.uiActionKeyBorderOpacity or 0.6,
-    -- gate
-    math.floor(gate),
-    -- zoom selects
-    zoomSel["0.8"], zoomSel["1.0"], zoomSel["1.2"], zoomSel["1.4"]
-  )
-end
-
-_G.activeWatchers = _G.activeWatchers or {}
-
-local function createSettingsWebview()
-  if _G.activeWatchers.settingsWebview then
-    return _G.activeWatchers.settingsWebview
-  end
-
-  local uc = hsUsercontent.new("settingsUserContent")
-
-  uc:setCallback(function(message)
-    local body = message.body
-    if not body or not body.type then return end
-    local act = body.type
-    local val = body.value
-
-    if act == "setBpmStep" then
-      local val = tonumber(body.value) or 10
-      state.bpmStepSize = val
-      hs.settings.set("qwertyMidi_bpmStepSize", val)
-    elseif act == "setInputQuantize" then
-      local val = tostring(body.value or "Off")
-      state.inputQuantizeMode = val
-      hs.settings.set("qwertyMidi_inputQuantizeMode", val)
-      pcall(function() __require("hud").updateWebviewHud() end)
-    elseif act == "setGatePercent" then
-      state.arpGatePercent = val
-      hs.settings.set("qwertyMidi_arpGatePercent", val)
-      if state.arpEnabled then
-        __require("arpeggiator").applyGatePercentChange()
-      end
-    elseif act == "setUiActionKeyHue" then
-      state.uiActionKeyHue = val
-      hs.settings.set("qwertyMidi_uiActionKeyHue", val)
-      __require("hud").updateWebviewHud()
-    elseif act == "setUiActionKeySat" then
-      state.uiActionKeySat = val
-      hs.settings.set("qwertyMidi_uiActionKeySat", val)
-      __require("hud").updateWebviewHud()
-    elseif act == "setUiActionKeyLight" then
-      state.uiActionKeyLight = val
-      hs.settings.set("qwertyMidi_uiActionKeyLight", val)
-      __require("hud").updateWebviewHud()
-    elseif act == "setUiActionKeyOpacity" then
-      state.uiActionKeyOpacity = val
-      hs.settings.set("qwertyMidi_uiActionKeyOpacity", val)
-      __require("hud").updateWebviewHud()
-    elseif act == "setUiActionKeyBorderOpacity" then
-      state.uiActionKeyBorderOpacity = val
-      hs.settings.set("qwertyMidi_uiActionKeyBorderOpacity", val)
-      __require("hud").updateWebviewHud()
-    elseif act == "setLogicSync" then
-      local val = (body.value == true or body.value == "true" or body.value == 1)
-      state.logicSyncEnabled = val
-      hs.settings.set("qwertyMidi_logicSyncEnabled", val)
-    elseif act == "setGate" then
-      local val = tonumber(body.value) or 80.0
-      state.arpGatePercent = math.max(5.0, math.min(150.0, val))
-    elseif act == "setZoom" then
-      local val = tonumber(body.value) or 1.0
-      state.zoomLevel = val
-      hs.settings.set("qwertyMidi_zoomLevel", val)
-    elseif body.type == "setSensitivity" then
-      local val = tonumber(body.value) or 0.15
-      state.scrollSensitivity = val
-      hs.settings.set("qwertyMidi_scrollSensitivity", val)
-    elseif body.type == "setAcceleration" then
-      local val = tonumber(body.value) or 1.0
-      state.scrollAcceleration = val
-      hs.settings.set("qwertyMidi_scrollAcceleration", val)
-    elseif body.type == "setInit" then
-      local val = tonumber(body.value) or 1.0
-      state.scrollInertiaInitial = val
-      hs.settings.set("qwertyMidi_scrollInertiaInitial", val)
-    elseif body.type == "setDecay" then
-      local val = tonumber(body.value) or 0.85
-      state.scrollInertiaDecay = math.max(0.1, math.min(0.99, val))
-      hs.settings.set("qwertyMidi_scrollInertiaDecay", val)
-    elseif body.type == "setCurve" then
-      local val = tonumber(body.value) or 1.0
-      state.scrollCurveExponent = math.max(0.5, math.min(3.0, val))
-      hs.settings.set("qwertyMidi_scrollCurveExponent", val)
-    elseif body.type == "setMaxInertia" then
-      local val = tonumber(body.value) or 250
-      state.scrollMaxInertiaMs = math.max(50, math.min(600, val))
-      hs.settings.set("qwertyMidi_scrollMaxInertiaMs", val)
-    elseif body.type == "setCutoff" then
-      local val = tonumber(body.value) or 0.5
-      state.scrollInertiaCutoff = math.max(0.1, math.min(2.0, val))
-      hs.settings.set("qwertyMidi_scrollInertiaCutoff", val)
-    elseif body.type == "hoverSettings" then
-      _G.activeWatchers.isHoveringSettings = (val == true)
-      return
-    elseif body.type == "resizeWindow" then
-      if _G.activeWatchers.settingsWebview and type(val) == "table" then
-        local curFrame = _G.activeWatchers.settingsWebview:frame()
-        local newW = math.max(460, math.min(1200, tonumber(val.w) or curFrame.w))
-        local newH = math.max(400, math.min(1100, tonumber(val.h) or curFrame.h))
-        _G.activeWatchers.settingsWebview:frame({ x = curFrame.x, y = curFrame.y, w = newW, h = newH })
-      end
-      return
-    elseif body.type == "saveWindowSize" then
-      if type(val) == "table" then
-        hs.settings.set("qwertyMidi_settingsW", tonumber(val.w))
-        hs.settings.set("qwertyMidi_settingsH", tonumber(val.h))
-      end
-      return
-    elseif body.type == "close" then
-      if _G.activeWatchers.settingsWebview then
-        _G.activeWatchers.settingsWebview:hide()
-      end
-      _G.activeWatchers.isHoveringSettings = false
-      return
-    end
-
-    config.saveSettings()
-    local hud = __require("hud")
-    hud.updateWebviewHud()
-  end)
-
-  local savedW = hs.settings.get("qwertyMidi_settingsW") or 528
-  local savedH = hs.settings.get("qwertyMidi_settingsH") or 640
-  local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
-  local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
-
-  local screen = hs.screen.mainScreen():frame()
-  local x = math.floor(screen.x + (screen.w - w) / 2)
-  local y = math.floor(screen.y + (screen.h - h) / 2)
-
-  local wv = hsWebview.new({ x = x, y = y, w = w, h = h }, { developerExtrasEnabled = true }, uc)
-  wv:windowTitle("QWERTY MIDI Settings")
-  -- Borderless transparent floating panel with rounded corners and resize capability
-  wv:windowStyle({ "borderless", "resizable", "nonactivating" })
-  wv:transparent(true)
-  wv:level(hs.drawing.windowLevels.floating + 1)
-  wv:allowTextEntry(true)
-  wv:html(generateSettingsHTML())
-
-  _G.activeWatchers.settingsWebview = wv
-  return wv
-end
-
-local function syncStateToWebview()
-  if not _G.activeWatchers.settingsWebview then return end
-  local s = {
-    bpmStepSize = state.bpmStepSize or 10,
-    inputQuantizeMode = state.inputQuantizeMode or "Off",
-    logicSyncEnabled = state.logicSyncEnabled,
-    arpGatePercent = state.arpGatePercent or 80,
-    zoomLevel = state.zoomLevel or 1.0,
-    scrollSensitivity = state.scrollSensitivity or 0.15,
-    scrollAcceleration = state.scrollAcceleration or 1.0,
-    scrollInertiaInitial = state.scrollInertiaInitial or 1.0,
-    scrollInertiaDecay = state.scrollInertiaDecay or 0.85,
-    scrollCurveExponent = state.scrollCurveExponent or 1.0,
-    scrollMaxInertiaMs = state.scrollMaxInertiaMs or 250,
-    scrollInertiaCutoff = state.scrollInertiaCutoff or 0.5
-  }
-  local jsonStr = hs.json.encode(s)
-  _G.activeWatchers.settingsWebview:evaluateJavaScript("syncState(" .. jsonStr .. ");")
-end
-
-local function toggleSettingsWindow()
-  local wv = createSettingsWebview()
-
-  if wv:isVisible() then
-    wv:hide()
-    _G.activeWatchers.isHoveringSettings = false
-  else
-    local curFrame = wv:frame()
-    local screen = hs.screen.mainScreen():frame()
-    local savedW = hs.settings.get("qwertyMidi_settingsW") or curFrame.w or 528
-    local savedH = hs.settings.get("qwertyMidi_settingsH") or curFrame.h or 640
-    local w = math.max(460, math.min(1200, tonumber(savedW) or 528))
-    local h = math.max(400, math.min(1100, tonumber(savedH) or 640))
-    local x = curFrame.x
-    local y = curFrame.y
-    if x < screen.x or x > screen.x + screen.w - 50 or y < screen.y or y > screen.y + screen.h - 50 then
-      x = math.floor(screen.x + (screen.w - w) / 2)
-      y = math.floor(screen.y + (screen.h - h) / 2)
-    end
-    wv:frame({ x = x, y = y, w = w, h = h })
-
-    syncStateToWebview()
-    wv:show()
-  end
-end
-
--- Cleanup old instance on reload and pre-warm new settings webview
-if _G.activeWatchers.settingsWebview then
-  _G.activeWatchers.settingsWebview:delete()
-  _G.activeWatchers.settingsWebview = nil
-end
-createSettingsWebview()
-
-return {
-  toggleSettingsWindow = toggleSettingsWindow
-}
-
-end
-
-__modules["config"] = function()
-local function getSetting(key, default)
-  local val = hs.settings.get("qwertyMidi_" .. key)
-  if val == nil then return default end
-  if type(default) == "number" then
-    local num = tonumber(val)
-    return num ~= nil and num or default
-  elseif type(default) == "boolean" then
-    if type(val) == "boolean" then return val end
-    if type(val) == "number" then return val ~= 0 end
-    if type(val) == "string" then return val == "true" or val == "1" end
-  end
-  return val
-end
-
-local state = {
-  midiActive = false,
-  currentMode = "Home",
-  modeSelectHeld = false,
-  modeWasSelectedDuringHold = false,
-  currentRoot = getSetting("currentRoot", 0),            -- 0 = C (0..11)
-  currentScaleIdx = getSetting("currentScaleIdx", 1),    -- 1 = Major / Ionian
-  octaveShift = getSetting("octaveShift", 0),            -- Global Octave offset in semitones (-36 to +36)
-  topRowOctaveOffset = getSetting("topRowOctaveOffset", 12), -- Independent Top Row Octave Offset
-  bottomRowOctaveOffset = getSetting("bottomRowOctaveOffset", 0), -- Independent Bottom Row Octave Offset
-  transposeShift = getSetting("transposeShift", 0),     -- Transpose offset in scale degrees (-12 to +12)
-  sustainActive = false,      -- Sustain toggle state (CC64)
-  sustainKeyDownTime = 0,     -- Timestamp when sustain key was pressed down
-  sustainWasActiveOnPress = false,
-  arpLatchActive = getSetting("arpLatchActive", false),  -- Arpeggiator Latch mode
-  cmdHeld = false,
-  shiftHeld = false,          -- Shift key active state
-  altHeld = false,            -- Option (Alt) key active state
-  ctrlHeld = false,           -- Control key active state
-  zoomLevel = getSetting("zoomLevel", 1.0),
-  BASE_HUD_SCALE = 1.4,
-
-  -- UI Styling (Clean Dark Studio Grayscale)
-  uiActionKeyHue = getSetting("uiActionKeyHue", 0),
-  uiActionKeySat = getSetting("uiActionKeySat", 0),
-  uiActionKeyLight = getSetting("uiActionKeyLight", 70),
-  uiActionKeyOpacity = getSetting("uiActionKeyOpacity", 0.08),
-  uiActionKeyBorderOpacity = getSetting("uiActionKeyBorderOpacity", 0.6),
-
-  -- Chord Trigger State
-  chordIdx = getSetting("chordIdx", 1),
-  quoteHeld = false,
-  CHORDS = {
-    { name = "Triad", offsets = { 0, 2, 4 } },
-    { name = "7th", offsets = { 0, 2, 4, 6 } },
-    { name = "9th", offsets = { 0, 2, 4, 6, 8 } },
-    { name = "Power (1-5)", offsets = { 0, 4 } },
-    { name = "Octaves", offsets = { 0, 7 } }
-  },
-
-  -- Arpeggiator State
-  arpEnabled = getSetting("arpEnabled", false),
-  arpDirectionIdx = getSetting("arpDirectionIdx", 1),    -- 1: UP, 2: DOWN, 3: UP-DOWN, 4: DOWN-UP, 5: CONVERGE, 6: DIVERGE, 7: RANDOM
-  ARP_DIRECTIONS = { "UP", "DOWN", "UP-DOWN", "DOWN-UP", "CONVERGE", "DIVERGE", "RANDOM" },
-  arpRateIdx = getSetting("arpRateIdx", 5),
-  ARP_RATES = {
-    -- Straight rates (slow → fast)
-    { label = "4",     factor = 16.0 },
-    { label = "2",     factor = 8.0 },
-    { label = "1",     factor = 4.0 },
-    { label = "1/2",   factor = 2.0 },
-    { label = "1/4",   factor = 1.0 },
-    { label = "1/8",   factor = 0.5 },
-    { label = "1/16",  factor = 0.25 },
-    { label = "1/32",  factor = 0.125 },
-    { label = "1/64",  factor = 0.0625 },
-    -- Triplet rates (slow → fast)
-    { label = "4T",    factor = 16.0 / 1.5 },
-    { label = "2T",    factor = 8.0  / 1.5 },
-    { label = "1T",    factor = 4.0  / 1.5 },
-    { label = "1/2T",  factor = 2.0  / 1.5 },
-    { label = "1/4T",  factor = 1.0  / 1.5 },
-    { label = "1/8T",  factor = 0.5  / 1.5 },
-    { label = "1/16T", factor = 0.25 / 1.5 },
-    { label = "1/32T", factor = 0.125 / 1.5 },
-    { label = "1/64T", factor = 0.0625 / 1.5 }
-  },
-  arpGatePercent = getSetting("arpGatePercent", 80.0),
-  arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
-  inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
-  arpBpm = getSetting("arpBpm", 120.0),
-  arpTimer = nil,
-  arpGateTimer = nil,
-  arpHeldNotes = {},          -- [code] = pitch
-  arpKeysCurrentlyHeld = {},  -- [code] = true
-  arpCurrentPitch = nil,
-  arpStepIndex = 1,
-  arpStepDirection = 1,
-  lastArpMode = 1,
-  arpTopEnabled = getSetting("arpTopEnabled", true),
-  arpBottomEnabled = getSetting("arpBottomEnabled", true),
-  arpLinked = getSetting("arpLinked", true),
-
-  -- BPM Input Mode & Sync State
-  bpmInputMode = false,
-  bpmInputBuffer = "",
-  bpmBeforeEdit = 120.0,
-  bpmStepSize = getSetting("bpmStepSize", 10),
-  logicSyncEnabled = (hs.settings.get("qwertyMidi_logicSyncEnabled") == nil) and true or hs.settings.get("qwertyMidi_logicSyncEnabled"),
-  logicSyncTimer = nil,
-
-  -- Scroll / Trackpad
-  scrollSensitivity     = getSetting("scrollSensitivity", 0.15),
-  scrollAcceleration    = getSetting("scrollAcceleration", 1.0),
-  scrollInertiaInitial  = getSetting("scrollInertiaInitial", 1.0),
-  scrollInertiaDecay    = getSetting("scrollInertiaDecay", 0.85),
-  scrollCurveExponent   = getSetting("scrollCurveExponent", 1.0),
-  scrollMaxInertiaMs    = getSetting("scrollMaxInertiaMs", 250),
-  scrollInertiaCutoff   = getSetting("scrollInertiaCutoff", 0.5),
-
-  DIGIT_KEYCODES = {
-    [50] = "`", [29] = "0", [18] = "1", [19] = "2", [20] = "3", [21] = "4",
-    [23] = "5", [22] = "6", [26] = "7", [28] = "8", [25] = "9"
-  },
-
-  topRowVolume = getSetting("track3Volume", getSetting("topRowVolume", 100)),
-  bottomRowVolume = getSetting("track1Volume", getSetting("bottomRowVolume", 100)),
-  topRowChannel = getSetting("topRowChannel", 0),       -- MIDI Channel 0 (Ch 1 in 1-based indexing)
-  bottomRowChannel = getSetting("bottomRowChannel", 1),    -- MIDI Channel 1 (Ch 2 in 1-based indexing)
-  arpChannel = getSetting("arpChannel", 2),            -- Dedicated Arp MIDI Channel 2 (Ch 3 in 1-based indexing)
-  splitArpTopBoost = 20,
-
-  tracks = {
-    [1] = {
-      id = 1, name = "Bass", channel = 0, color = "#00e5ff", rgb = "0, 229, 255",
-      volume = getSetting("track1Volume", 100),
-      octaveOffset = getSetting("track1OctaveOffset", 0),
-      attack = getSetting("track1Attack", 0),
-      decay = getSetting("track1Decay", 64),
-      muted = false, soloed = false, armed = true, locked = false,
-      sustainMode = getSetting("track1SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track1ChordIdx", 1),
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track1ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track1ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
-    },
-    [2] = {
-      id = 2, name = "Chords", channel = 1, color = "#ff9100", rgb = "255, 145, 0",
-      volume = getSetting("track2Volume", 100),
-      octaveOffset = getSetting("track2OctaveOffset", 0),
-      attack = getSetting("track2Attack", 0),
-      decay = getSetting("track2Decay", 64),
-      muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track2SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track2ChordIdx", 1),
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track2ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track2ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
-    },
-    [3] = {
-      id = 3, name = "Lead", channel = 2, color = "#00e676", rgb = "0, 230, 118",
-      volume = getSetting("track3Volume", 100),
-      octaveOffset = getSetting("track3OctaveOffset", 12),
-      attack = getSetting("track3Attack", 0),
-      decay = getSetting("track3Decay", 64),
-      muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track3SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track3ChordIdx", 1),
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track3ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track3ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
-    },
-    [4] = {
-      id = 4, name = "Arp", channel = 3, color = "#d500f9", rgb = "213, 0, 249",
-      volume = getSetting("track4Volume", 100),
-      octaveOffset = getSetting("track4OctaveOffset", 12),
-      attack = getSetting("track4Attack", 0),
-      decay = getSetting("track4Decay", 64),
-      muted = false, soloed = false, armed = false, locked = false,
-      sustainMode = getSetting("track4SustainMode", "smart"), sustainedPitches = {}, chordStartTime = 0, chordModeActive = false, chordIdx = getSetting("track4ChordIdx", 1),
-      arpEnabled = false, arpLatchActive = false, arpDirectionIdx = getSetting("track4ArpDirectionIdx", getSetting("arpDirectionIdx", 1)), arpRateIdx = getSetting("track4ArpRateIdx", getSetting("arpRateIdx", 5)), arpGatePercent = 80.0,
-      heldNotes = {}, targetHeldNotes = {}, keysCurrentlyHeld = {}, physicalKeysHeld = {}, stepIndex = 1, stepDirection = 1, pos = 0,
-      currentPitch = nil, beatPosition = 0, activeGateTimers = {}, latchClearedForNewChord = false, activeNotesCount = 0, arpIsPlaying = false
-    },
-  },
-  bottomRowTrack = getSetting("bottomRowTrack", (getSetting("activeTrack", 1) <= 2 and getSetting("activeTrack", 1) or 1)),
-  topRowTrack = getSetting("topRowTrack", (getSetting("activeTrack", 1) > 2 and getSetting("activeTrack", 1) or 3)),
-  activeTrack = getSetting("activeTrack", 1),
-
-  ccStates = {
-    [1] = 0,
-    [7] = 100,
-    [72] = 64
-  },
-
-  chordIdx = getSetting("chordIdx", 1),
-  quoteHeld = false,
-  CHORDS = { { name = "Triad", offsets = { 0, 2, 4 } }, { name = "7th", offsets = { 0, 2, 4, 6 } }, { name = "9th", offsets = { 0, 2, 4, 6, 8 } }, { name = "Power (1-5)", offsets = { 0, 4 } }, { name = "Octaves", offsets = { 0, 7 } } },
-  pressedKeys = {},
-  sustainedPitches = {},
-  spotlightInfo = nil,
-  stackedKeyLabelsInPerformanceMode = getSetting("stackedKeyLabelsInPerformanceMode", false),
-  scaleGuideEnabled = getSetting("scaleGuideEnabled", true)
-}
-
-local function saveSettings()
-  state.currentRoot = tonumber(state.currentRoot) or 0
-  state.currentScaleIdx = tonumber(state.currentScaleIdx) or 1
-  state.octaveShift = tonumber(state.octaveShift) or 0
-  state.topRowOctaveOffset = tonumber(state.topRowOctaveOffset) or 0
-  state.bottomRowOctaveOffset = tonumber(state.bottomRowOctaveOffset) or 0
-  state.transposeShift = tonumber(state.transposeShift) or 0
-  state.arpDirectionIdx = tonumber(state.arpDirectionIdx) or 1
-  state.arpRateIdx = tonumber(state.arpRateIdx) or 5
-  state.arpGatePercent = tonumber(state.arpGatePercent) or 80.0
-  state.arpBpm = tonumber(state.arpBpm) or 120.0
-  state.bpmStepSize = tonumber(state.bpmStepSize) or 10
-  state.scrollSensitivity = tonumber(state.scrollSensitivity) or 0.15
-  state.scrollAcceleration = tonumber(state.scrollAcceleration) or 1.0
-  state.scrollInertiaInitial = tonumber(state.scrollInertiaInitial) or 1.0
-  state.scrollInertiaDecay = tonumber(state.scrollInertiaDecay) or 0.85
-  state.scrollCurveExponent = tonumber(state.scrollCurveExponent) or 1.0
-  state.scrollMaxInertiaMs = tonumber(state.scrollMaxInertiaMs) or 250
-  state.scrollInertiaCutoff = tonumber(state.scrollInertiaCutoff) or 0.5
-  state.topRowVolume = tonumber(state.topRowVolume) or 100
-  state.bottomRowVolume = tonumber(state.bottomRowVolume) or 100
-  state.zoomLevel = tonumber(state.zoomLevel) or 1.0
-
-  if state.tracks then
-    for i = 1, 4 do
-      local trk = state.tracks[i]
-      if trk then
-        hs.settings.set("qwertyMidi_track" .. i .. "Volume", trk.volume or 100)
-        hs.settings.set("qwertyMidi_track" .. i .. "OctaveOffset", trk.octaveOffset or 0)
-        hs.settings.set("qwertyMidi_track" .. i .. "Attack", trk.attack or 0)
-        hs.settings.set("qwertyMidi_track" .. i .. "Decay", trk.decay or 64)
-        hs.settings.set("qwertyMidi_track" .. i .. "ArpDirectionIdx", trk.arpDirectionIdx or 1)
-        hs.settings.set("qwertyMidi_track" .. i .. "SustainMode", trk.sustainMode or "smart")
-        hs.settings.set("qwertyMidi_track" .. i .. "ChordIdx", trk.chordIdx or 1)
-      end
-    end
-    local botTrk = state.tracks[state.bottomRowTrack or 1]
-    if botTrk then
-      state.bottomRowOctaveOffset = botTrk.octaveOffset or 0
-      state.bottomRowVolume = botTrk.volume or 100
-    end
-    local topTrk = state.tracks[state.topRowTrack or 3]
-    if topTrk then
-      state.topRowOctaveOffset = topTrk.octaveOffset or 12
-      state.topRowVolume = topTrk.volume or 100
-    end
-  end
-
-  hs.settings.set("qwertyMidi_activeTrack", state.activeTrack or 1)
-  hs.settings.set("qwertyMidi_bottomRowTrack", state.bottomRowTrack or 1)
-  hs.settings.set("qwertyMidi_topRowTrack", state.topRowTrack or 3)
-  hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
-  hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
-  hs.settings.set("qwertyMidi_scaleGuideEnabled", state.scaleGuideEnabled == true)
-  hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
-  hs.settings.set("qwertyMidi_topRowOctaveOffset", state.topRowOctaveOffset)
-  hs.settings.set("qwertyMidi_bottomRowOctaveOffset", state.bottomRowOctaveOffset)
-  hs.settings.set("qwertyMidi_transposeShift", state.transposeShift)
-  hs.settings.set("qwertyMidi_arpEnabled", state.arpEnabled == true)
-  hs.settings.set("qwertyMidi_chordModeActive", state.chordModeActive == true)
-  hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
-  hs.settings.set("qwertyMidi_arpLatchActive", state.arpLatchActive == true)
-  hs.settings.set("qwertyMidi_arpDirectionIdx", state.arpDirectionIdx)
-  hs.settings.set("qwertyMidi_arpRateIdx", state.arpRateIdx)
-  hs.settings.set("qwertyMidi_arpQuantizeMode", state.arpQuantizeMode)
-  hs.settings.set("qwertyMidi_inputQuantizeMode", state.inputQuantizeMode)
-  hs.settings.set("qwertyMidi_arpGatePercent", state.arpGatePercent)
-  hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
-  hs.settings.set("qwertyMidi_arpTopEnabled", state.arpTopEnabled == true)
-  hs.settings.set("qwertyMidi_arpBottomEnabled", state.arpBottomEnabled == true)
-  hs.settings.set("qwertyMidi_arpLinked", state.arpLinked == true)
-  hs.settings.set("qwertyMidi_bpmStepSize", state.bpmStepSize)
-  hs.settings.set("qwertyMidi_logicSyncEnabled", state.logicSyncEnabled == true)
-  hs.settings.set("qwertyMidi_scrollSensitivity", state.scrollSensitivity)
-  hs.settings.set("qwertyMidi_scrollAcceleration", state.scrollAcceleration)
-  hs.settings.set("qwertyMidi_scrollInertiaInitial", state.scrollInertiaInitial)
-  hs.settings.set("qwertyMidi_scrollInertiaDecay", state.scrollInertiaDecay)
-  hs.settings.set("qwertyMidi_scrollCurveExponent", state.scrollCurveExponent)
-  hs.settings.set("qwertyMidi_scrollMaxInertiaMs", state.scrollMaxInertiaMs)
-  hs.settings.set("qwertyMidi_scrollInertiaCutoff", state.scrollInertiaCutoff)
-  hs.settings.set("qwertyMidi_topRowVolume", state.topRowVolume)
-  hs.settings.set("qwertyMidi_bottomRowVolume", state.bottomRowVolume)
-  hs.settings.set("qwertyMidi_zoomLevel", state.zoomLevel)
-  hs.settings.set("qwertyMidi_stackedKeyLabelsInPerformanceMode", state.stackedKeyLabelsInPerformanceMode == true)
-
-  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastState then
-    _G.activeWatchers.sync.broadcastState(state)
-  end
-end
-
-local SCALES = {
-  { name = "Lydian",                  intervals = { 0, 2, 4, 6, 7, 9, 11 }, brightness = 6, brightTag = "BRIGHTEST ☀️" },
-  { name = "Major / Ionian",          intervals = { 0, 2, 4, 5, 7, 9, 11 }, brightness = 5, brightTag = "BRIGHT 🌤" },
-  { name = "Mixolydian",              intervals = { 0, 2, 4, 5, 7, 9, 10 }, brightness = 4, brightTag = "WARM ⛅" },
-  { name = "Dorian",                  intervals = { 0, 2, 3, 5, 7, 9, 10 }, brightness = 3, brightTag = "NEUTRAL ☁️" },
-  { name = "Natural Minor / Aeolian", intervals = { 0, 2, 3, 5, 7, 8, 10 }, brightness = 2, brightTag = "DARK 🌧" },
-  { name = "Phrygian",                intervals = { 0, 1, 3, 5, 7, 8, 10 }, brightness = 1, brightTag = "DARKER 🌩" },
-  { name = "Locrian",                 intervals = { 0, 1, 3, 5, 6, 8, 10 }, brightness = 0, brightTag = "DARKEST 🌑" },
-  { name = "Harmonic Minor",          intervals = { 0, 2, 3, 5, 7, 8, 11 }, brightness = 2, brightTag = "EXOTIC 🔮" },
-  { name = "Melodic Minor",           intervals = { 0, 2, 3, 5, 7, 9, 11 }, brightness = 3, brightTag = "JAZZY 🎷" }
-}
-
-local NOTE_NAMES = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }
-
-local WHITE_KEY_INDEX = {
-  [0] = 0, [1] = -1, [2] = 1, [3] = -1, [4] = 2, [5] = 3,
-  [6] = -1, [7] = 4, [8] = -1, [9] = 5, [10] = -1, [11] = 6
-}
-
-local defaultNumberRowControls = {
-  [18] = { key = "1", name = "Trk 1: Bass",   action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
-  [19] = { key = "2", name = "Trk 2: Chords", action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
-  [20] = { key = "3", name = "Trk 3: Lead",   action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
-  [21] = { key = "4", name = "Trk 4: Arp",    action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
-  [23] = { key = "5", name = "Rate -",   action = "arpRateDown",    shiftAction = "botOctDown",   shiftName = "BotOct -" },
-  [22] = { key = "6", name = "Rate +",   action = "arpRateUp",      shiftAction = "botOctUp",     shiftName = "BotOct +" },
-  [26] = { key = "7", name = "Gate -",   action = "arpGateDown",    shiftAction = "arpLinkToggle", shiftName = "Arp Link" },
-  [28] = { key = "8", name = "Gate +",   action = "arpGateUp",      shiftAction = "botVolDown",   shiftName = "BotVol -" },
-  [25] = { key = "9", name = "Atk -",    action = "atkDown",        shiftAction = "decDown",      shiftName = "Dec -" },
-  [29] = { key = "0", name = "Atk +",    action = "atkUp",          shiftAction = "decUp",        shiftName = "Dec +" },
-  [27] = { key = "-", name = "BPM -",    action = "bpmDown",        shiftAction = "zoomOut",      shiftName = "Zoom -" },
-  [24] = { key = "=", name = "BPM +",    action = "bpmUp",          shiftAction = "zoomIn",       shiftName = "Zoom +" }
-}
-
-local defaultUpperRowKeys = {
-  [12] = { key = "Q", baseNote = 72, isTop = true }, [13] = { key = "W", baseNote = 74, isTop = true }, [14] = { key = "E", baseNote = 76, isTop = true },
-  [15] = { key = "R", baseNote = 77, isTop = true }, [17] = { key = "T", baseNote = 79, isTop = true }, [16] = { key = "Y", baseNote = 81, isTop = true },
-  [32] = { key = "U", baseNote = 83, isTop = true }, [34] = { key = "I", baseNote = 84, isTop = true }, [31] = { key = "O", baseNote = 86, isTop = true },
-  [35] = { key = "P", baseNote = 88, isTop = true }, [33] = { key = "[", baseNote = 89, isTop = true }, [30] = { key = "]", baseNote = 91, isTop = true }
-}
-
-local defaultLowerRowKeys = {
-  [6]  = { key = "Z", baseNote = 60, isTop = false }, [7]  = { key = "X", baseNote = 62, isTop = false }, [8]  = { key = "C", baseNote = 64, isTop = false },
-  [9]  = { key = "V", baseNote = 65, isTop = false }, [11] = { key = "B", baseNote = 67, isTop = false }, [45] = { key = "N", baseNote = 69, isTop = false },
-  [46] = { key = "M", baseNote = 71, isTop = false }, [43] = { key = ",", baseNote = 72, isTop = false }, [47] = { key = ".", baseNote = 74, isTop = false },
-  [44] = { key = "/", baseNote = 76, isTop = false }
-}
-
-local defaultHomeRowControls = {
-  [48] = { key = "Tab", name = "Smart Sus · 2× Off", action = "sustain", shiftAction = "classicSustain", shiftName = "Classic Sus" },
-  [0]  = { key = "A",   name = "Arp",     action = "arpToggle",   shiftAction = "arpLatchToggle", shiftName = "Latch" },
-  [1]  = { key = "S",   name = "Random",  action = "randomScale", shiftAction = "panic",      shiftName = "Panic!" },
-  [2]  = { key = "D",   name = "Oct -",   action = "octaveDown",  shiftAction = "topVolDown", shiftName = "TopVol -" },
-  [3]  = { key = "F",   name = "Oct +",   action = "octaveUp",    shiftAction = "topVolUp",   shiftName = "TopVol +" },
-  [5]  = { key = "G",   name = "Mode -",  action = "modeDown",    shiftAction = "modWheelDown", shiftName = "Mod -" },
-  [4]  = { key = "H",   name = "Root -",  action = "rootDown",    shiftAction = "rootDown",   shiftName = "Root -" },
-  [38] = { key = "J",   name = "Trnsp -", action = "trnspDown",   shiftAction = "volDown",    shiftName = "Vol -" },
-  [40] = { key = "K",   name = "Trnsp +", action = "trnspUp",     shiftAction = "volUp",      shiftName = "Vol +" },
-  [37] = { key = "L",   name = "Root +",  action = "rootUp",      shiftAction = "rootUp",     shiftName = "Root +" },
-  [41] = { key = ";",   name = "Mode +",  action = "modeUp",      shiftAction = "modWheelUp",   shiftName = "Mod +" },
-  [39] = { key = "'",   name = "Chord",   action = "chordToggle",    shiftAction = "chordUp",      shiftName = "Chord +" }
-}
-
-local ACTION_CATALOG = {
-  {
-    category = "Arpeggiator",
-    actions = {
-      { id = "arpToggle", name = "Arp On/Off", typeClass = "ctrl-arp", description = "Toggle arpeggiator engine" },
-      { id = "arpTopToggle", name = "Top Arp", typeClass = "ctrl-arptop", description = "Toggle top row arpeggiator" },
-      { id = "arpBottomToggle", name = "Bot Arp", typeClass = "ctrl-arpbot", description = "Toggle bottom row arpeggiator" },
-      { id = "arpDirUp", name = "Arp Dir +", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction up" },
-      { id = "arpDirDown", name = "Arp Dir -", typeClass = "ctrl-arpdir", description = "Cycle arpeggiator direction down" },
-      { id = "arpRateUp", name = "Arp Rate +", typeClass = "ctrl-arprate", description = "Increase arpeggiator speed" },
-      { id = "arpRateDown", name = "Arp Rate -", typeClass = "ctrl-arprate", description = "Decrease arpeggiator speed" },
-      { id = "arpGateUp", name = "Arp Gate +", typeClass = "ctrl-arpgate", description = "Lengthen arpeggiator gate" },
-      { id = "arpGateDown", name = "Arp Gate -", typeClass = "ctrl-arpgate", description = "Shorten arpeggiator gate" },
-      { id = "arpLinkToggle", name = "Arp Link", typeClass = "ctrl-arplink", description = "Toggle linked/split arp mode" }
-    }
-  },
-  {
-    category = "Scale & Pitch",
-    actions = {
-      { id = "rootUp", name = "Root +", typeClass = "ctrl-root", description = "Shift root note up" },
-      { id = "rootDown", name = "Root -", typeClass = "ctrl-root", description = "Shift root note down" },
-      { id = "modeUp", name = "Mode +", typeClass = "ctrl-mode", description = "Cycle scale/mode forward" },
-      { id = "modeDown", name = "Mode -", typeClass = "ctrl-mode", description = "Cycle scale/mode backward" },
-      { id = "trnspUp", name = "Trnsp +", typeClass = "ctrl-trnsp", description = "Transpose semitone up" },
-      { id = "trnspDown", name = "Trnsp -", typeClass = "ctrl-trnsp", description = "Transpose semitone down" },
-      { id = "octaveUp", name = "Main Oct +", typeClass = "ctrl-oct", description = "Shift main octave up" },
-      { id = "octaveDown", name = "Main Oct -", typeClass = "ctrl-oct", description = "Shift main octave down" },
-      { id = "botOctUp", name = "Bot Oct +", typeClass = "ctrl-oct", description = "Shift bottom octave up" },
-      { id = "botOctDown", name = "Bot Oct -", typeClass = "ctrl-oct", description = "Shift bottom octave down" },
-      { id = "topOctUp", name = "Top Oct +", typeClass = "ctrl-topoct", description = "Shift top row octave up" },
-      { id = "topOctDown", name = "Top Oct -", typeClass = "ctrl-topoct", description = "Shift top row octave down" },
-      { id = "chordMod", name = "Chord Mod", typeClass = "ctrl-mode", description = "Hold for chord trigger mode" },
-      { id = "chordUp", name = "Chord +", typeClass = "ctrl-mode", description = "Cycle chord pattern forward" },
-      { id = "chordDown", name = "Chord -", typeClass = "ctrl-mode", description = "Cycle chord pattern backward" },
-      { id = "randomScale", name = "Random Scale", typeClass = "ctrl-rand", description = "Pick random scale & root" }
-    }
-  },
-  {
-    category = "Volume & CC",
-    actions = {
-      { id = "sustain", name = "Smart Sustain", typeClass = "ctrl-sus", description = "Tap to damp; double-tap Tab to turn sustain off" },
-      { id = "classicSustain", name = "Classic Sus", typeClass = "ctrl-sus", description = "Classic cumulative sustain" },
-      { id = "volUp", name = "Vol +", typeClass = "ctrl-vol", description = "Increase track velocity / volume" },
-      { id = "volDown", name = "Vol -", typeClass = "ctrl-vol", description = "Decrease track velocity / volume" },
-      { id = "topVolUp", name = "Top Vol +", typeClass = "ctrl-vol", description = "Increase top row velocity" },
-      { id = "topVolDown", name = "Top Vol -", typeClass = "ctrl-vol", description = "Decrease top row velocity" },
-      { id = "botVolUp", name = "Bot Vol +", typeClass = "ctrl-vol", description = "Increase bottom row velocity" },
-      { id = "botVolDown", name = "Bot Vol -", typeClass = "ctrl-vol", description = "Decrease bottom row velocity" },
-      { id = "atkUp", name = "Attack +", typeClass = "ctrl-atk", description = "Increase track synth attack time" },
-      { id = "atkDown", name = "Attack -", typeClass = "ctrl-atk", description = "Decrease track synth attack time" },
-      { id = "decUp", name = "Decay +", typeClass = "ctrl-dec", description = "Increase track synth decay & tail (ADSR)" },
-      { id = "decDown", name = "Decay -", typeClass = "ctrl-dec", description = "Decrease track synth decay & tail (ADSR)" },
-      { id = "modWheelUp", name = "Mod +", typeClass = "ctrl-modw", description = "Increase modulation wheel CC1" },
-      { id = "modWheelDown", name = "Mod -", typeClass = "ctrl-modw", description = "Decrease modulation wheel CC1" },
-      { id = "panic", name = "Panic!", typeClass = "ctrl-panic", description = "Send all-notes-off MIDI panic" }
-    }
-  },
-  {
-    category = "Tempo & View",
-    actions = {
-      { id = "undoState", name = "Undo", typeClass = "ctrl-reset", description = "Undo last controller state change (scale, pitch, octave, etc.)" },
-      { id = "redoState", name = "Redo State", typeClass = "ctrl-reset", description = "Redo previous controller state change" },
-      { id = "bpmUp", name = "BPM +", typeClass = "ctrl-bpm", description = "Increase tempo" },
-      { id = "bpmDown", name = "BPM -", typeClass = "ctrl-bpm", description = "Decrease tempo" },
-      { id = "zoomIn", name = "Zoom +", typeClass = "ctrl-zoom", description = "Zoom in HUD size" },
-      { id = "zoomOut", name = "Zoom -", typeClass = "ctrl-zoom", description = "Zoom out HUD size" },
-      { id = "resetAll", name = "Reset All", typeClass = "ctrl-reset", description = "Reset settings to defaults" },
-      { id = "none", name = "None", typeClass = "", description = "Unassigned key" }
-    }
-  }
-}
-
-local function deepCopy(orig)
-  if type(orig) ~= "table" then return orig end
-  local copy = {}
-  for k, v in pairs(orig) do
-    copy[k] = deepCopy(v)
-  end
-  return copy
-end
-
-local numberRowControls = deepCopy(defaultNumberRowControls)
-local upperRowKeys = deepCopy(defaultUpperRowKeys)
-local lowerRowKeys = deepCopy(defaultLowerRowKeys)
-local homeRowControls = deepCopy(defaultHomeRowControls)
-
-local function getActionIndex()
-  local idx = {}
-  for _, cat in ipairs(ACTION_CATALOG) do
-    for _, act in ipairs(cat.actions) do
-      idx[act.id] = act
-    end
-  end
-  return idx
-end
-
-local function applyCustomLayout(customData)
-  for k in pairs(numberRowControls) do numberRowControls[k] = nil end
-  for k, v in pairs(deepCopy(defaultNumberRowControls)) do numberRowControls[k] = v end
-
-  for k in pairs(upperRowKeys) do upperRowKeys[k] = nil end
-  for k, v in pairs(deepCopy(defaultUpperRowKeys)) do upperRowKeys[k] = v end
-
-  for k in pairs(homeRowControls) do homeRowControls[k] = nil end
-  for k, v in pairs(deepCopy(defaultHomeRowControls)) do homeRowControls[k] = v end
-
-  for k in pairs(lowerRowKeys) do lowerRowKeys[k] = nil end
-  for k, v in pairs(deepCopy(defaultLowerRowKeys)) do lowerRowKeys[k] = v end
-
-  _cachedActiveNoteKeysMap = nil
-  _cachedActiveControlKeysMap = nil
-
-  if not customData or type(customData) ~= "table" then return end
-
-  local actionIdx = getActionIndex()
-
-  -- Legacy saved layout migration: replace F (code 3) -> arpLatchToggle with Octave +
-  if type(customData.home_row_controls) == "table" then
-    for _, item in ipairs(customData.home_row_controls) do
-      if item.code == 3 and (item.action == "arpLatchToggle" or item.action == "lockLoop" or item.action == "lockAndSwap") then
-        item.action = "octaveUp"
-        item.name = "Oct +"
-        item.shiftAction = "topVolUp"
-        item.shiftName = "TopVol +"
-      end
-    end
-  end
-
-  for codeStr, binding in pairs(customData) do
-    local code = tonumber(codeStr)
-    if code and type(binding) == "table" then
-      if code == 3 and (binding.action == "arpLatchToggle" or binding.action == "lockLoop" or binding.action == "lockAndSwap") then
-        binding.action = "octaveUp"
-        binding.name = "Oct +"
-        binding.shiftAction = "topVolUp"
-        binding.shiftName = "TopVol +"
-      end
-      if binding.action == "none" or binding.isNote == true or (binding.action == nil and binding.shiftAction == nil and binding.baseNote == nil) then
-        -- Revert to default note or control for this keycode
-        local defaultDef = defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultHomeRowControls[code] or defaultNumberRowControls[code]
-        if defaultDef then
-          if defaultUpperRowKeys[code] then upperRowKeys[code] = deepCopy(defaultDef)
-          elseif defaultLowerRowKeys[code] then lowerRowKeys[code] = deepCopy(defaultDef)
-          elseif defaultHomeRowControls[code] then homeRowControls[code] = deepCopy(defaultDef)
-          elseif defaultNumberRowControls[code] then numberRowControls[code] = deepCopy(defaultDef)
-          end
-        end
-      elseif binding.action ~= nil or binding.shiftAction ~= nil then
-        local targetTable = nil
-        if defaultNumberRowControls[code] then targetTable = numberRowControls
-        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
-        elseif defaultUpperRowKeys[code] then targetTable = upperRowKeys
-        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
-        end
-
-        if targetTable then
-          local defaultDef = defaultNumberRowControls[code] or defaultHomeRowControls[code] or defaultUpperRowKeys[code] or defaultLowerRowKeys[code]
-          local actObj = binding.action and actionIdx[binding.action]
-          local shiftActObj = binding.shiftAction and actionIdx[binding.shiftAction]
-
-          local actionVal, nameVal
-          if binding.action ~= nil then
-            actionVal = binding.action
-            nameVal = binding.name
-            if not nameVal or nameVal == "Ctrl" or nameVal == "" then
-              nameVal = (actObj and actObj.name) or (defaultDef and defaultDef.name) or "Action"
-            end
-          else
-            actionVal = defaultDef and defaultDef.action
-            nameVal = defaultDef and defaultDef.name
-          end
-
-          local shiftActionVal, shiftNameVal
-          if binding.shiftAction ~= nil then
-            shiftActionVal = binding.shiftAction
-            shiftNameVal = binding.shiftName
-            if not shiftNameVal or shiftNameVal == "" then
-              shiftNameVal = (shiftActObj and shiftActObj.name) or (defaultDef and defaultDef.shiftName)
-            end
-          else
-            shiftActionVal = defaultDef and defaultDef.shiftAction
-            shiftNameVal = defaultDef and defaultDef.shiftName
-          end
-
-          targetTable[code] = {
-            key = binding.key or (defaultDef and defaultDef.key),
-            name = nameVal,
-            action = actionVal,
-            shiftAction = shiftActionVal,
-            shiftName = shiftNameVal,
-            baseNote = defaultDef and defaultDef.baseNote,
-            isTop = defaultDef and defaultDef.isTop
-          }
-        end
-      elseif binding.baseNote ~= nil then
-        local targetTable = nil
-        if defaultUpperRowKeys[code] then targetTable = upperRowKeys
-        elseif defaultLowerRowKeys[code] then targetTable = lowerRowKeys
-        elseif defaultNumberRowControls[code] then targetTable = numberRowControls
-        elseif defaultHomeRowControls[code] then targetTable = homeRowControls
-        end
-
-        if targetTable then
-          targetTable[code] = {
-            key = binding.key or (defaultUpperRowKeys[code] or defaultLowerRowKeys[code] or defaultNumberRowControls[code] or defaultHomeRowControls[code]).key,
-            baseNote = binding.baseNote,
-            isTop = (binding.isTop ~= nil) and binding.isTop or (defaultUpperRowKeys[code] ~= nil)
-          }
-        end
-      end
-    end
-  end
-end
-
-local function getActionCatalog()
-  local path = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/actions/actions.json"
-  local f = io.open(path, "r")
-  if f then
-    local content = f:read("*a")
-    f:close()
-    local ok, res = pcall(function() return hs.json.decode(content) end)
-    if ok and res then return res end
-  end
-  return {}
-end
-
-local function getAvailableLayouts()
-  local dir = os.getenv("HOME") .. "/projects/qwerty-midi-hammerspoon/layouts"
-  local list = {}
-  local ok, iter_fn, dir_obj = pcall(hs.fs.dir, dir)
-  if ok and iter_fn and dir_obj then
-    for file in iter_fn, dir_obj do
-      if file and file:match("%.json$") then
-        local fullPath = dir .. "/" .. file
-        local f = io.open(fullPath, "r")
-        if f then
-          local content = f:read("*a")
-          f:close()
-          local sok, res = pcall(function() return hs.json.decode(content) end)
-          if sok and res and res.id then
-            table.insert(list, {
-              id = res.id,
-              name = res.name or res.id,
-              description = res.description or "",
-              filename = file,
-              data = res
-            })
-          end
-        end
-      end
-    end
-  end
-  table.sort(list, function(a, b) return a.name < b.name end)
-  return list
-end
-
-local function getPresetsMap()
-  local layouts = getAvailableLayouts()
-  local map = {}
-  for _, l in ipairs(layouts) do
-    map[l.id] = l
-  end
-  if not map["default"] then
-    map["default"] = { id = "default", name = "Default Layout", data = {} }
-  end
-  return map
-end
-
-local function getActivePresetId()
-  return hs.settings.get("qwertyMidi_activePresetId") or "default"
-end
-
-local function getPresetsList()
-  return getAvailableLayouts()
-end
-
-local function getActivePresetData()
-  local map = getPresetsMap()
-  local activeId = getActivePresetId()
-  local p = map[activeId] or map["default"]
-  return (p and p.data) or {}
-end
-
-local function selectPreset(presetId)
-  local map = getPresetsMap()
-  if not map[presetId] then
-    presetId = "default"
-  end
-  hs.settings.set("qwertyMidi_activePresetId", presetId)
-  local data = (map[presetId] and map[presetId].data) or {}
-  applyCustomLayout(data)
-  saveSettings()
-end
-
-local function saveCustomLayout(newLayoutData)
-  applyCustomLayout(newLayoutData)
-  saveSettings()
-end
-
-local function savePreset(presetId, name, layoutData)
-  return presetId
-end
-
-local function renamePreset(presetId, newName)
-  return false
-end
-
-local function deletePreset(presetId)
-  return false
-end
-
-local function duplicatePreset(presetId, newName)
-  return presetId
-end
-
-local function resetLayout()
-  applyCustomLayout(nil)
-  saveSettings()
-end
-
-local function updateKeyMapping(code, newBinding)
-  -- Key mappings are managed via JSON layout files
-end
-
-local function getLayoutConfig()
-  local presetsList = getPresetsList()
-  local activePresetId = getActivePresetId()
-  local activeData = getActivePresetData()
-
-  return {
-    customized = false,
-    actionCatalog = getActionCatalog(),
-    presets = presetsList,
-    activePresetId = activePresetId,
-    defaults = {
-      numberRow = defaultNumberRowControls,
-      upperRow = defaultUpperRowKeys,
-      homeRow = defaultHomeRowControls,
-      lowerRow = defaultLowerRowKeys
-    },
-    active = {
-      numberRow = numberRowControls,
-      upperRow = upperRowKeys,
-      homeRow = homeRowControls,
-      lowerRow = lowerRowKeys
-    },
-    customLayout = activeData or {}
-  }
-end
-
-applyCustomLayout(getActivePresetData())
-
-local arpAdvancedControlKeysMap = {
-  -- Arp Rate
-  [18] = { key = "1", name = "Rate 1/4",   action = "setArpRate_5" },
-  [19] = { key = "2", name = "Rate 1/8",   action = "setArpRate_6" },
-  [20] = { key = "3", name = "Rate 1/16",  action = "setArpRate_7" },
-  [21] = { key = "4", name = "Rate 1/32",  action = "setArpRate_8" },
-
-  -- Arp Direction
-  [12] = { key = "q", name = "Dir UP",     action = "setArpDir_1" },
-  [13] = { key = "w", name = "Dir DOWN",   action = "setArpDir_2" },
-  [14] = { key = "e", name = "Dir UP/DN",  action = "setArpDir_3" },
-  [15] = { key = "r", name = "Dir DN/UP",  action = "setArpDir_4" },
-  [17] = { key = "t", name = "Dir RAND",   action = "setArpDir_7" },
-
-  -- Arp Quantize
-  [6] = { key = "z", name = "Sync OFF",    action = "setArpQuantize_None" },
-  [7] = { key = "x", name = "Sync BEAT",   action = "setArpQuantize_Beat" },
-  [8] = { key = "c", name = "Sync BAR",    action = "setArpQuantize_Bar" },
-
-  -- Arp Latch
-  [49] = { key = "Space", name = "Arp Latch", action = "arpLatchToggle" },
-}
-local arpAdvancedNoteKeysMap = {}
-
-local defaultKeyStepLowerRowControls = {
-  [6]  = { key = "Z", name = "Trk 1: Bass", action = "trkSelect1", shiftAction = "trkMute1", shiftName = "Trk 1 Mute" },
-  [7]  = { key = "X", name = "Trk 2: Chd",  action = "trkSelect2", shiftAction = "trkMute2", shiftName = "Trk 2 Mute" },
-  [8]  = { key = "C", name = "Trk 3: Lead", action = "trkSelect3", shiftAction = "trkMute3", shiftName = "Trk 3 Mute" },
-  [9]  = { key = "V", name = "Trk 4: Arp",  action = "trkSelect4", shiftAction = "trkMute4", shiftName = "Trk 4 Mute" },
-  [11] = { key = "B", name = "Lock Loop",   action = "lockLoop",   shiftAction = "lockAndSwap", shiftName = "Lock & Swap" },
-  [45] = { key = "N", name = "Stop Loops",  action = "stopLoops",  shiftAction = "panic", shiftName = "Panic!" },
-  [46] = { key = "M", name = "Vol -",       action = "volDown",    shiftAction = "botVolDown", shiftName = "BotVol -" },
-  [43] = { key = ",", name = "Vol +",       action = "volUp",      shiftAction = "botVolUp", shiftName = "BotVol +" },
-  [47] = { key = ".", name = "Mod -",       action = "modWheelDown", shiftAction = "decDown", shiftName = "Dec -" },
-  [44] = { key = "/", name = "Mod +",       action = "modWheelUp",   shiftAction = "decUp", shiftName = "Dec +" }
-}
-
-local function isKsConnected()
-  if _G.activeWatchers and _G.activeWatchers.keystep and _G.activeWatchers.keystep.isConnected then
-    return _G.activeWatchers.keystep.isConnected() == true
-  end
-  return state.keystepConnected == true
-end
-
-local function getNoteKey(code)
-  if state.currentMode == "ArpAdvanced" then
-    return arpAdvancedNoteKeysMap[code]
-  end
-  local ksConnected = isKsConnected()
-  if ksConnected and defaultKeyStepLowerRowControls[code] then
-    return nil
-  end
-  local k = upperRowKeys[code] or lowerRowKeys[code] or homeRowControls[code] or numberRowControls[code]
-  if k and k.baseNote ~= nil then return k end
-  return nil
-end
-
-local function getControlKey(code)
-  if state.currentMode == "ArpAdvanced" then
-    return arpAdvancedControlKeysMap[code]
-  end
-  local ksConnected = isKsConnected()
-  if ksConnected and defaultKeyStepLowerRowControls[code] then
-    return defaultKeyStepLowerRowControls[code]
-  end
-  local k = homeRowControls[code] or upperRowKeys[code] or lowerRowKeys[code]
-  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
-  return nil
-end
-
-local function getNumberControlKey(code)
-  if state.currentMode == "ArpAdvanced" then
-    return arpAdvancedControlKeysMap[code]
-  end
-  local k = numberRowControls[code]
-  if k and (k.action ~= nil or k.shiftAction ~= nil) then return k end
-  return nil
-end
-
-
-local _cachedActiveNoteKeysMap = nil
-local _cachedActiveControlKeysMap = nil
-local _cachedKsConnected = nil
-
-local function getActiveNoteKeysMap()
-  if state.currentMode == "ArpAdvanced" then
-    return arpAdvancedNoteKeysMap
-  end
-  local ksConnected = isKsConnected()
-  if _cachedActiveNoteKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveNoteKeysMap end
-  _cachedKsConnected = ksConnected
-  local map = {}
-  for code, k in pairs(upperRowKeys) do if k.baseNote ~= nil then map[code] = k end end
-  if not ksConnected then
-    for code, k in pairs(lowerRowKeys) do if k.baseNote ~= nil then map[code] = k end end
-  end
-  for code, k in pairs(homeRowControls) do if k.baseNote ~= nil then map[code] = k end end
-  for code, k in pairs(numberRowControls) do if k.baseNote ~= nil then map[code] = k end end
-  _cachedActiveNoteKeysMap = map
-  return map
-end
-
-local function getActiveControlKeysMap()
-  if state.currentMode == "ArpAdvanced" then
-    return arpAdvancedControlKeysMap
-  end
-  local ksConnected = isKsConnected()
-  if _cachedActiveControlKeysMap and _cachedKsConnected == ksConnected then return _cachedActiveControlKeysMap end
-  _cachedKsConnected = ksConnected
-  local map = {}
-  for code, k in pairs(homeRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  for code, k in pairs(upperRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  if ksConnected then
-    for code, k in pairs(defaultKeyStepLowerRowControls) do map[code] = k end
-  else
-    for code, k in pairs(lowerRowKeys) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  end
-  for code, k in pairs(numberRowControls) do if k.action ~= nil or k.shiftAction ~= nil then map[code] = k end end
-  _cachedActiveControlKeysMap = map
-  return map
-end
-
-
-return {
-  state = state,
-  saveSettings = saveSettings,
-  SCALES = SCALES,
-  NOTE_NAMES = NOTE_NAMES,
-  WHITE_KEY_INDEX = WHITE_KEY_INDEX,
-  ACTION_CATALOG = ACTION_CATALOG,
-  defaultNumberRowControls = defaultNumberRowControls,
-  defaultUpperRowKeys = defaultUpperRowKeys,
-  defaultLowerRowKeys = defaultLowerRowKeys,
-  defaultHomeRowControls = defaultHomeRowControls,
-  defaultKeyStepLowerRowControls = defaultKeyStepLowerRowControls,
-  numberRowControls = numberRowControls,
-  upperRowKeys = upperRowKeys,
-  lowerRowKeys = lowerRowKeys,
-  homeRowControls = homeRowControls,
-  applyCustomLayout = applyCustomLayout,
-  saveCustomLayout = saveCustomLayout,
-  selectPreset = selectPreset,
-  savePreset = savePreset,
-  renamePreset = renamePreset,
-  deletePreset = deletePreset,
-  duplicatePreset = duplicatePreset,
-  getPresetsList = getPresetsList,
-  resetLayout = resetLayout,
-  updateKeyMapping = updateKeyMapping,
-  getLayoutConfig = getLayoutConfig,
-  getNoteKey = getNoteKey,
-  getControlKey = getControlKey,
-  getNumberControlKey = getNumberControlKey,
-  getActiveNoteKeysMap = getActiveNoteKeysMap,
-  getActiveControlKeysMap = getActiveControlKeysMap,
-  isKeyStepConnected = isKsConnected
-}
-
-end
-
-__modules["sync"] = function()
--- src/sync.lua
--- Bidirectional synchronization between QWERTY MIDI (Hammerspoon) and DualSynth (DualSense macOS app)
--- Uses macOS native NSDistributedNotificationCenter via hs.distributednotifications
-
-local sync = {}
-local arpeggiator = __require("arpeggiator")
-
-local isSyncing = false
-local configRef = nil
-local hudRef = nil
-local controlsRef = nil
-
-local DUALSYNTH_STATE_NOTIFICATION = "DualSynthStateBroadcast"
-local QWERTY_STATE_NOTIFICATION = "QwertyMidiStateBroadcast"
-local QWERTY_NOTE_NOTIFICATION = "QwertyMidiNoteBroadcast"
-
-local function log(msg)
-  print("[Sync]: " .. tostring(msg))
-end
-
-function sync.init(config, hud, controls)
-  configRef = config
-  hudRef = hud
-  controlsRef = controls
-  _G.activeWatchers = _G.activeWatchers or {}
-
-  -- Stop previous watcher if reloading
-  if _G.activeWatchers.dualSynthSyncWatcher then
-    _G.activeWatchers.dualSynthSyncWatcher:stop()
-    _G.activeWatchers.dualSynthSyncWatcher = nil
-  end
-
-  -- 1. Listen for state updates from DualSynth
-  _G.activeWatchers.dualSynthSyncWatcher = hs.distributednotifications.new(function(name, object, userInfo)
-    if isSyncing or not userInfo or not configRef then return end
-    isSyncing = true
-
-    local state = configRef.state
-    local stateChanged = false
-
-    if userInfo.root ~= nil then
-      local rootNum = tonumber(userInfo.root)
-      if rootNum and state.currentRoot ~= rootNum then
-        state.currentRoot = rootNum
-        hs.settings.set("qwertyMidi_currentRoot", state.currentRoot)
-        stateChanged = true
-      end
-    end
-
-    if userInfo.scaleIdx ~= nil then
-      local scaleNum = tonumber(userInfo.scaleIdx)
-      if scaleNum then
-        local targetIdx = scaleNum + 1 -- Swift is 0-indexed, Lua is 1-indexed
-        if state.currentScaleIdx ~= targetIdx then
-          state.currentScaleIdx = targetIdx
-          hs.settings.set("qwertyMidi_currentScaleIdx", state.currentScaleIdx)
-          stateChanged = true
-        end
-      end
-    end
-
-    if userInfo.bpm ~= nil then
-      local bpmNum = tonumber(userInfo.bpm)
-      if bpmNum and math.abs((state.arpBpm or 120) - bpmNum) > 0.5 then
-        state.arpBpm = bpmNum
-        hs.settings.set("qwertyMidi_arpBpm", state.arpBpm)
-        stateChanged = true
-      end
-    end
-
-    if userInfo.octaveShift ~= nil then
-      local octNum = tonumber(userInfo.octaveShift)
-      if octNum and state.octaveShift ~= octNum then
-        state.octaveShift = octNum
-        hs.settings.set("qwertyMidi_octaveShift", state.octaveShift)
-        stateChanged = true
-      end
-    end
-
-    if userInfo.chordIdx ~= nil then
-      local chordNum = tonumber(userInfo.chordIdx)
-      if chordNum then
-        local targetChord = chordNum + 1
-        if state.chordIdx ~= targetChord then
-          state.chordIdx = targetChord
-          local activeTrack = state.tracks and state.tracks[state.activeTrack or 1]
-          if activeTrack then activeTrack.chordIdx = targetChord end
-          hs.settings.set("qwertyMidi_chordIdx", state.chordIdx)
-          stateChanged = true
-        end
-      end
-    end
-
-    if userInfo.activeTrack ~= nil then
-      local trackId = math.floor(tonumber(userInfo.activeTrack) or 0)
-      if trackId >= 1 and trackId <= 4 and state.activeTrack ~= trackId and controlsRef and controlsRef.selectTrack then
-        controlsRef.selectTrack(trackId)
-        stateChanged = true
-      end
-    end
-
-    if stateChanged then
-      arpeggiator.updateLatchedArpNotes()
-      arpeggiator.updateLatchedArpChordNotes(state.activeTrack or 1)
-      log("Synced state from DualSynth: Root=" .. tostring(state.currentRoot) .. " Scale=" .. tostring(state.currentScaleIdx) .. " BPM=" .. tostring(state.arpBpm))
-      if hudRef and hudRef.updateWebviewHud then
-        hudRef.updateWebviewHud()
-      end
-    end
-
-    isSyncing = false
-  end, DUALSYNTH_STATE_NOTIFICATION)
-
-  if _G.activeWatchers.dualSynthSyncWatcher then
-    _G.activeWatchers.dualSynthSyncWatcher:start()
-    log("Started DualSynth sync listener on " .. DUALSYNTH_STATE_NOTIFICATION)
-  end
-end
-
--- Broadcast QWERTY state to DualSynth
-function sync.broadcastState(state)
-  if isSyncing or not state then return end
-  local payload = {
-    root = state.currentRoot or 0,
-    scaleIdx = (state.currentScaleIdx or 1) - 1, -- Swift 0-indexed
-    bpm = state.arpBpm or 120,
-    octaveShift = state.octaveShift or 0,
-    chordIdx = (state.chordIdx or 1) - 1,
-    activeTrack = state.activeTrack or 1
-  }
-
-  hs.distributednotifications.post(QWERTY_STATE_NOTIFICATION, nil, payload)
-end
-
--- Broadcast played notes to DualSynth visualizer
-function sync.broadcastNotes(pitches, isNoteOn)
-  if not pitches then return end
-  if type(pitches) == "number" then
-    pitches = { pitches }
-  end
-  hs.distributednotifications.post(QWERTY_NOTE_NOTIFICATION, nil, {
-    pitches = pitches,
-    isNoteOn = isNoteOn == true
-  })
-end
-
-return sync
-
-end
-
-__modules["controls"] = function()
-local config = __require("config")
-local midi = __require("midi")
-local transposer = __require("transposer")
-local arpeggiator = __require("arpeggiator")
-local quantizer = require("quantizer")
-local hud = __require("hud")
-
-local state = config.state
-local SCALES = config.SCALES
-local NOTE_NAMES = config.NOTE_NAMES
-
-local function getActiveArpRateIdx()
-  local trk = state.tracks and state.tracks[state.activeTrack or 1]
-  return (trk and trk.arpRateIdx) or state.arpRateIdx or 5
-end
-
-local function setActiveArpRate(rateIdx)
-  if arpeggiator.setTrackArpRate then
-    return arpeggiator.setTrackArpRate(rateIdx, state.activeTrack or 1)
-  end
-
-  state.arpRateIdx = math.max(1, math.min(#state.ARP_RATES, tonumber(rateIdx) or state.arpRateIdx or 5))
-  arpeggiator.applyBpmChange()
-  return nil, state.arpRateIdx
-end
-
-local function getActiveArpDirectionIdx()
-  local trk = state.tracks and state.tracks[state.activeTrack or 1]
-  return (trk and trk.arpDirectionIdx) or state.arpDirectionIdx or 1
-end
-
-local function setActiveArpDirection(dirIdx, targetTrackIdx)
-  if arpeggiator.setTrackArpDirection then
-    return arpeggiator.setTrackArpDirection(dirIdx, targetTrackIdx or state.activeTrack or 1)
-  end
-
-  local trkId = targetTrackIdx or state.activeTrack or 1
-  local normalizedDirIdx = math.max(1, math.min(#state.ARP_DIRECTIONS, tonumber(dirIdx) or state.arpDirectionIdx or 1))
-  state.arpDirectionIdx = normalizedDirIdx
-  local trk = state.tracks and state.tracks[trkId]
-  if trk then
-    trk.arpDirectionIdx = normalizedDirIdx
-    hs.settings.set("qwertyMidi_track" .. trkId .. "ArpDirectionIdx", normalizedDirIdx)
-  end
-  hs.settings.set("qwertyMidi_arpDirectionIdx", normalizedDirIdx)
-  return trk, normalizedDirIdx
-end
-
-_G.activeWatchers = _G.activeWatchers or {}
-
--- Clear any stale repeat timers from a previous module load (Hammerspoon reload safety)
-if _G._qmidiRepeatTimers then
-  for code, entry in pairs(_G._qmidiRepeatTimers) do
-    pcall(function()
-      if entry.timer then entry.timer:stop() end
-      if entry.interval then entry.interval:stop() end
-    end)
-  end
-end
-_G._qmidiRepeatTimers = {}
-local controlRepeatTimers = _G._qmidiRepeatTimers
-
-local function stopControlRepeat(code)
-  if code and controlRepeatTimers[code] then
-    pcall(function()
-      if controlRepeatTimers[code].timer then
-        controlRepeatTimers[code].timer:stop()
-      end
-      if controlRepeatTimers[code].interval then
-        controlRepeatTimers[code].interval:stop()
-      end
-    end)
-    controlRepeatTimers[code] = nil
-  end
-end
-
-local function stopAllControlRepeats()
-  for code in pairs(controlRepeatTimers) do
-    stopControlRepeat(code)
-  end
-end
-
-local stateUndoStack = {}
-local stateRedoStack = {}
-local isRestoringControllerState = false
-
-local function captureStateSnapshot(label)
-  return {
-    label = label or "State Change",
-    currentRoot = state.currentRoot,
-    currentScaleIdx = state.currentScaleIdx,
-    octaveShift = state.octaveShift,
-    topRowOctaveOffset = state.topRowOctaveOffset,
-    bottomRowOctaveOffset = state.bottomRowOctaveOffset,
-    transposeShift = state.transposeShift,
-    topRowVolume = state.topRowVolume,
-    bottomRowVolume = state.bottomRowVolume,
-    arpEnabled = state.arpEnabled,
-    arpLatchActive = state.arpLatchActive,
-    arpDirectionIdx = state.arpDirectionIdx,
-    arpRateIdx = state.arpRateIdx,
-    arpGatePercent = state.arpGatePercent,
-    arpBpm = state.arpBpm,
-    arpTopEnabled = state.arpTopEnabled,
-    arpBottomEnabled = state.arpBottomEnabled,
-    arpLinked = state.arpLinked,
-    modWheel = state.ccStates[1] or 0,
-    sustainActive = state.sustainActive,
-    chordModeActive = state.chordModeActive
-  }
-end
-
-local function pushStateSnapshot(label)
-  if isRestoringControllerState then return end
-  table.insert(stateUndoStack, captureStateSnapshot(label))
-  stateRedoStack = {}
-end
-
-local function applyStateSnapshot(snap)
-  isRestoringControllerState = true
-
-  -- Capture current values before overwriting so we can skip no-op arp restarts
-  local prevBpm = state.arpBpm
-  local prevGatePercent = state.arpGatePercent
-
-  state.currentRoot = snap.currentRoot
-  state.currentScaleIdx = snap.currentScaleIdx
-  state.octaveShift = snap.octaveShift
-  state.topRowOctaveOffset = snap.topRowOctaveOffset
-  state.bottomRowOctaveOffset = snap.bottomRowOctaveOffset or 0
-  state.transposeShift = snap.transposeShift
-  state.topRowVolume = snap.topRowVolume
-  state.bottomRowVolume = snap.bottomRowVolume
-  state.arpEnabled = snap.arpEnabled
-  state.arpLatchActive = snap.arpLatchActive
-  state.arpDirectionIdx = snap.arpDirectionIdx
-  setActiveArpRate(snap.arpRateIdx)
-  state.arpGatePercent = snap.arpGatePercent
-  state.arpBpm = snap.arpBpm
-  state.arpTopEnabled = snap.arpTopEnabled
-  state.arpBottomEnabled = snap.arpBottomEnabled
-  if snap.arpLinked ~= nil then state.arpLinked = snap.arpLinked end
-  state.ccStates[1] = snap.modWheel
-  
-  if snap.sustainActive ~= nil then state.sustainActive = snap.sustainActive end
-  if snap.chordModeActive ~= nil then state.chordModeActive = snap.chordModeActive end
-
-  arpeggiator.updateLatchedArpNotes()
-  if snap.arpBpm ~= prevBpm then
-    arpeggiator.applyBpmChange()
-  end
-  if snap.arpGatePercent ~= prevGatePercent then
-    arpeggiator.applyGatePercentChange()
-  end
-  midi.sendMidiCC(1, snap.modWheel)
-
-  isRestoringControllerState = false
-  config.saveSettings()
-end
-
-local function undoControllerState(code)
-  if #stateUndoStack == 0 then
-    local spot = {
-      title = "UNDO STATE",
-      value = "NO HISTORY",
-      subtext = "Nothing to undo",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return
-  end
-
-  local cur = captureStateSnapshot("Current")
-  table.insert(stateRedoStack, cur)
-
-  local prev = table.remove(stateUndoStack)
-  applyStateSnapshot(prev)
-
-  local scaleName = SCALES[state.currentScaleIdx].name
-  local rootName = NOTE_NAMES[state.currentRoot + 1]
-  local spot = {
-    title = "UNDO STATE",
-    value = rootName .. " " .. scaleName,
-    subtext = "Reverted: " .. (prev.label or "Controller State"),
-    targetId = code and ("key-" .. code) or "header",
-    color = "#d4a359"
-  }
-  hud.updateWebviewHud(spot)
-end
-
-local function redoControllerState(code)
-  if #stateRedoStack == 0 then
-    local spot = {
-      title = "REDO STATE",
-      value = "NO HISTORY",
-      subtext = "Nothing to redo",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    return
-  end
-
-  local cur = captureStateSnapshot("Current")
-  table.insert(stateUndoStack, cur)
-
-  local nxt = table.remove(stateRedoStack)
-  applyStateSnapshot(nxt)
-
-  local scaleName = SCALES[state.currentScaleIdx].name
-  local rootName = NOTE_NAMES[state.currentRoot + 1]
-  local spot = {
-    title = "REDO STATE",
-    value = rootName .. " " .. scaleName,
-    subtext = "Re-applied: " .. (nxt.label or "Controller State"),
-    targetId = code and ("key-" .. code) or "header",
-    color = "#d4a359"
-  }
-  hud.updateWebviewHud(spot)
-end
-
-local function canApplyShifts(testT, testO, testTop, testBot)
-  local oldT = state.transposeShift
-  local oldO = state.octaveShift
-  local oldTop = state.topRowOctaveOffset
-  local oldBot = state.bottomRowOctaveOffset
-
-  -- Calculate bounds for current state
-  local curMinPitch = math.huge
-  local curMaxPitch = -math.huge
-  for _, kData in pairs(config.getActiveNoteKeysMap()) do
-    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
-    if pitch < curMinPitch then curMinPitch = pitch end
-    if pitch > curMaxPitch then curMaxPitch = pitch end
-  end
-
-  -- Calculate bounds for test state
-  state.transposeShift = testT
-  state.octaveShift = testO
-  state.topRowOctaveOffset = testTop
-  state.bottomRowOctaveOffset = testBot
-
-  local minPitch = math.huge
-  local maxPitch = -math.huge
-  for _, kData in pairs(config.getActiveNoteKeysMap()) do
-    local pitch = transposer.getTransposedPitch(kData.baseNote, kData.isTop)
-    if pitch < minPitch then minPitch = pitch end
-    if pitch > maxPitch then maxPitch = pitch end
-  end
-
-  state.transposeShift = oldT
-  state.octaveShift = oldO
-  state.topRowOctaveOffset = oldTop
-  state.bottomRowOctaveOffset = oldBot
-
-  if minPitch >= 16 and maxPitch <= 113 then
-    return true, testT, testO, testTop, testBot
-  end
-
-  if curMinPitch < 16 or curMaxPitch > 113 then
-    while minPitch < 16 do
-      testO = testO + 12
-      testTop = testTop + 12
-      testBot = testBot + 12
-      minPitch = minPitch + 12
-      maxPitch = maxPitch + 12
-    end
-    while maxPitch > 113 do
-      testO = testO - 12
-      testTop = testTop - 12
-      testBot = testBot - 12
-      minPitch = minPitch - 12
-      maxPitch = maxPitch - 12
-    end
-    return true, testT, testO, testTop, testBot
-  end
-
-  return false, testT, testO, testTop, testBot
-end
-
-local function countTableKeys(t)
-  if not t then return 0 end
-  local count = 0
-  for _ in pairs(t) do count = count + 1 end
-  return count
-end
-
-local function isTrackAudible(trackIdx)
-  if not state.tracks then return true end
-  local trk = state.tracks[trackIdx]
-  if not trk then return true end
-  if trk.muted then return false end
-  local anySolo = false
-  for _, t in pairs(state.tracks) do
-    if t.soloed then anySolo = true; break end
-  end
-  if anySolo then
-    return trk.soloed == true
-  end
-  return true
-end
-
-local function syncTrackAudibility()
-  if not state.tracks then return end
-  for trkId = 1, 4 do
-    local trk = state.tracks[trkId]
-    local ch = trk.channel or (trkId - 1)
-    local audible = isTrackAudible(trkId)
-    if not audible then
-      -- 1. Silence audio in DAW / Logic Pro immediately
-      if midi and midi.silenceChannel then
-        midi.silenceChannel(ch)
-      else
-        midi.sendMidiCC(64, 0, ch)
-        midi.sendMidiCC(120, 0, ch)
-        midi.sendMidiCC(123, 0, ch)
-      end
-      -- Set Channel Volume (CC 7) & Expression (CC 11) to 0 so synth/audio is truly muted
-      midi.sendMidiCC(7, 0, ch)
-      midi.sendMidiCC(11, 0, ch)
-
-      -- Dedicated DAW Controller Assignment CCs:
-      -- CC 108: Track Mute (127 if muted, 0 if unmuted)
-      -- CC 109: Track Solo (127 if soloed, 0 if not soloed)
-      midi.sendMidiCC(108, trk.muted and 127 or 0, ch)
-      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
-
-      -- 2. Silence arpeggiator active notes & gate timers on this track
-      if arpeggiator and arpeggiator.silenceTrack then
-        arpeggiator.silenceTrack(trkId)
-      end
-
-      -- 3. Silence any physically held notes on this track
-      for code, info in pairs(state.pressedKeys) do
-        if type(info) == "table" and not info.isControl and info.track == trkId then
-          if info.pitches then
-            for _, p in ipairs(info.pitches) do
-              midi.sendMidiNote("noteOff", p, 0, info.channel or ch)
-            end
-          end
-        end
-      end
-
-      -- 4. Silence any sustained notes on this track's channel
-      if trk.sustainedPitches then
-        for _, item in ipairs(trk.sustainedPitches) do
-          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or ch)
-        end
-        trk.sustainedPitches = {}
-      end
-      if state.sustainedPitches then
-        local newSustained = {}
-        for _, item in ipairs(state.sustainedPitches) do
-          if item.channel == ch then
-            midi.sendMidiNote("noteOff", item.pitch, 0, item.channel)
-          else
-            table.insert(newSustained, item)
-          end
-        end
-        state.sustainedPitches = newSustained
-      end
-      trk.activeNotesCount = 0
-    else
-      -- Track became audible!
-      -- 1. Restore DAW Controller Assignment CCs:
-      midi.sendMidiCC(108, 0, ch) -- Mute off
-      midi.sendMidiCC(109, trk.soloed and 127 or 0, ch)
-
-      -- 2. Restore Channel Volume (CC 7) & Expression (CC 11):
-      local vol = trk.volume or 100
-      local volCc = math.floor(math.min(127, math.max(0, vol * 1.27)))
-      midi.sendMidiCC(7, volCc, ch)
-      midi.sendMidiCC(11, 127, ch)
-
-      -- 3. Resume physically held non-arp keys
-      for code, info in pairs(state.pressedKeys) do
-        if type(info) == "table" and not info.isControl and info.track == trkId and not info.isArpNote then
-          if info.pitches then
-            local vel = transposer.getEffectiveRowVelocity(trkId > 2)
-            for _, p in ipairs(info.pitches) do
-              midi.sendMidiNote("noteOn", p, vel, info.channel or ch)
-            end
-            trk.activeNotesCount = (trk.activeNotesCount or 0) + #info.pitches
-          end
-        end
-      end
-
-      -- 4. Resume arpeggiator if active or if notes are held
-      if trk.arpEnabled then
-        for code, info in pairs(state.pressedKeys) do
-          if type(info) == "table" and not info.isControl and info.track == trkId and info.isArpNote then
-            if info.pitches and arpeggiator and arpeggiator.arpAddNote then
-              for _, p in ipairs(info.pitches) do
-                arpeggiator.arpAddNote(code .. "_" .. p, p, trkId)
-              end
-            end
-          end
-        end
-
-        local hasHeld = countTableKeys(trk.heldNotes) > 0 or trk.locked
-        if hasHeld and not trk.timer and arpeggiator and arpeggiator.startTrackArp then
-          arpeggiator.startTrackArp(trk, true)
-        end
-      end
-    end
-  end
-  if hudModule and hudModule.fastUpdateArp then
-    hudModule.fastUpdateArp()
-  end
-  -- Track-dependent key styling is owned by the full HUD payload. A spotlight
-  -- update alone leaves the previous track's CSS variables in place.
-  if hudModule and hudModule.updateWebviewHud then
-    hudModule.updateWebviewHud(nil, nil, true)
-  end
-
-  local ks = _G.activeWatchers and _G.activeWatchers.keystep
-  if ks and ks.syncToHud then ks.syncToHud() end
-end
-
-local function selectTrack(id)
-  local targetId = math.max(1, math.min(4, tonumber(id) or 1))
-  if not (state.tracks and state.tracks[targetId]) then return end
-
-  local isBottomTarget = (targetId <= 2)
-
-  -- Clean up only currently physically held note keys on the targeted row
-  for code, info in pairs(state.pressedKeys) do
-    if type(info) == "table" and not info.isControl then
-      local noteKey = config.getNoteKey(code)
-      local isTopKey = (noteKey and noteKey.isTop) or (info.track and info.track > 2)
-      local shouldClean = isBottomTarget and (not isTopKey) or ((not isBottomTarget) and isTopKey)
-      if shouldClean then
-        if info.pitches then
-          for _, p in ipairs(info.pitches) do
-            midi.sendMidiNote("noteOff", p, 0, info.channel or 0)
-          end
-        end
-        state.pressedKeys[code] = nil
-        local prevTrkId = info.track or (isTopKey and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
-        local prevTrk = state.tracks and state.tracks[prevTrkId]
-        if prevTrk and prevTrk.physicalKeysHeld then
-          prevTrk.physicalKeysHeld[code] = nil
-        end
-      end
-    end
-  end
-
-  state.activeTrack = targetId
-  local trk = state.tracks[targetId]
-  state.arpEnabled = trk.arpEnabled == true
-  state.arpLatchActive = trk.arpLatchActive == true
-  state.arpRateIdx = trk.arpRateIdx or state.arpRateIdx
-  state.arpDirectionIdx = trk.arpDirectionIdx or state.arpDirectionIdx or 1
-  state.sustainActive = (trk.sustainMode ~= nil and trk.sustainMode ~= "off")
-  state.chordModeActive = trk.chordModeActive == true
-  if trk.chordIdx then state.chordIdx = trk.chordIdx end
-
-  if targetId <= 2 then
-    state.bottomRowTrack = targetId
-    state.bottomRowChannel = trk.channel
-    state.bottomRowOctaveOffset = trk.octaveOffset or 0
-    state.bottomRowVolume = trk.volume or 100
-  else
-    state.topRowTrack = targetId
-    state.topRowChannel = trk.channel
-    state.topRowOctaveOffset = trk.octaveOffset or 12
-    state.topRowVolume = trk.volume or 100
-  end
-  config.saveSettings()
-
-  hud.updateWebviewHud({
-    title = "SELECT TRACK " .. targetId,
-    value = "Track " .. targetId .. ": " .. trk.name .. (trk.locked and " 🔁" or ""),
-    subtext = (targetId <= 2 and "Bottom Row • " or "Top Row • ") .. "MIDI Ch " .. (trk.channel + 1) .. (trk.arpEnabled and " • Arp ON" or " • Live Play"),
-    targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[targetId],
-    color = trk.color or "#64d8f0"
-  })
-
-  local sync = _G.activeWatchers and _G.activeWatchers.sync
-  if sync and sync.broadcastState then
-    sync.broadcastState(state)
-  end
-
-  if hudModule and hudModule.fastUpdateArp then
-    hudModule.fastUpdateArp()
-  end
-  if hudModule and hudModule.updateWebviewHud then
-    hudModule.updateWebviewHud(nil, nil, true)
-  end
-  local ks = _G.activeWatchers and _G.activeWatchers.keystep
-  if ks and ks.syncToHud then ks.syncToHud() end
-end
-
-local function adjustTrackVolume(trackId, delta)
-  local id = math.max(1, math.min(4, math.floor(tonumber(trackId) or 0)))
-  local trk = state.tracks and state.tracks[id]
-  if not trk then return false end
-  trk.volume = math.max(0, math.min(127, (tonumber(trk.volume) or 100) + (tonumber(delta) or 0)))
-  if isTrackAudible(id) then midi.sendMidiCC(7, trk.volume, trk.channel or (id - 1)) end
-  if id <= 2 and state.bottomRowTrack == id then state.bottomRowVolume = trk.volume end
-  if id >= 3 and state.topRowTrack == id then state.topRowVolume = trk.volume end
-  config.saveSettings()
-  hud.updateWebviewHud({
-    title = "VOLUME (TRK " .. id .. ")",
-    value = math.floor((trk.volume / 127) * 100 + 0.5) .. "%",
-    subtext = (trk.name or ("Track " .. id)) .. " Volume (CC #7)",
-    targetId = "key-" .. (17 + id),
-    color = trk.color or "#d4a359"
-  })
-  return true
-end
-
-local function applyTransposeDelta(deltaSteps, spotTitle)
-  local curT = tonumber(state.transposeShift) or 0
-  local curO = tonumber(state.octaveShift) or 0
-  local curTop = tonumber(state.topRowOctaveOffset) or 0
-  local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-  local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
-  local newT = curT + deltaSteps
-  local newO = curO
-  while newT < 0 do
-    newT = newT + numIntervals
-    newO = newO - 12
-  end
-  while newT >= numIntervals do
-    newT = newT - numIntervals
-    newO = newO + 12
-  end
-  local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
-  if ok then
-    pushStateSnapshot("transpose")
-    state.transposeShift = finalT
-    state.octaveShift = finalO
-    state.topRowOctaveOffset = finalTop
-    state.bottomRowOctaveOffset = finalBot
-    arpeggiator.updateLatchedArpNotes()
-    local degreeNames = {
-      [0] = "Degree 1 (Root)",
-      [1] = "Degree 2",
-      [2] = "Degree 3",
-      [3] = "Degree 4",
-      [4] = "Degree 5",
-      [5] = "Degree 6",
-      [6] = "Degree 7 (Subtonic)"
-    }
-    local degLabel = degreeNames[state.transposeShift] or ("Degree " .. (state.transposeShift + 1))
-    local spot = {
-      title = spotTitle or "TRANSPOSE",
-      value = degLabel,
-      subtext = string.format("Scale Degree %d | Octave %+d", state.transposeShift + 1, math.floor(state.octaveShift / 12)),
-      targetId = "key-38",
-      color = "#64d8f0"
-    }
-    hud.updateWebviewHud(spot)
-  end
-end
-
-local function executeControlAction(act, code)
-  if act == "closeMidiHud" then
-    if _G.closeMidiHud then _G.closeMidiHud("Cmd-Shift-M") end
-    return
-  end
-
-  if act == "undoState" then
-    undoControllerState(code)
-    return
-  elseif act == "redoState" then
-    redoControllerState(code)
-    return
-  elseif string.match(act, "^setArpRate_(%d+)$") then
-    local rate = tonumber(string.match(act, "^setArpRate_(%d+)$"))
-    setActiveArpRate(rate)
-    hud.updateWebviewHud()
-    return
-  elseif string.match(act, "^setArpDir_(%d+)$") then
-    local dir = tonumber(string.match(act, "^setArpDir_(%d+)$"))
-    state.arpDirectionIdx = dir
-    hud.updateWebviewHud()
-    return
-  elseif string.match(act, "^setArpQuantize_(.+)$") then
-    local quant = string.match(act, "^setArpQuantize_(.+)$")
-    state.arpQuantizeMode = quant
-    hs.settings.set("qwertyMidi_arpQuantizeMode", quant)
-    hud.updateWebviewHud()
-    return
-  elseif act == "arpLatchToggle" then
-    arpeggiator.toggleArpLatch()
-    return
-  end
-
-  -- Top/Bottom ARP controls target the selected track for that row. The
-  -- multi-track engine no longer consumes the legacy row-level flags.
-  if act == "arpTopToggle" or act == "arpBottomToggle" then
-    local rowName = act == "arpTopToggle" and "TOP" or "BOTTOM"
-    local trackId = act == "arpTopToggle" and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trackId]
-    if trk then
-      arpeggiator.toggleArpPower(trackId)
-      state.arpTopEnabled = (state.tracks[state.topRowTrack or 3].arpEnabled == true)
-      state.arpBottomEnabled = (state.tracks[state.bottomRowTrack or 1].arpEnabled == true)
-      hud.updateWebviewHud({
-        title = rowName .. " ROW ARP (TRACK " .. trackId .. ")",
-        value = trk.arpEnabled and (trk.arpLatchActive and "ON • LATCH 🔒" or "ON") or "OFF",
-        subtext = trk.name .. " • " .. (trk.arpEnabled and "Arpeggiating" or "Live Play"),
-        targetId = act == "arpTopToggle" and "arp-top-toggle" or "arp-bottom-toggle",
-        color = trk.color or "#d4a359"
-      })
-    end
-    return
-  end
-
-  -- Record state snapshot before mutating controller parameters
-  if act == "modeDown" or act == "modeUp" or
-     act == "rootDown" or act == "rootUp" or act == "randomScale" or act == "resetAll" or
-     act == "arpToggle" or act == "arpTopToggle" or act == "arpBottomToggle" or
-     act == "arpLinkToggle" or act == "arpDirDown" or act == "arpDirUp" or act == "arpRateDown" or act == "arpRateUp" or
-     act == "arpGateDown" or act == "arpGateUp" or act == "bpmDown" or act == "bpmUp" or
-     act == "atkDown" or act == "atkUp" or act == "decDown" or act == "decUp" or
-     act == "relDown" or act == "relUp" or act == "releaseDown" or act == "releaseUp" or
-     act == "volDown" or act == "volUp" or act == "topVolDown" or act == "topVolUp" or
-     act == "botVolDown" or act == "botVolUp" or
-     act == "modWheelDown" or act == "modWheelUp" or act == "botOctDown" or act == "botOctUp" or
-     act == "octaveDown" or act == "octaveUp" then
-    pushStateSnapshot(act)
-  end
-
-  if act == "topOctDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newTop = curTop - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-      if topTrk then topTrk.octaveOffset = finalTop end
-      config.saveSettings()
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TOP OCTAVE",
-        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
-        subtext = "Top keys shifted",
-        targetId = "octave-indicator-top",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "topOctUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newTop = curTop + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      local topTrk = state.tracks and state.tracks[state.topRowTrack or 3]
-      if topTrk then topTrk.octaveOffset = finalTop end
-      config.saveSettings()
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TOP OCTAVE",
-        value = ((state.topRowOctaveOffset + 12) >= 0 and "+" or "") .. math.floor((state.topRowOctaveOffset + 12) / 12) .. " Oct",
-        subtext = "Top keys shifted",
-        targetId = "octave-indicator-top",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "botOctDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newBot = curBot - 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-      if botTrk then botTrk.octaveOffset = finalBot end
-      config.saveSettings()
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "BOT OCTAVE",
-        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
-        subtext = "Bottom keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "botOctUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local newBot = curBot + 12
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, curTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      local botTrk = state.tracks and state.tracks[state.bottomRowTrack or 1]
-      if botTrk then botTrk.octaveOffset = finalBot end
-      config.saveSettings()
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "BOT OCTAVE",
-        value = (state.bottomRowOctaveOffset >= 0 and "+" or "") .. math.floor(state.bottomRowOctaveOffset / 12) .. " Oct",
-        subtext = "Bottom keys shifted",
-        targetId = "octave-indicator-bottom",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "trnspDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
-    local newT = curT - 1
-    local newO = curO
-    if newT <= -numIntervals then
-      newT = newT + numIntervals
-      newO = newO - 12
-    end
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TRANSPOSE",
-        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
-        subtext = "Scale notes shifted",
-        targetId = "header",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "trnspUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local numIntervals = #config.SCALES[state.currentScaleIdx].intervals
-    local newT = curT + 1
-    local newO = curO
-    if newT >= numIntervals then
-      newT = newT - numIntervals
-      newO = newO + 12
-    end
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(newT, newO, curTop, curBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.transposeShift = finalT
-      state.octaveShift = finalO
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local spot = {
-        title = "TRANSPOSE",
-        value = (state.transposeShift >= 0 and "+" or "") .. state.transposeShift .. " steps",
-        subtext = "Scale notes shifted",
-        targetId = "header",
-        color = "#d4a359"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "octaveDown" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local activeTrkId = state.activeTrack or 1
-    local isTop = (activeTrkId > 2)
-    local newTop = isTop and (curTop - 12) or curTop
-    local newBot = (not isTop) and (curBot - 12) or curBot
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[activeTrkId]
-      if actTrk then
-        actTrk.octaveOffset = isTop and finalTop or finalBot
-      end
-      config.saveSettings()
-      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
-      local spot = {
-        title = "OCTAVE (TRK " .. activeTrkId .. ")",
-        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
-        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
-        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
-        color = (actTrk and actTrk.color) or "#00e5ff"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "octaveUp" then
-    local curT = tonumber(state.transposeShift) or 0
-    local curO = tonumber(state.octaveShift) or 0
-    local curTop = tonumber(state.topRowOctaveOffset) or 0
-    local curBot = tonumber(state.bottomRowOctaveOffset) or 0
-    local activeTrkId = state.activeTrack or 1
-    local isTop = (activeTrkId > 2)
-    local newTop = isTop and (curTop + 12) or curTop
-    local newBot = (not isTop) and (curBot + 12) or curBot
-    local ok, finalT, finalO, finalTop, finalBot = canApplyShifts(curT, curO, newTop, newBot)
-    if ok then
-      pushStateSnapshot(act)
-      state.topRowOctaveOffset = finalTop
-      state.bottomRowOctaveOffset = finalBot
-      arpeggiator.updateLatchedArpNotes()
-      local actTrk = state.tracks and state.tracks[activeTrkId]
-      if actTrk then
-        actTrk.octaveOffset = isTop and finalTop or finalBot
-      end
-      config.saveSettings()
-      local octVal = actTrk and actTrk.octaveOffset or (isTop and finalTop or finalBot)
-      local spot = {
-        title = "OCTAVE (TRK " .. activeTrkId .. ")",
-        value = (octVal >= 0 and "+" or "") .. math.floor(octVal / 12) .. " Oct",
-        subtext = (actTrk and actTrk.name or ("Track " .. activeTrkId)) .. " Octave Offset",
-        targetId = isTop and "octave-indicator-top" or "octave-indicator-bottom",
-        color = (actTrk and actTrk.color) or "#00e5ff"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "modeDown" then
-    state.currentScaleIdx = (state.currentScaleIdx - 2) % #SCALES + 1
-    arpeggiator.updateLatchedArpNotes()
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "SCALE / MODE",
-      value = scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "modeUp" then
-    state.currentScaleIdx = (state.currentScaleIdx % #SCALES) + 1
-    arpeggiator.updateLatchedArpNotes()
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "SCALE / MODE",
-      value = scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "rootDown" then
-    if state.currentRoot == 0 then
-      state.currentRoot = 11
-      state.octaveShift = math.max(-36, state.octaveShift - 12)
-    else
-      state.currentRoot = state.currentRoot - 1
-    end
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local spot = {
-      title = "ROOT NOTE",
-      value = rootName,
-      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-      targetId = "root-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "rootUp" then
-    if state.currentRoot == 11 then
-      state.currentRoot = 0
-      state.octaveShift = math.min(36, state.octaveShift + 12)
-    else
-      state.currentRoot = state.currentRoot + 1
-    end
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local spot = {
-      title = "ROOT NOTE",
-      value = rootName,
-      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-      targetId = "root-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomScale" then
-    state.currentRoot = math.random(0, 11)
-    state.currentScaleIdx = math.random(1, #SCALES)
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "RANDOM SCALE",
-      value = rootName .. " " .. scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomRoot" then
-    state.currentRoot = math.random(0, 11)
-    arpeggiator.updateLatchedArpNotes()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local spot = {
-      title = "RANDOM ROOT",
-      value = rootName,
-      subtext = rootName .. " " .. SCALES[state.currentScaleIdx].name,
-      targetId = "root-select",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomMode" then
-    state.currentScaleIdx = math.random(1, #SCALES)
-    arpeggiator.updateLatchedArpNotes()
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "RANDOM MODE",
-      value = scaleInfo.name,
-      subtext = scaleInfo.brightTag,
-      targetId = "mode-thumb",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomRhythm" then
-    setActiveArpRate(math.random(1, #state.ARP_RATES))
-    state.arpGatePercent = math.random(25, 120)
-    arpeggiator.applyGatePercentChange()
-    local spot = {
-      title = "RANDOM RHYTHM",
-      value = state.ARP_RATES[state.arpRateIdx].label .. " (" .. math.floor(state.arpGatePercent) .. "%)",
-      subtext = "Rate & Gate Randomized",
-      targetId = "arp-rate-select",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "randomAll" then
-    state.currentRoot = math.random(0, 11)
-    state.currentScaleIdx = math.random(1, #SCALES)
-    state.arpDirectionIdx = math.random(1, #state.ARP_DIRECTIONS)
-    setActiveArpRate(math.random(1, #state.ARP_RATES))
-    state.arpGatePercent = math.random(25, 120)
-    arpeggiator.updateLatchedArpNotes()
-    arpeggiator.applyGatePercentChange()
-    local rootName = NOTE_NAMES[state.currentRoot + 1]
-    local scaleInfo = SCALES[state.currentScaleIdx]
-    local spot = {
-      title = "RANDOM ALL",
-      value = rootName .. " " .. scaleInfo.name,
-      subtext = "Root, Mode & Rhythm Randomized",
-      targetId = "key-1",
-      color = "#ffd700"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpBypassToggle" then
-    state.arpBypassed = not state.arpBypassed
-    local spot = {
-      title = "ARP BYPASS",
-      value = state.arpBypassed and "BYPASS ON (Live Notes)" or "BYPASS OFF (Arp Active)",
-      subtext = state.arpBypassed and "Live key presses bypass arpeggiator" or "Keys trigger arpeggiator normally",
-      targetId = "key-0",
-      color = state.arpBypassed and "#ffd700" or "#50fa7b"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "panic" then
-    -- Stop producers before sending the MIDI panic sweep so no timer or queued
-    -- quantized note can immediately retrigger after the sweep.
-    if arpeggiator.stopAllLoops then arpeggiator.stopAllLoops() end
-    if quantizer.panic then
-      quantizer.panic(function(pitches, channel)
-        for _, pitch in ipairs(pitches or {}) do
-          midi.sendMidiNote("noteOff", pitch, 0, channel or 0)
-        end
-      end)
-    end
-    local ks = _G.activeWatchers and _G.activeWatchers.keystep
-    if ks and ks.panic then ks.panic() end
-    local midiAvailable = midi.getMidiDevice() ~= nil
-    midi.panicAllChannels()
-    state.sustainActive = false
-    state.sustainKeyDownTime = nil
-    state.arpLatchActive = false
-    state.sustainedPitches = {}
-    state.pressedKeys = {}
-    if state.tracks then
-      for _, trk in pairs(state.tracks) do
-        trk.sustainMode = "off"
-        trk.sustainedPitches = {}
-        trk.physicalKeysHeld = {}
-        trk.activeNotesCount = 0
-      end
-    end
-
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    state.arpSequence = {}
-
-    -- Clear repeats
-    stopAllControlRepeats()
-
-    local spot = {
-      title = "MIDI PANIC",
-      value = midiAvailable and "ALL NOTES OFF" or "STATE CLEARED",
-      subtext = midiAvailable and "Panic sent on all MIDI channels" or "MIDI output unavailable; external silence not confirmed",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-    if hudModule and hudModule.updateWebviewHud then
-      hudModule.updateWebviewHud(nil, nil, true)
-    end
-  elseif act == "resetAll" then
-    state.octaveShift = 0
-    state.topRowOctaveOffset = 0
-    state.bottomRowOctaveOffset = 0
-    state.transposeShift = 0
-    state.topRowVolume = 100
-    state.bottomRowVolume = 100
-    state.currentRoot = 0
-    state.currentScaleIdx = 1
-    state.sustainActive = false
-    state.ccStates[1] = 0
-    _G.activeWatchers.modAccumulator = 0
-    arpeggiator.stopArpTimer()
-    state.arpHeldNotes = {}
-    state.arpKeysCurrentlyHeld = {}
-    state.arpEnabled = false
-    state.arpLatchActive = false
-    state.arpTopEnabled = true
-    state.arpBottomEnabled = true
-    midi.sendMidiCC(64, 0)
-    midi.sendMidiCC(1, 0)
-    local spot = {
-      title = "RESET ALL",
-      value = "DEFAULTS RESTORED",
-      subtext = "Everything reset to defaults",
-      targetId = code and ("key-" .. code) or "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "zoomOut" or act == "zoomDown" then
-    state.zoomLevel = math.max(0.5, state.zoomLevel - 0.1)
-    local spot = {
-      title = "HUD ZOOM",
-      value = math.floor(state.zoomLevel * 100) .. "%",
-      subtext = "Scale Factor",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "zoomIn" or act == "zoomUp" then
-    state.zoomLevel = math.min(2.0, state.zoomLevel + 0.1)
-    local spot = {
-      title = "HUD ZOOM",
-      value = math.floor(state.zoomLevel * 100) .. "%",
-      subtext = "Scale Factor",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "sustain" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    local now = hs.timer.secondsSinceEpoch()
-    state.sustainKeyDownTime = now
-    state.tabDamping = true
-    if trk then
-      trk.sustainWasActiveOnPress = (trk.sustainMode == "smart")
-      -- A short second Tab press is the explicit, visible sustain-off gesture.
-      -- The first tap retains its useful damping behavior.
-      if trk.lastSmartSustainTapAt and (now - trk.lastSmartSustainTapAt) <= 0.35 then
-        trk.sustainMode = "off"
-        trk.lastSmartSustainTapAt = nil
-        state.sustainActive = false
-        cleanupSustainPitches(activeTrkId)
-        config.saveSettings()
-        hud.updateWebviewHud({
-          title = "SUSTAIN OFF (TRK " .. activeTrkId .. ")",
-          value = "OFF",
-          subtext = "Double-tap Tab toggles Smart Sustain off",
-          targetId = code and ("key-" .. code) or "key-48",
-          color = "#b5aba0"
-        })
-      elseif trk.sustainMode == "off" then
-        trk.sustainMode = "smart"
-        state.sustainActive = true
-        config.saveSettings()
-        local spot = {
-          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = "SMART ON",
-          subtext = "Tap Tab to damp · double-tap Tab to turn off",
-          targetId = code and ("key-" .. code) or "key-48",
-          color = trk.color or "#00e5ff"
-        }
-        hud.updateWebviewHud(spot)
-      else
-        -- Reverse functionality: smart sustain is on, hitting Tab cuts off ringing notes for silence
-        local hadNotes = (trk.sustainedPitches and #trk.sustainedPitches > 0)
-        cleanupSustainPitches(activeTrkId)
-        local spot = {
-          title = "DAMP / SILENCE (TRK " .. activeTrkId .. ")",
-          value = "CUT OFF",
-          subtext = hadNotes and "Silenced ringing notes; double-tap Tab to turn off" or "Silence; Smart Sustain active (2× Tab = off)",
-          targetId = code and ("key-" .. code) or "key-48",
-          color = trk.color or "#00e5ff"
-        }
-        hud.updateWebviewHud(spot)
-      end
-    end
-  elseif act == "classicSustain" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    state.sustainKeyDownTime = hs.timer.secondsSinceEpoch()
-    if trk then
-      trk.classicWasActiveOnPress = (trk.sustainMode == "classic")
-    end
-    state.sustainWasActiveOnPress = (trk and trk.sustainMode == "classic") or state.sustainActive
-    local isClassic = trk and (trk.sustainMode == "classic")
-    local spot = {
-      title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
-      value = isClassic and "CLASSIC ON" or "CLASSIC OFF",
-      subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Shift+Tab to toggle Classic",
-      targetId = code and ("key-" .. code) or "key-48",
-      color = trk and trk.color or "#ff9100"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpToggle" then
-    arpeggiator.toggleArpPower()
-  elseif act == "arpLinkToggle" then
-    arpeggiator.toggleArpLink()
-  elseif act == "chordToggle" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    state.chordKeyDownTime = hs.timer.secondsSinceEpoch()
-    if trk then
-      trk.chordWasActiveOnPress = (trk.chordModeActive == true)
-    end
-    state.chordWasActiveOnPress = (trk and trk.chordModeActive) or state.chordModeActive
-    local isChord = trk and trk.chordModeActive
-    local chordName = state.CHORDS[(trk and trk.chordIdx) or state.chordIdx or 1].name
-    local spot = {
-      title = "CHORD MODE (TRK " .. activeTrkId .. ")",
-      value = isChord and ("ON (" .. chordName .. ")") or "OFF",
-      subtext = isChord and ("Track " .. activeTrkId .. " chords enabled") or ("Track " .. activeTrkId .. " single notes"),
-      targetId = "header",
-      color = isChord and "#d4a359" or "#b5aba0"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "chordUp" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    if trk then
-      trk.chordIdx = ((trk.chordIdx or 1) % #state.CHORDS) + 1
-      state.chordIdx = trk.chordIdx
-    else
-      state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
-    end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
-    local chordName = state.CHORDS[state.chordIdx].name
-    local spot = {
-      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
-      value = chordName,
-      subtext = "Cycle chord type for Track " .. activeTrkId,
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "chordDown" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    if trk then
-      trk.chordIdx = (((trk.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
-      state.chordIdx = trk.chordIdx
-    else
-      state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
-    end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(activeTrkId)
-    local chordName = state.CHORDS[state.chordIdx].name
-    local spot = {
-      title = "CHORD TYPE (TRK " .. activeTrkId .. ")",
-      value = chordName,
-      subtext = "Cycle chord type for Track " .. activeTrkId,
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "modWheelDown" then
-    local currentVal = state.ccStates[1] or 0
-    local newVal = math.max(0, currentVal - 4)
-    state.ccStates[1] = newVal
-    _G.activeWatchers.modAccumulator = newVal
-    midi.sendMidiCC(1, newVal)
-    local spot = {
-      title = "MOD WHEEL",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #1 Intensity",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "modWheelUp" or act == "modWheel" then
-    local currentVal = state.ccStates[1] or 0
-    local newVal = math.min(127, currentVal + 4)
-    state.ccStates[1] = newVal
-    _G.activeWatchers.modAccumulator = newVal
-    midi.sendMidiCC(1, newVal)
-    local spot = {
-      title = "MOD WHEEL",
-      value = math.floor((newVal / 127) * 100) .. "%",
-      subtext = "CC #1 Intensity",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "topVolDown" then
-    state.topRowVolume = math.max(0, state.topRowVolume - 4)
-    local topTrkId = state.topRowTrack or 3
-    local trk = state.tracks and state.tracks[topTrkId]
-    if trk then
-      trk.volume = state.topRowVolume
-      if isTrackAudible(topTrkId) then
-        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
-      end
-    end
-    config.saveSettings()
-    local spot = {
-      title = "TOP ROW VOL",
-      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = (trk and trk.name or "Upper Keys") .. " Level",
-      targetId = "vol-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "topVolUp" then
-    state.topRowVolume = math.min(127, state.topRowVolume + 4)
-    local topTrkId = state.topRowTrack or 3
-    local trk = state.tracks and state.tracks[topTrkId]
-    if trk then
-      trk.volume = state.topRowVolume
-      if isTrackAudible(topTrkId) then
-        midi.sendMidiCC(7, state.topRowVolume, trk.channel or 2)
-      end
-    end
-    config.saveSettings()
-    local spot = {
-      title = "TOP ROW VOL",
-      value = math.floor((state.topRowVolume / 127) * 100) .. "%",
-      subtext = (trk and trk.name or "Upper Keys") .. " Level",
-      targetId = "vol-indicator-top",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "botVolDown" then
-    state.bottomRowVolume = math.max(0, state.bottomRowVolume - 4)
-    local botTrkId = state.bottomRowTrack or 1
-    local trk = state.tracks and state.tracks[botTrkId]
-    if trk then
-      trk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrkId) then
-        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
-      end
-    end
-    config.saveSettings()
-    local spot = {
-      title = "BOTTOM ROW VOL",
-      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = (trk and trk.name or "Lower Keys") .. " Level",
-      targetId = "vol-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "botVolUp" then
-    state.bottomRowVolume = math.min(127, state.bottomRowVolume + 4)
-    local botTrkId = state.bottomRowTrack or 1
-    local trk = state.tracks and state.tracks[botTrkId]
-    if trk then
-      trk.volume = state.bottomRowVolume
-      if isTrackAudible(botTrkId) then
-        midi.sendMidiCC(7, state.bottomRowVolume, trk.channel or 0)
-      end
-    end
-    config.saveSettings()
-    local spot = {
-      title = "BOTTOM ROW VOL",
-      value = math.floor((state.bottomRowVolume / 127) * 100) .. "%",
-      subtext = (trk and trk.name or "Lower Keys") .. " Level",
-      targetId = "vol-indicator-bottom",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "volDown" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    if trk then
-      trk.volume = math.max(0, (trk.volume or 100) - 4)
-      if isTrackAudible(trk.id) then
-        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
-      end
-      if activeTrkId <= 2 then
-        state.bottomRowVolume = trk.volume
-      else
-        state.topRowVolume = trk.volume
-      end
-      config.saveSettings()
-      local spot = {
-        title = "VOLUME (TRK " .. activeTrkId .. ")",
-        value = math.floor((trk.volume / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
-        targetId = "header",
-        color = trk.color or "#00e5ff"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "volUp" or act == "volume" then
-    local activeTrkId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[activeTrkId]
-    if trk then
-      trk.volume = math.min(127, (trk.volume or 100) + 4)
-      if isTrackAudible(trk.id) then
-        midi.sendMidiCC(7, trk.volume, trk.channel or 0)
-      end
-      if activeTrkId <= 2 then
-        state.bottomRowVolume = trk.volume
-      else
-        state.topRowVolume = trk.volume
-      end
-      config.saveSettings()
-      local spot = {
-        title = "VOLUME (TRK " .. activeTrkId .. ")",
-        value = math.floor((trk.volume / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. activeTrkId)) .. " Volume (CC #7)",
-        targetId = "header",
-        color = trk.color or "#00e5ff"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "chordUp" then
-    state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    local chordName = state.CHORDS[state.chordIdx].name
-    local spot = {
-      title = "CHORD TYPE",
-      value = chordName,
-      subtext = "Active Chord Modifier Pattern",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "chordDown" then
-    state.chordIdx = ((state.chordIdx - 2 + #state.CHORDS) % #state.CHORDS) + 1
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    local chordName = state.CHORDS[state.chordIdx].name
-    local spot = {
-      title = "CHORD TYPE",
-      value = chordName,
-      subtext = "Active Chord Modifier Pattern",
-      targetId = "header",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpDirDown" then
-    local currentDir = getActiveArpDirectionIdx()
-    local nextDir = ((currentDir - 2 + #state.ARP_DIRECTIONS) % #state.ARP_DIRECTIONS) + 1
-    setActiveArpDirection(nextDir)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    local spot = {
-      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
-      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
-      targetId = "arp-dir-select",
-      color = (trk and trk.color) or "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpDirUp" then
-    local currentDir = getActiveArpDirectionIdx()
-    local nextDir = (currentDir % #state.ARP_DIRECTIONS) + 1
-    setActiveArpDirection(nextDir)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    local spot = {
-      title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")",
-      value = state.ARP_DIRECTIONS[state.arpDirectionIdx],
-      subtext = (trk and trk.name or ("Track " .. (state.activeTrack or 1))) .. " Arp Pattern",
-      targetId = "arp-dir-select",
-      color = (trk and trk.color) or "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpRateDown" then
-    setActiveArpRate(math.max(1, getActiveArpRateIdx() - 1))
-    local spot = {
-      title = "ARP RATE",
-      value = state.ARP_RATES[state.arpRateIdx].label,
-      subtext = "Note Division",
-      targetId = "arp-rate-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpRateUp" then
-    setActiveArpRate(math.min(#state.ARP_RATES, getActiveArpRateIdx() + 1))
-    local spot = {
-      title = "ARP RATE",
-      value = state.ARP_RATES[state.arpRateIdx].label,
-      subtext = "Note Division",
-      targetId = "arp-rate-select",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpGateDown" then
-    state.arpGatePercent = math.max(5.0, (state.arpGatePercent or 80.0) - 5.0)
-    arpeggiator.applyGatePercentChange()
-    local spot = {
-      title = "ARP NOTE LENGTH",
-      value = math.floor(state.arpGatePercent + 0.5) .. "%",
-      subtext = "Gate Duration",
-      targetId = "gate-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "arpGateUp" then
-    state.arpGatePercent = math.min(150.0, (state.arpGatePercent or 80.0) + 5.0)
-    arpeggiator.applyGatePercentChange()
-    local spot = {
-      title = "ARP NOTE LENGTH",
-      value = math.floor(state.arpGatePercent + 0.5) .. "%",
-      subtext = "Gate Duration",
-      targetId = "gate-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "bpmDown" then
-    local step = state.bpmStepSize or 10
-    state.arpBpm = math.max(20.0, state.arpBpm - step)
-    arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(-step)
-    local spot = {
-      title = "TEMPO / BPM",
-      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Step: " .. step .. " BPM",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "bpmUp" then
-    local step = state.bpmStepSize or 10
-    state.arpBpm = math.min(300.0, state.arpBpm + step)
-    arpeggiator.applyBpmChange()
-    arpeggiator.stepLogicBpm(step)
-    local spot = {
-      title = "TEMPO / BPM",
-      value = arpeggiator.formatBpm(state.arpBpm) .. " BPM",
-      subtext = "Step: " .. step .. " BPM",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-  elseif act == "atkDown" then
-    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trkId]
-    if trk then
-      trk.attack = math.max(0, (trk.attack or 0) - 4)
-      local ch = trk.channel or (trkId - 1)
-      midi.sendMidiCC(24, trk.attack, ch)
-      midi.sendMidiCC(73, trk.attack, ch)
-      config.saveSettings()
-      local spot = {
-        title = "ATTACK (TRK " .. trkId .. ")",
-        value = math.floor((trk.attack / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "key-25",
-        color = trk.color or "#00e676"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "atkUp" then
-    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trkId]
-    if trk then
-      trk.attack = math.min(127, (trk.attack or 0) + 4)
-      local ch = trk.channel or (trkId - 1)
-      midi.sendMidiCC(24, trk.attack, ch)
-      midi.sendMidiCC(73, trk.attack, ch)
-      config.saveSettings()
-      local spot = {
-        title = "ATTACK (TRK " .. trkId .. ")",
-        value = math.floor((trk.attack / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Attack",
-        targetId = "key-29",
-        color = trk.color or "#00e676"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "decDown" or act == "relDown" or act == "releaseDown" then
-    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trkId]
-    if trk then
-      trk.decay = math.max(0, (trk.decay or 64) - 4)
-      local ch = trk.channel or (trkId - 1)
-      midi.sendMidiCC(25, trk.decay, ch)
-      midi.sendMidiCC(26, trk.decay, ch)
-      midi.sendMidiCC(27, trk.decay, ch)
-      midi.sendMidiCC(72, trk.decay, ch)
-      config.saveSettings()
-      local spot = {
-        title = "DECAY & TAIL (TRK " .. trkId .. ")",
-        value = math.floor((trk.decay / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "key-25",
-        color = trk.color or "#ffd700"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "decUp" or act == "relUp" or act == "releaseUp" then
-    local trkId = state.activeTrack or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trkId]
-    if trk then
-      trk.decay = math.min(127, (trk.decay or 64) + 4)
-      local ch = trk.channel or (trkId - 1)
-      midi.sendMidiCC(25, trk.decay, ch)
-      midi.sendMidiCC(26, trk.decay, ch)
-      midi.sendMidiCC(27, trk.decay, ch)
-      midi.sendMidiCC(72, trk.decay, ch)
-      config.saveSettings()
-      local spot = {
-        title = "DECAY & TAIL (TRK " .. trkId .. ")",
-        value = math.floor((trk.decay / 127) * 100) .. "%",
-        subtext = (trk.name or ("Track " .. trkId)) .. " Envelope Decay / Tail",
-        targetId = "key-29",
-        color = trk.color or "#ffd700"
-      }
-      hud.updateWebviewHud(spot)
-    end
-  elseif act == "bpmEdit" then
-    state.bpmInputMode = true
-    state.bpmBeforeEdit = state.arpBpm
-    state.bpmInputBuffer = ""
-    local spot = {
-      title = "EDIT BPM",
-      value = "TYPE TEMPO",
-      subtext = "Type digits & press Enter",
-      targetId = "bpm-value",
-      color = "#d4a359"
-    }
-    hud.updateWebviewHud(spot)
-
-  -- Transposition Actions
-  elseif act == "trnspStep1Up" then
-    applyTransposeDelta(1, "TRNSP +1 STEP")
-  elseif act == "trnspStep1Down" then
-    applyTransposeDelta(-1, "TRNSP -1 STEP")
-  elseif act == "trnspStep2Up" then
-    applyTransposeDelta(2, "TRNSP +2 STEPS (3RD)")
-  elseif act == "trnspStep2Down" then
-    applyTransposeDelta(-2, "TRNSP -2 STEPS (3RD)")
-  elseif act == "trnspStep3Up" then
-    applyTransposeDelta(3, "TRNSP +3 STEPS (4TH)")
-  elseif act == "trnspStep3Down" then
-    applyTransposeDelta(-3, "TRNSP -3 STEPS (4TH)")
-  elseif act == "trnspNearRootUp" then
-    local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
-    local rem = (state.transposeShift % numIntervals + numIntervals) % numIntervals
-    local delta = (rem == 0) and numIntervals or (numIntervals - rem)
-    applyTransposeDelta(delta, "NEAR ROOT ↑")
-  elseif act == "trnspNearSubDown" then
-    local numIntervals = #config.SCALES[state.currentScaleIdx or 1].intervals
-    local subtonic = numIntervals - 1
-    local rem = (state.transposeShift % numIntervals + numIntervals) % numIntervals
-    local delta = (rem - subtonic + numIntervals) % numIntervals
-    if delta == 0 then delta = numIntervals end
-    applyTransposeDelta(-delta, "NEAR SUBTONIC ↓")
-
-  -- Mode Actions (Consolidated on G)
-  elseif act == "modeStep2Up" then
-    state.currentScaleIdx = ((state.currentScaleIdx + 1) % #config.SCALES) + 1
-    arpeggiator.updateLatchedArpNotes()
-    local sc = config.SCALES[state.currentScaleIdx]
-    hud.updateWebviewHud({ title = "MODE +2", value = sc.name, subtext = sc.brightTag, targetId = "key-5", color = "#ffd700" })
-  elseif act == "modeStep2Down" then
-    state.currentScaleIdx = ((state.currentScaleIdx - 3 + #config.SCALES) % #config.SCALES) + 1
-    arpeggiator.updateLatchedArpNotes()
-    local sc = config.SCALES[state.currentScaleIdx]
-    hud.updateWebviewHud({ title = "MODE -2", value = sc.name, subtext = sc.brightTag, targetId = "key-5", color = "#ffd700" })
-  elseif act == "modeSetMajor" then
-    state.currentScaleIdx = 2 -- Major / Ionian
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[2].name, subtext = config.SCALES[2].brightTag, targetId = "key-5", color = "#50fa7b" })
-  elseif act == "modeSetAeolian" then
-    state.currentScaleIdx = 5 -- Natural Minor / Aeolian
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[5].name, subtext = config.SCALES[5].brightTag, targetId = "key-5", color = "#64d8f0" })
-  elseif act == "modeSetLydian" then
-    state.currentScaleIdx = 1 -- Lydian
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[1].name, subtext = config.SCALES[1].brightTag, targetId = "key-5", color = "#ffb86c" })
-  elseif act == "modeSetLocrian" then
-    state.currentScaleIdx = 7 -- Locrian
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "MODE SNAP", value = config.SCALES[7].name, subtext = config.SCALES[7].brightTag, targetId = "key-5", color = "#bd93f9" })
-
-  -- Root Actions (Consolidated on H)
-  elseif act == "rootFifthUp" then
-    state.currentRoot = (state.currentRoot + 7) % 12
-    arpeggiator.updateLatchedArpNotes()
-    local name = config.NOTE_NAMES[state.currentRoot + 1]
-    hud.updateWebviewHud({ title = "ROOT +5TH", value = name, subtext = "Circle of Fifths Clockwise", targetId = "key-4", color = "#ffd700" })
-  elseif act == "rootFifthDown" then
-    state.currentRoot = (state.currentRoot + 5) % 12
-    arpeggiator.updateLatchedArpNotes()
-    local name = config.NOTE_NAMES[state.currentRoot + 1]
-    hud.updateWebviewHud({ title = "ROOT -5TH", value = name, subtext = "Circle of Fifths Counter-Clockwise", targetId = "key-4", color = "#ffd700" })
-  elseif act == "rootSetC" then
-    state.currentRoot = 0
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "ROOT SNAP", value = "C", subtext = "Concert Pitch Root", targetId = "key-4", color = "#50fa7b" })
-  elseif act == "rootSetA" then
-    state.currentRoot = 9
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "ROOT SNAP", value = "A", subtext = "Natural Minor Anchor", targetId = "key-4", color = "#64d8f0" })
-  elseif act == "rootOctaveUp" then
-    executeControlAction("octaveUp", code)
-  elseif act == "rootOctaveDown" then
-    executeControlAction("octaveDown", code)
-
-  -- Octave Reset (Consolidated on D)
-  elseif act == "octReset" then
-    state.octaveShift = 0
-    state.topRowOctaveOffset = 0
-    state.bottomRowOctaveOffset = 0
-    arpeggiator.updateLatchedArpNotes()
-    hud.updateWebviewHud({ title = "OCTAVE RESET", value = "0 Oct", subtext = "All Octave Shifts Centered", targetId = "key-2", color = "#50fa7b" })
-
-  -- Master Arp & Track Loop Lock (Consolidated on B)
-  elseif act == "lockLoop" then
-    local curId = state.activeTrack or 1
-    local trk = state.tracks and state.tracks[curId]
-    if trk then
-      trk.locked = true
-      trk.arpEnabled = true
-      trk.arpLatchActive = true
-      state.arpEnabled = true
-      state.arpLatchActive = true
-      hud.updateWebviewHud({ title = "LOOP LOCKED", value = "Track " .. curId .. " (" .. trk.name .. ") Looping 🔁", subtext = "Continuous background pattern", targetId = "key-11", color = trk.color or "#ffd700" })
-    end
-  elseif act == "lockAndSwap" then
-    local curId = state.activeTrack or 1
-    local curTrk = state.tracks and state.tracks[curId]
-    if curTrk then
-      curTrk.locked = true
-      curTrk.arpEnabled = true
-      curTrk.arpLatchActive = true
-    end
-    local nextId = (curId % 4) + 1
-    selectTrack(nextId)
-    local nextTrk = state.tracks and state.tracks[nextId]
-    hud.updateWebviewHud({ title = "LOCKED & SWAPPED", value = "Track " .. curId .. " Looping 🔁", subtext = "Now playing Track " .. nextId .. " (" .. (nextTrk and nextTrk.name or "") .. ")", targetId = "key-11", color = "#ffd700" })
-  elseif act == "lockAllTracks" then
-    if state.tracks then
-      for _, t in pairs(state.tracks) do
-        if countTableKeys(t.heldNotes) > 0 then
-          t.locked = true
-          t.arpEnabled = true
-          t.arpLatchActive = true
-        end
-      end
-    end
-    state.arpEnabled = true
-    state.arpLatchActive = true
-    hud.updateWebviewHud({ title = "LOCK 4 TRACKS", value = "All Active Loops Locked", subtext = "4-Track Sequence Running", targetId = "key-11", color = "#ffd700" })
-  elseif act == "stopLoops" then
-    arpeggiator.stopAllLoops()
-    hud.updateWebviewHud({ title = "LOOPS STOPPED", value = "All Background Arps Silenced", subtext = "Arpeggiator Idle", targetId = "key-45", color = "#ff5555" })
-  elseif act == "freezeAll" then
-    state.arpLatchActive = true
-    if state.tracks then
-      for _, t in pairs(state.tracks) do
-        if countTableKeys(t.heldNotes) > 0 then t.arpLatchActive = true end
-      end
-    end
-    hud.updateWebviewHud({ title = "FREEZE ALL", value = "All Patterns Frozen", subtext = "Live Notes Latched", targetId = "key-11", color = "#64d8f0" })
-
-  -- Freed Keys: K (Bottom 1<->2), L (Top 3<->4), ; (Focus/Mixer)
-  elseif act == "botTrackToggle" then
-    local nextId = (state.bottomRowTrack == 1) and 2 or 1
-    selectTrack(nextId)
-  elseif act == "botTrackLock" then
-    local trkId = state.activeTrack or 1
-    if trkId > 2 then trkId = 1 end
-    if state.tracks and state.tracks[trkId] then
-      state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-40", color = "#ffd700" })
-    end
-  elseif act == "topTrackToggle" then
-    local nextId = (state.topRowTrack == 3) and 4 or 3
-    selectTrack(nextId)
-  elseif act == "topTrackLock" then
-    local trkId = state.activeTrack or 3
-    if trkId <= 2 then trkId = 3 end
-    if state.tracks and state.tracks[trkId] then
-      state.tracks[trkId].locked = not state.tracks[trkId].locked
-      hud.updateWebviewHud({ title = "TRACK " .. trkId .. " LOCK", value = "Track " .. trkId .. (state.tracks[trkId].locked and " LOCKED 🔒" or " UNLOCKED 🔓"), subtext = state.tracks[trkId].name, targetId = "key-37", color = "#ffd700" })
-    end
-  elseif act == "trackFocusCycle" then
-    local nextId = (state.activeTrack % 4) + 1
-    selectTrack(nextId)
-  elseif act == "allMuteToggle" then
-    local anyUnmuted = false
-    if state.tracks then
-      for _, t in pairs(state.tracks) do
-        if not t.muted then anyUnmuted = true; break end
-      end
-      for _, t in pairs(state.tracks) do t.muted = anyUnmuted end
-      syncTrackAudibility()
-    end
-    hud.updateWebviewHud({ title = "MASTER MIXER", value = anyUnmuted and "ALL TRACKS MUTED 🔇" or "ALL TRACKS UNMUTED 🔊", subtext = "Global Track Mute", targetId = "key-41", color = anyUnmuted and "#ff5555" or "#50fa7b" })
-  elseif act == "mixReset" then
-    if state.tracks then
-      for _, t in pairs(state.tracks) do
-        t.muted = false
-        t.soloed = false
-        t.volume = 100
-      end
-      syncTrackAudibility()
-    end
-    state.topRowVolume = 100
-    state.bottomRowVolume = 100
-    hud.updateWebviewHud({ title = "MIXER RESET", value = "All Volumes 100%", subtext = "All Mutes & Solos Cleared", targetId = "key-41", color = "#50fa7b" })
-
-  -- Dedicated Track 1-4 Actions
-  elseif string.match(act, "^trkSelect(%d)$") then
-    local id = tonumber(string.match(act, "^trkSelect(%d)$"))
-    selectTrack(id)
-  elseif string.match(act, "^trkMute(%d)$") then
-    local id = tonumber(string.match(act, "^trkMute(%d)$"))
-    local trk = state.tracks and state.tracks[id]
-    if trk then
-      trk.muted = not trk.muted
-      syncTrackAudibility()
-      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.muted and "MUTED 🔇" or "UNMUTED 🔊", subtext = "Mute Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.muted and "#ff5555" or "#50fa7b" })
-    end
-  elseif string.match(act, "^trkSolo(%d)$") then
-    local id = tonumber(string.match(act, "^trkSolo(%d)$"))
-    local trk = state.tracks and state.tracks[id]
-    if trk then
-      trk.soloed = not trk.soloed
-      syncTrackAudibility()
-      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.soloed and "SOLO ON 🌟" or "SOLO OFF", subtext = "Solo Toggle", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.soloed and "#ffd700" or "#64d8f0" })
-    end
-  elseif string.match(act, "^trkRec(%d)$") then
-    local id = tonumber(string.match(act, "^trkRec(%d)$"))
-    local trk = state.tracks and state.tracks[id]
-    if trk then
-      trk.armed = not trk.armed
-      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.armed and "ARMED ⏺" or "DISARMED", subtext = "Record Arm", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = trk.armed and "#ff5555" or "#64d8f0" })
-    end
-  elseif string.match(act, "^trkLock(%d)$") then
-    local id = tonumber(string.match(act, "^trkLock(%d)$"))
-    local trk = state.tracks and state.tracks[id]
-    if trk then
-      trk.locked = not trk.locked
-      hud.updateWebviewHud({ title = "TRACK " .. id .. " (" .. trk.name .. ")", value = trk.locked and "LOCKED 🔒" or "UNLOCKED 🔓", subtext = "Pattern Hold", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ffd700" })
-    end
-  elseif string.match(act, "^trkClear(%d)$") then
-    local id = tonumber(string.match(act, "^trkClear(%d)$"))
-    arpeggiator.clearTrackArp(id)
-    hud.updateWebviewHud({ title = "CLEAR TRACK " .. id, value = "Pattern Cleared", subtext = "Reset Sequence", targetId = "key-" .. ({[1]=18,[2]=19,[3]=20,[4]=21})[id], color = "#ff5555" })
-  elseif string.match(act, "^trkFocus(%d)$") then
-    local id = tonumber(string.match(act, "^trkFocus(%d)$"))
-    selectTrack(id)
-
-  -- Voicing Actions
-  elseif act == "voicingUp" then
-    state.chordIdx = ((state.chordIdx or 1) % #state.CHORDS) + 1
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing +", targetId = "key-39", color = "#ffd700" })
-  elseif act == "voicingDown" then
-    state.chordIdx = (((state.chordIdx or 1) - 2 + #state.CHORDS) % #state.CHORDS) + 1
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    hud.updateWebviewHud({ title = "CHORD VOICING", value = state.CHORDS[state.chordIdx].name, subtext = "Voicing -", targetId = "key-39", color = "#ffd700" })
-  elseif act == "inversionUp" or act == "inversionDown" then
-    hud.updateWebviewHud({ title = "INVERSION", value = "Inversion Modified", subtext = "Pitch Inversion", targetId = "key-39", color = "#ffd700" })
-  elseif act == "chordPower" then
-    state.chordIdx = 4
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    hud.updateWebviewHud({ title = "CHORD VOICING", value = "Power (1-5)", subtext = "Root + Fifth", targetId = "key-39", color = "#ffd700" })
-  elseif act == "chordTriad" then
-    state.chordIdx = 1
-    local trkId = state.activeTrack or 1
-    if state.tracks and state.tracks[trkId] then state.tracks[trkId].chordIdx = state.chordIdx end
-    config.saveSettings()
-    arpeggiator.updateLatchedArpChordNotes(trkId)
-    hud.updateWebviewHud({ title = "CHORD VOICING", value = "Triad", subtext = "Root + 3rd + 5th", targetId = "key-39", color = "#ffd700" })
-
-  -- Arp Direction Presets (Key 5)
-  elseif act == "arpDirRandom" then
-    setActiveArpDirection(7)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "RANDOM", subtext = "Random Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-  elseif act == "arpDirConverge" then
-    setActiveArpDirection(5)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "CONVERGE", subtext = "Outside-In Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-  elseif act == "arpDirDiverge" then
-    setActiveArpDirection(6)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DIVERGE", subtext = "Inside-Out Order", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-  elseif act == "arpDirUpDown" then
-    setActiveArpDirection(3)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP / DOWN", subtext = "Up then Down", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-  elseif act == "arpDirDownUp" then
-    setActiveArpDirection(4)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "DOWN / UP", subtext = "Down then Up", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-  elseif act == "arpDirReset" then
-    setActiveArpDirection(1)
-    local trk = state.tracks and state.tracks[state.activeTrack or 1]
-    hud.updateWebviewHud({ title = "ARP DIRECTION (TRK " .. (state.activeTrack or 1) .. ")", value = "UP", subtext = "Default Upward", targetId = "key-23", color = (trk and trk.color) or "#64d8f0" })
-
-  -- Arp Rate Presets (Key 6)
-  elseif act == "arpRateTriplet" then
-    setActiveArpRate(15) -- 1/8T
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8T (Triplet)", subtext = "Triplet Feel", targetId = "key-22", color = "#64d8f0" })
-  elseif act == "arpRateStraight" then
-    setActiveArpRate(6) -- 1/8
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8 (Straight)", subtext = "Straight Feel", targetId = "key-22", color = "#64d8f0" })
-  elseif act == "arpRate16th" then
-    setActiveArpRate(7) -- 1/16
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/16th", subtext = "Sixteenth Notes", targetId = "key-22", color = "#64d8f0" })
-  elseif act == "arpRate8th" then
-    setActiveArpRate(6) -- 1/8
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/8th", subtext = "Eighth Notes", targetId = "key-22", color = "#64d8f0" })
-  elseif act == "arpRate32nd" then
-    setActiveArpRate(8) -- 1/32
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/32nd", subtext = "Thirty-Second Notes", targetId = "key-22", color = "#64d8f0" })
-  elseif act == "arpRate4th" then
-    setActiveArpRate(5) -- 1/4
-    hud.updateWebviewHud({ title = "ARP RATE", value = "1/4th", subtext = "Quarter Notes", targetId = "key-22", color = "#64d8f0" })
-
-  -- Arp Gate Presets (Key 7)
-  elseif act == "arpGateStaccato" then
-    state.arpGatePercent = 25.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "25% (Staccato)", subtext = "Short Plucks", targetId = "key-26", color = "#64d8f0" })
-  elseif act == "arpGateLegato" then
-    state.arpGatePercent = 100.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "100% (Legato)", subtext = "Continuous Sustained", targetId = "key-26", color = "#64d8f0" })
-  elseif act == "arpGateOverlap" then
-    state.arpGatePercent = 120.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "120% (Overlap)", subtext = "Overlapping Notes", targetId = "key-26", color = "#64d8f0" })
-  elseif act == "arpGate80" then
-    state.arpGatePercent = 80.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "80%", subtext = "Standard Gate", targetId = "key-26", color = "#64d8f0" })
-  elseif act == "arpGate50" then
-    state.arpGatePercent = 50.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "50%", subtext = "Medium Gate", targetId = "key-26", color = "#64d8f0" })
-  elseif act == "arpGateReset" then
-    state.arpGatePercent = 80.0
-    arpeggiator.applyGatePercentChange()
-    hud.updateWebviewHud({ title = "ARP GATE", value = "80%", subtext = "Default Gate Reset", targetId = "key-26", color = "#64d8f0" })
-
-  -- Arp Sync & Clock (Key 8)
-  elseif act == "splitArpToggle" then
-    state.arpBottomEnabled = not state.arpBottomEnabled
-    hud.updateWebviewHud({ title = "SPLIT ARP", value = state.arpBottomEnabled and "BOTTOM ROW ACTIVE" or "BOTTOM ROW MUTED", subtext = "Split Keyboard Arp", targetId = "key-28", color = "#64d8f0" })
-  elseif act == "syncBpmToggle" then
-    state.logicSyncEnabled = not state.logicSyncEnabled
-    hud.updateWebviewHud({ title = "DAW SYNC", value = state.logicSyncEnabled and "ON (Logic Pro)" or "OFF (Internal)", subtext = "BPM Clock Source", targetId = "key-28", color = state.logicSyncEnabled and "#50fa7b" or "#ff5555" })
-  elseif act == "freeClockToggle" then
-    state.logicSyncEnabled = false
-    hud.updateWebviewHud({ title = "DAW SYNC", value = "OFF (Free Clock)", subtext = "Internal Clock Only", targetId = "key-28", color = "#ff5555" })
-  elseif act == "topBoostUp" then
-    state.splitArpTopBoost = math.min(50, (state.splitArpTopBoost or 20) + 5)
-    hud.updateWebviewHud({ title = "TOP BOOST", value = "+" .. state.splitArpTopBoost .. " Vel", subtext = "Split Arp Lead Boost", targetId = "key-28", color = "#64d8f0" })
-  elseif act == "topBoostDown" then
-    state.splitArpTopBoost = math.max(0, (state.splitArpTopBoost or 20) - 5)
-    hud.updateWebviewHud({ title = "TOP BOOST", value = "+" .. state.splitArpTopBoost .. " Vel", subtext = "Split Arp Lead Boost", targetId = "key-28", color = "#64d8f0" })
-  elseif act == "clockDiv2" then
-    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) / 2)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "CLOCK /2", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Half-Time", targetId = "key-28", color = "#64d8f0" })
-  elseif act == "clockMul2" then
-    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) * 2)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "CLOCK x2", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Double-Time", targetId = "key-28", color = "#64d8f0" })
-
-  -- Release Presets (Key 9)
-  elseif act == "relMax" then
-    state.ccStates[72] = 127
-    midi.sendMidiCC(72, 127)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "MAX (100%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-  elseif act == "relMin" then
-    state.ccStates[72] = 0
-    midi.sendMidiCC(72, 0)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "MIN (0%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-  elseif act == "relDefault" then
-    state.ccStates[72] = 64
-    midi.sendMidiCC(72, 64)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "DEFAULT (50%)", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-  elseif act == "rel50" then
-    state.ccStates[72] = 64
-    midi.sendMidiCC(72, 64)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "50%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-  elseif act == "rel75" then
-    state.ccStates[72] = 96
-    midi.sendMidiCC(72, 96)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "75%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-  elseif act == "rel25" then
-    state.ccStates[72] = 32
-    midi.sendMidiCC(72, 32)
-    hud.updateWebviewHud({ title = "SYNTH RELEASE", value = "25%", subtext = "CC #72 Level", targetId = "key-25", color = "#cf9ee1" })
-
-  -- Volume & Mod Presets (Key 0)
-  elseif act == "vol100" then
-    state.topRowVolume = 127
-    state.bottomRowVolume = 127
-    hud.updateWebviewHud({ title = "MASTER VOLUME", value = "100%", subtext = "Full Velocity", targetId = "key-29", color = "#50fa7b" })
-  elseif act == "vol75" then
-    state.topRowVolume = 95
-    state.bottomRowVolume = 95
-    hud.updateWebviewHud({ title = "MASTER VOLUME", value = "75%", subtext = "Medium Velocity", targetId = "key-29", color = "#64d8f0" })
-  elseif act == "modMax" then
-    state.ccStates[1] = 127
-    _G.activeWatchers.modAccumulator = 127
-    midi.sendMidiCC(1, 127)
-    hud.updateWebviewHud({ title = "MOD WHEEL", value = "100% (127)", subtext = "Max CC #1", targetId = "key-29", color = "#ffd700" })
-  elseif act == "mod0" then
-    state.ccStates[1] = 0
-    _G.activeWatchers.modAccumulator = 0
-    midi.sendMidiCC(1, 0)
-    hud.updateWebviewHud({ title = "MOD WHEEL", value = "0%", subtext = "Min CC #1", targetId = "key-29", color = "#ffd700" })
-
-  -- BPM Presets (Keys - and =)
-  elseif act == "bpmDown10" then
-    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) - 10)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO -10", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM -10", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpmDown20" then
-    state.arpBpm = math.max(20.0, (state.arpBpm or 120.0) - 20)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO -20", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM -20", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpmUp10" then
-    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) + 10)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO +10", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM +10", targetId = "key-24", color = "#64d8f0" })
-  elseif act == "bpmUp20" then
-    state.arpBpm = math.min(300.0, (state.arpBpm or 120.0) + 20)
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO +20", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "BPM +20", targetId = "key-24", color = "#64d8f0" })
-  elseif act == "bpm120" then
-    state.arpBpm = 120.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO", value = "120 BPM", subtext = "Standard Preset", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpm90" then
-    state.arpBpm = 90.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO", value = "90 BPM", subtext = "Lofi / Hip-hop Preset", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpm70" then
-    state.arpBpm = 70.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO", value = "70 BPM", subtext = "Ballad Preset", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpm140" then
-    state.arpBpm = 140.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO", value = "140 BPM", subtext = "Trap / Dubstep Preset", targetId = "key-24", color = "#64d8f0" })
-  elseif act == "bpm160" then
-    state.arpBpm = 160.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO", value = "160 BPM", subtext = "DnB Preset", targetId = "key-24", color = "#64d8f0" })
-  elseif act == "bpmMin" then
-    state.arpBpm = 20.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO MIN", value = "20 BPM", subtext = "Minimum Tempo", targetId = "key-27", color = "#64d8f0" })
-  elseif act == "bpmMax" then
-    state.arpBpm = 300.0
-    arpeggiator.applyBpmChange()
-    hud.updateWebviewHud({ title = "TEMPO MAX", value = "300 BPM", subtext = "Maximum Tempo", targetId = "key-24", color = "#64d8f0" })
-  elseif act == "tapTempo" then
-    if arpeggiator.tapTempo then
-      arpeggiator.tapTempo()
-    end
-    hud.updateWebviewHud({ title = "TAP TEMPO", value = arpeggiator.formatBpm(state.arpBpm) .. " BPM", subtext = "Tap rhythm to set tempo", targetId = "key-24", color = "#ffd700" })
-  end
-
-  config.saveSettings()
-end
-
-local function shouldRepeat(act)
-  if not act then return false end
-  local repeatingActions = {
-    bpmUp = true, bpmDown = true,
-    atkUp = true, atkDown = true, decUp = true, decDown = true,
-    relUp = true, relDown = true, releaseUp = true, releaseDown = true,
-    arpGateUp = true, arpGateDown = true,
-    volUp = true, volDown = true, volume = true,
-    topVolUp = true, topVolDown = true,
-    botVolUp = true, botVolDown = true,
-    modWheelUp = true, modWheelDown = true, modWheel = true
-  }
-  return repeatingActions[act] == true
-end
-
-local function handleKeyDown(code, externalNoteKey)
-  if code == 50 then -- Backtick
-    state.modeSelectHeld = true
-    state.modeWasSelectedDuringHold = false
-    hud.updateWebviewHud()
-    return true
-  end
-
-  if not externalNoteKey and state.modeSelectHeld then
-    -- Mode Selector is Active!
-    if code == 0 then -- 'a' key
-      state.currentMode = "ArpAdvanced"
-      state.modeWasSelectedDuringHold = true
-      -- Release any currently pressed piano keys to prevent stuck notes
-      local keysToRelease = {}
-      for heldCode, _ in pairs(state.pressedKeys) do
-        table.insert(keysToRelease, heldCode)
-      end
-      for _, heldCode in ipairs(keysToRelease) do
-        handleKeyUp(heldCode)
-      end
-      hud.updateWebviewHud()
-      return true
-    end
-    -- If it's another key, ignore/block it while mode selector is held
-    return true 
-  end
-
-  if state.pressedKeys[code] then
-    return true
-  end
-
-  local propDef = hud.getProposedActionDef and hud.getProposedActionDef(code)
-  if propDef and (propDef.reserved or propDef.passThrough) then
-    -- Command-layer holes are intentionally visible in the HUD but must never
-    -- fall through into the piano/note mapping when clicked in the webview.
-    state.pressedKeys[code] = { isProposed = true }
-    hud.updateSingleKeyState(code, true, false)
-    return true
-  end
-  local actionToExecute = propDef and propDef.action
-
-  if not actionToExecute or actionToExecute == "" or actionToExecute == "none" then
-    local k = config.getNumberControlKey(code) or config.getControlKey(code)
-    if k then
-      if (state.shiftHeld or state.altHeld) and k.shiftAction and k.shiftAction ~= "" and k.shiftAction ~= "none" then
-        actionToExecute = k.shiftAction
-      elseif k.action and k.action ~= "" and k.action ~= "none" then
-        actionToExecute = k.action
-      end
-    end
-  end
-  if externalNoteKey then actionToExecute = nil end
-
-  if actionToExecute and actionToExecute ~= "" and actionToExecute ~= "none" then
-    state.pressedKeys[code] = { isControl = true, action = actionToExecute }
-    hud.updateSingleKeyState(code, true, false)
-    
-    state.controlKeyDownTime = state.controlKeyDownTime or {}
-    state.controlKeyDownSnapshots = state.controlKeyDownSnapshots or {}
-    state.controlKeyDownTime[code] = hs.timer.secondsSinceEpoch()
-    state.controlKeyDownSnapshots[code] = captureStateSnapshot("Pre-hold")
-
-    executeControlAction(actionToExecute, code)
-    if shouldRepeat(actionToExecute) then
-      stopControlRepeat(code)
-      local entry = {}
-      controlRepeatTimers[code] = entry
-      entry.timer = hs.timer.doAfter(0.35, function()
-        if not controlRepeatTimers[code] then return end
-        if state.pressedKeys[code] then
-          entry.interval = hs.timer.doEvery(0.08, function()
-            if not controlRepeatTimers[code] then return end
-            local savedFn = pushStateSnapshot
-            pushStateSnapshot = function() end
-            pcall(executeControlAction, actionToExecute, code)
-            pushStateSnapshot = savedFn
-          end)
-        end
-      end)
-    else
-      stopControlRepeat(code)
-    end
-    return true
-  end
-
-  local noteKey = externalNoteKey or config.getNoteKey(code)
-  if noteKey then
-    local isTop = noteKey.isTop
-    local trkIdx = isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1)
-    local trk = state.tracks and state.tracks[trkIdx]
-    local now = hs.timer.secondsSinceEpoch()
-
-    -- Count physical keys held on this track before registering this key
-    local numPhysHeld = 0
-    if trk and trk.physicalKeysHeld then
-      for _ in pairs(trk.physicalKeysHeld) do
-        numPhysHeld = numPhysHeld + 1
-      end
-    end
-
-    if trk then
-      trk.physicalKeysHeld = trk.physicalKeysHeld or {}
-      trk.physicalKeysHeld[code] = true
-    end
-    local ch = trk and trk.channel or (isTop and (state.topRowChannel or 2) or (state.bottomRowChannel or 0))
-    local transposedPitch = transposer.getTransposedPitch(noteKey.baseNote, isTop)
-
-    -- Track-independent chord mode
-    local isChordActive = (trk and trk.chordModeActive) or state.quoteHeld
-    local chordPitches = isChordActive and transposer.getChordPitches(noteKey.baseNote, isTop, true, trk and trk.chordIdx) or { transposedPitch }
-    local arpActive = trk and trk.arpEnabled or false
-    local isArpNote = (not state.arpBypassed) and arpActive and (not state.shiftHeld)
-
-    -- Track-independent sustain mode
-    local susMode = (trk and trk.sustainMode) or "smart"
-    if state.tabDamping then
-      susMode = "off"
-    end
-    local sustainPedalHeld = false
-    for c, info in pairs(state.pressedKeys) do
-      if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
-        sustainPedalHeld = true
-        break
-      end
-    end
-    if sustainPedalHeld and susMode == "off" and not state.tabDamping then
-      susMode = "smart"
-    end
-
-    -- Smart Sustain Auto-Reset Engine
-    if trk and susMode == "smart" and not isArpNote then
-      local chordWindow = 0.12 -- 120ms grouping window for multi-finger chord strikes
-      local isNewChord = (numPhysHeld == 0) or ((now - (trk.chordStartTime or 0)) > chordWindow)
-      if isNewChord then
-        -- Silence previously sustained pitches on this track that are NOT physically held down right now
-        if trk.sustainedPitches then
-          for _, item in ipairs(trk.sustainedPitches) do
-            local p = item.pitch
-            local itemCh = item.channel or ch
-            local isStillPhysHeld = false
-            for heldCode, _ in pairs(trk.physicalKeysHeld) do
-              if heldCode ~= code then
-                local kInfo = state.pressedKeys[heldCode]
-                if kInfo and kInfo.pitches then
-                  for _, hp in ipairs(kInfo.pitches) do
-                    if hp == p then isStillPhysHeld = true; break end
-                  end
-                end
-              end
-              if isStillPhysHeld then break end
-            end
-            if not isStillPhysHeld then
-              midi.sendMidiNote("noteOff", p, 0, itemCh)
-            end
-          end
-        end
-        trk.sustainedPitches = {}
-        trk.chordStartTime = now
-      end
-      -- Latch new pitches into trk.sustainedPitches
-      trk.sustainedPitches = trk.sustainedPitches or {}
-      for _, p in ipairs(chordPitches) do
-        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
-          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
-      end
-    elseif trk and susMode == "classic" and not isArpNote then
-      -- Classic cumulative sustain: append without clearing
-      trk.sustainedPitches = trk.sustainedPitches or {}
-      for _, p in ipairs(chordPitches) do
-        table.insert(trk.sustainedPitches, { pitch = p, channel = ch, basePitch = noteKey.baseNote,
-          isTop = isTop, isChordSource = isChordActive, sourceCode = code })
-      end
-    end
-
-    local effectiveSustain = (susMode ~= "off")
-    state.pressedKeys[code] = { pitches = chordPitches, isArpNote = isArpNote, isSustainedNote = effectiveSustain,
-      channel = ch, track = trkIdx, isTop = isTop, basePitch = noteKey.baseNote,
-      isChordSource = isChordActive, chordIdx = trk and trk.chordIdx or state.chordIdx }
-    
-    if isArpNote then 
-      for _, p in ipairs(chordPitches) do arpeggiator.arpAddNote(code .. "_" .. p, p, trkIdx) end
-    else 
-      if isTrackAudible(trkIdx) then
-        local quantMode = state.inputQuantizeMode or "Off"
-        local bpm = state.arpBpm or 120.0
-        local vel = transposer.getEffectiveRowVelocity(isTop)
-
-        if trk then trk.activeNotesCount = (trk.activeNotesCount or 0) + #chordPitches end
-
-        quantizer.queueNoteOn("qwerty_" .. code, chordPitches, vel, ch, bpm, quantMode, function(pitches, v, channel)
-          for _, p in ipairs(pitches) do
-            midi.sendMidiNote("noteOn", p, v, channel)
-          end
-        end)
-      end
-    end
-    if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end
-    if hudModule and hudModule.fastUpdateArp then hudModule.fastUpdateArp() end
-    return true
-  end
-
-  return true
-end
-
-local function handleKeyUp(code, externalNoteKey)
-  if not externalNoteKey and code == 50 then -- Backtick released
-    stopControlRepeat(code)
-    state.modeSelectHeld = false
-    if not state.modeWasSelectedDuringHold then
-      state.currentMode = "Home"
-      local keysToRelease = {}
-      for heldCode, _ in pairs(state.pressedKeys) do
-        table.insert(keysToRelease, heldCode)
-      end
-      for _, heldCode in ipairs(keysToRelease) do
-        handleKeyUp(heldCode)
-      end
-    end
-    hud.updateWebviewHud()
-    return true
-  end
-
-  local keyInfo = state.pressedKeys[code]
-  if keyInfo and type(keyInfo) == "table" and keyInfo.isProposed then
-    state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
-    return true
-  end
-
-  if keyInfo and type(keyInfo) == "table" and not keyInfo.isControl and keyInfo.pitches then
-    local pitches = keyInfo.pitches
-    local isArpNote = keyInfo.isArpNote
-    local isSustainedNote = keyInfo.isSustainedNote
-    local keyChannel = keyInfo.channel or 0
-    local isTop = keyInfo.isTop
-    local trkId = keyInfo.track or (isTop and (state.topRowTrack or 3) or (state.bottomRowTrack or 1))
-    local trk = state.tracks and state.tracks[trkId]
-    if trk and trk.physicalKeysHeld then
-      trk.physicalKeysHeld[code] = nil
-    end
-    if trk and not isArpNote then
-      trk.activeNotesCount = math.max(0, (trk.activeNotesCount or 0) - #pitches)
-    end
-
-    if isArpNote then
-      for _, p in ipairs(pitches) do arpeggiator.arpRemoveNote(code .. "_" .. p, trkId) end
-    else
-      local sustainPedalHeld = false
-      for c, info in pairs(state.pressedKeys) do
-        if type(info) == "table" and info.isControl and (info.action == "sustain" or info.action == "classicSustain") then
-          sustainPedalHeld = true
-          break
-        end
-      end
-
-      local susMode = (trk and trk.sustainMode) or "smart"
-      if state.tabDamping then susMode = "off" end
-      if sustainPedalHeld and susMode == "off" and not state.tabDamping then susMode = "smart" end
-      local isSustained = (not state.tabDamping) and (isSustainedNote or (susMode ~= "off"))
-
-      quantizer.queueNoteOff("qwerty_" .. code, function(releasedPitches, channel)
-        for _, playedPitch in ipairs(releasedPitches or pitches) do
-          if isSustained and susMode ~= "off" then
-            if trk then
-              trk.sustainedPitches = trk.sustainedPitches or {}
-              local found = false
-              for _, item in ipairs(trk.sustainedPitches) do
-                if item.pitch == playedPitch and item.channel == (channel or keyChannel) then
-                  found = true
-                  break
-                end
-              end
-              if not found then
-                table.insert(trk.sustainedPitches, { pitch = playedPitch, channel = channel or keyChannel,
-                  basePitch = keyInfo.basePitch, isTop = keyInfo.isTop, isChordSource = keyInfo.isChordSource,
-                  chordIdx = keyInfo.chordIdx, sourceCode = code })
-              end
-            end
-          else
-            midi.sendMidiNote("noteOff", playedPitch, 0, channel or keyChannel)
-          end
-        end
-      end)
-    end
-    state.pressedKeys[code] = nil
-    if not externalNoteKey then
-      hud.updateSingleKeyState(code, false, false)
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  local noteKey = externalNoteKey or config.getNoteKey(code)
-  if noteKey then
-    -- Fallback if pressedKeys entry was missing
-    local isTop = noteKey.isTop
-    local chordPitches = transposer.getChordPitches(noteKey.baseNote, isTop)
-    local ch = isTop and (state.topRowChannel or 0) or (state.bottomRowChannel or 0)
-    for _, pitch in ipairs(chordPitches) do
-      midi.sendMidiNote("noteOff", pitch, 0, ch)
-    end
-    hud.updateSingleKeyState(code, false, false)
-    return true
-  end
-
-  local numCtrlKey = config.getNumberControlKey(code)
-  if numCtrlKey then
-    stopControlRepeat(code)
-      state.pressedKeys[code] = nil
-      hud.updateSingleKeyState(code, false, false)
-      hud.updateWebviewHud()
-      return true
-  end
-
-  local function cleanupSustainPitches(targetTrackId)
-    local tracksToClean = targetTrackId and { [targetTrackId] = state.tracks and state.tracks[targetTrackId] } or (state.tracks or {})
-    for tId, trk in pairs(tracksToClean) do
-      if trk and trk.sustainedPitches then
-        for _, item in ipairs(trk.sustainedPitches) do
-          if type(item) == "table" and item.pitch then
-            local pitch = item.pitch
-            local channel = item.channel or trk.channel or 0
-            local isCurrentlyHeld = false
-            for _, kInfo in pairs(state.pressedKeys) do
-              if type(kInfo) == "table" and not kInfo.isControl and kInfo.pitches and kInfo.track == tId then
-                for _, p in ipairs(kInfo.pitches) do
-                  if p == pitch then
-                    isCurrentlyHeld = true
-                    break
-                  end
-                end
-                if isCurrentlyHeld then break end
-              end
-            end
-            local isArpActivePitch = trk.currentPitch and ((type(trk.currentPitch) == "table" and trk.currentPitch.pitch or trk.currentPitch) == pitch)
-            if not isCurrentlyHeld and not isArpActivePitch then
-              midi.sendMidiNote("noteOff", pitch, 0, channel)
-            end
-          end
-        end
-        trk.sustainedPitches = {}
-      end
-    end
-    if not targetTrackId and state.sustainedPitches then
-      for _, item in ipairs(state.sustainedPitches) do
-        if type(item) == "table" and item.pitch then
-          midi.sendMidiNote("noteOff", item.pitch, 0, item.channel or 0)
-        end
-      end
-      state.sustainedPitches = {}
-    end
-  end
-
-  local ctrlKey = config.getControlKey(code)
-  if ctrlKey then
-    stopControlRepeat(code)
-    state.pressedKeys[code] = nil
-    hud.updateSingleKeyState(code, false, false)
-    local act = (keyInfo and keyInfo.action) or ((state.shiftHeld or state.altHeld) and ctrlKey.shiftAction or ctrlKey.action)
-    
-    local holdDuration = state.controlKeyDownTime and state.controlKeyDownTime[code] and (hs.timer.secondsSinceEpoch() - state.controlKeyDownTime[code]) or 0
-    if holdDuration > 0.25 and not shouldRepeat(act) and act ~= "bpmEdit" and act ~= "sustain" and act ~= "classicSustain" then
-      if state.controlKeyDownSnapshots and state.controlKeyDownSnapshots[code] then
-        applyStateSnapshot(state.controlKeyDownSnapshots[code])
-        return true
-      end
-    end
-
-    if act == "sustain" then
-      state.tabDamping = false
-      local activeTrkId = state.activeTrack or 1
-      local trk = state.tracks and state.tracks[activeTrkId]
-      if trk then
-        if state.altHeld then
-          -- Option + Tab explicitly toggles sustain off / on
-          trk.sustainMode = (trk.sustainMode == "off") and "smart" or "off"
-          if trk.sustainMode == "off" then
-            cleanupSustainPitches(activeTrkId)
-          end
-        end
-        -- Record only short base-layer taps. Holds remain momentary damping,
-        -- and Option+Tab keeps its separately displayed behavior.
-        if not state.altHeld and holdDuration <= 0.25 and trk.sustainMode ~= "off" then
-          trk.lastSmartSustainTapAt = hs.timer.secondsSinceEpoch()
-        elseif holdDuration > 0.25 then
-          trk.lastSmartSustainTapAt = nil
-        end
-        state.sustainActive = (trk.sustainMode ~= "off")
-        config.saveSettings()
-        local isSmart = (trk.sustainMode == "smart")
-        local isClassic = (trk.sustainMode == "classic")
-        local isSusOn = (trk.sustainMode ~= "off")
-        local spot = {
-          title = "SMART SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isSmart and "SMART ON" or (isClassic and "CLASSIC ON" or "OFF"),
-          subtext = isSmart and "Tap Tab to damp · double-tap Tab to turn off" or (isClassic and "Classic sustain active" or "Sustain disabled"),
-          targetId = "key-48",
-          color = isSusOn and (trk.color or "#00e5ff") or "#b5aba0"
-        }
-        hud.updateWebviewHud(spot)
-      end
-    elseif act == "classicSustain" then
-      local activeTrkId = state.activeTrack or 1
-      local trk = state.tracks and state.tracks[activeTrkId]
-      if trk then
-        if trk.classicWasActiveOnPress then
-          trk.sustainMode = "smart"
-        else
-          trk.sustainMode = "classic"
-          for c, kInfo in pairs(state.pressedKeys) do
-            if type(kInfo) == "table" and not kInfo.isControl and kInfo.track == activeTrkId and not kInfo.isArpNote then
-              kInfo.isSustainedNote = true
-              local pitches = kInfo.pitches or { kInfo.pitch }
-              local ch = kInfo.channel or trk.channel or 0
-              for _, p in ipairs(pitches) do
-                if p then
-                  trk.sustainedPitches = trk.sustainedPitches or {}
-                  table.insert(trk.sustainedPitches, { pitch = p, channel = ch })
-                end
-              end
-            end
-          end
-        end
-        state.sustainActive = (trk.sustainMode ~= "off")
-        config.saveSettings()
-        local isClassic = (trk.sustainMode == "classic")
-        local spot = {
-          title = "CLASSIC SUSTAIN (TRK " .. activeTrkId .. ")",
-          value = isClassic and "CLASSIC ON" or "SMART ON",
-          subtext = isClassic and "Cumulative sustain across releases (can get muddy)" or "Smart sustain active",
-          targetId = "key-48",
-          color = trk.color or "#00e5ff"
-        }
-        hud.updateWebviewHud(spot)
-      end
-    elseif act == "chordToggle" then
-      local activeTrkId = state.activeTrack or 1
-      local trk = state.tracks and state.tracks[activeTrkId]
-      if trk then
-        if trk.chordWasActiveOnPress then
-          trk.chordModeActive = false
-        else
-          trk.chordModeActive = true
-        end
-        state.chordModeActive = (trk.chordModeActive == true)
-        config.saveSettings()
-        local chordName = state.CHORDS[trk.chordIdx or state.chordIdx or 1].name
-        local spot = {
-          title = "CHORD MODE (TRK " .. activeTrkId .. ")",
-          value = trk.chordModeActive and ("ON (" .. chordName .. ")") or "OFF",
-          subtext = trk.chordModeActive and ("Chords active on Track " .. activeTrkId .. " (" .. ((trk and trk.name) or "") .. ")") or ("Single notes on Track " .. activeTrkId),
-          targetId = "key-39",
-          color = trk.chordModeActive and (trk.color or "#00e5ff") or "#b5aba0"
-        }
-        hud.updateWebviewHud(spot)
-      end
-    else
-      hud.updateWebviewHud()
-    end
-    return true
-  end
-
-  -- Fallback cleanup for unmapped or ignored keys
-  if state.pressedKeys[code] then
-    state.pressedKeys[code] = nil
-  end
-
-  return true
-end
-
-return {
-  selectTrack = selectTrack,
-  adjustTrackVolume = adjustTrackVolume,
-  executeControlAction = executeControlAction,
-  setActiveArpDirection = setActiveArpDirection,
-  getActiveArpDirectionIdx = getActiveArpDirectionIdx,
-  handleKeyDown = handleKeyDown,
-  handleKeyUp = handleKeyUp,
-  handleKeyStepNoteOn = function(note, velocity, channel)
-    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
-    if state.pressedKeys[token] then return end
-    handleKeyDown(token, { baseNote = note, isTop = false })
-  end,
-  handleKeyStepNoteOff = function(note, channel)
-    local token = "keystep_" .. tostring(channel or 0) .. "_" .. tostring(note)
-    if state.pressedKeys[token] then handleKeyUp(token, { baseNote = note, isTop = false }) end
-  end,
-  handleKeyStepDisconnect = function()
-    local held = {}
-    for code in pairs(state.pressedKeys) do
-      if type(code) == "string" and code:match("^keystep_") then held[#held + 1] = code end
-    end
-    for _, code in ipairs(held) do
-      if state.pressedKeys[code] then handleKeyUp(code, { isTop = false }) end
-    end
-  end,
-  stopAllControlRepeats = stopAllControlRepeats,
-  syncTrackAudibility = syncTrackAudibility,
-  isTrackAudible = isTrackAudible
-}
-
-end
-
-__modules["midi"] = function()
-local hsMidi = require("hs.midi")
-
-_G.activeWatchers = _G.activeWatchers or {}
-
-local function getMidiDevice()
-  if _G.activeWatchers.midiDevice then return _G.activeWatchers.midiDevice end
-
-  local devices = hsMidi.devices() or {}
-  local virtualSources = hsMidi.virtualSources() or {}
-
-  for _, devName in ipairs(devices) do
-    if string.find(devName, "IAC") or string.find(devName, "Bus") then
-      _G.activeWatchers.midiDevice = hsMidi.new(devName)
-      return _G.activeWatchers.midiDevice
-    end
-  end
-
-  for _, devName in ipairs(virtualSources) do
-    if string.find(devName, "IAC") or string.find(devName, "Bus") then
-      _G.activeWatchers.midiDevice = hsMidi.newVirtualSource(devName)
-      return _G.activeWatchers.midiDevice
-    end
-  end
-
-  if #devices > 0 then
-    _G.activeWatchers.midiDevice = hsMidi.new(devices[1])
-  elseif #virtualSources > 0 then
-    _G.activeWatchers.midiDevice = hsMidi.newVirtualSource(virtualSources[1])
-  end
-
-  return _G.activeWatchers.midiDevice
-end
-
-local activeNoteLedger = {} -- [noteNum] = { [channel] = { track = trackId, color = color, vel = vel } }
-
-local function getTrackForChannel(channel)
-  local state = _G.activeWatchers and _G.activeWatchers.state
-  if not state then
-    pcall(function()
-      local config = __require("config")
-      state = config and config.state
-    end)
-  end
-  if state and state.tracks then
-    for trkId, trk in pairs(state.tracks) do
-      if trk.channel == channel then
-        return trkId, trk.color or "#00e5ff"
-      end
-    end
-  end
-  local fallbackColors = { [1] = "#00e5ff", [2] = "#ff9100", [3] = "#00e676", [4] = "#d500f9" }
-  local trkId = ((channel or 0) % 4) + 1
-  return trkId, fallbackColors[trkId] or "#00e5ff"
-end
-
-local function getActiveNoteLedger()
-  local snapshot = {}
-  for note, voices in pairs(activeNoteLedger) do
-    for ch, voice in pairs(voices) do
-      snapshot[tostring(note)] = { note = note, channel = ch, track = voice.track, color = voice.color }
-      break
-    end
-  end
-  return snapshot
-end
-
-local function clearActiveNotes()
-  activeNoteLedger = {}
-  if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.clearPianoNotes then
-    _G.activeWatchers.hud.clearPianoNotes()
-  end
-end
-
-local function sendMidiNote(cmd, noteNum, vel, channel)
-  if type(noteNum) == "table" then
-    channel = channel or noteNum.channel
-    noteNum = noteNum.pitch
-  end
-  if not noteNum or type(noteNum) ~= "number" or noteNum < 0 or noteNum > 127 then return end
-  local dev = getMidiDevice()
-  local ch = channel or 0
-  local isNoteOn = (cmd == "noteOn" and (vel or 0) > 0)
-  local isNoteOff = (cmd == "noteOff" or (cmd == "noteOn" and (vel or 0) == 0))
-  local trkId, trkColor = getTrackForChannel(ch)
-
-  if dev then
-    if isNoteOff then
-      dev:sendCommand("noteOff", { note = noteNum, velocity = 0, channel = ch })
-      dev:sendCommand("noteOn", { note = noteNum, velocity = 0, channel = ch })
-    else
-      dev:sendCommand("noteOn", { note = noteNum, velocity = vel, channel = ch })
-    end
-  end
-
-  -- Update active note ledger & real-time piano visualizer
-  if isNoteOn then
-    activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
-    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel }
-    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
-      _G.activeWatchers.hud.updatePianoNote(noteNum, true, trkId, trkColor)
-    end
-  elseif isNoteOff then
-    if activeNoteLedger[noteNum] then
-      activeNoteLedger[noteNum][ch] = nil
-      if next(activeNoteLedger[noteNum]) == nil then
-        activeNoteLedger[noteNum] = nil
-      end
-    end
-    local stillActive = (activeNoteLedger[noteNum] ~= nil)
-    local remainingTrkId = 0
-    local remainingColor = ""
-    if stillActive then
-      for _, voice in pairs(activeNoteLedger[noteNum]) do
-        remainingTrkId = voice.track
-        remainingColor = voice.color
-        break
-      end
-    end
-    if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
-      _G.activeWatchers.hud.updatePianoNote(noteNum, stillActive, remainingTrkId, remainingColor)
-    end
-  end
-
-  if _G.activeWatchers and _G.activeWatchers.sync and _G.activeWatchers.sync.broadcastNotes then
-    _G.activeWatchers.sync.broadcastNotes(noteNum, isNoteOn)
-  end
-end
-
-local function sendSustainCC(val)
-  local dev = getMidiDevice()
-  if not dev then return end
-  for ch = 0, 15 do
-    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = val, channel = ch })
-  end
-end
-
-local function sendMidiCC(controllerNum, val, channel)
-  local dev = getMidiDevice()
-  if dev then
-    dev:sendCommand("controlChange", { controllerNumber = controllerNum, controllerValue = val, channel = channel or 0 })
-  end
-end
-
-local function silenceChannel(channel)
-  local dev = getMidiDevice()
-  local ch = channel or 0
-  if dev then
-    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
-  end
-  local notesToRelease = {}
-  for note, voices in pairs(activeNoteLedger) do
-    if voices and voices[ch] then
-      table.insert(notesToRelease, note)
-    end
-  end
-  for _, note in ipairs(notesToRelease) do
-    sendMidiNote("noteOff", note, 0, ch)
-  end
-end
-
-local function panicAllChannels()
-  local dev = getMidiDevice()
-  clearActiveNotes()
-  if not dev then return end
-
-  for ch = 0, 15 do
-    -- Release sustain before explicit note-offs; send the channel-mode fallback
-    -- after individual releases so synths receive both forms of note cleanup.
-    dev:sendCommand("controlChange", { controllerNumber = 64, controllerValue = 0, channel = ch })
-    for note = 0, 127 do
-      dev:sendCommand("noteOff", { note = note, velocity = 0, channel = ch })
-    end
-    dev:sendCommand("controlChange", { controllerNumber = 123, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 120, controllerValue = 0, channel = ch })
-    dev:sendCommand("controlChange", { controllerNumber = 121, controllerValue = 0, channel = ch })
-    dev:sendCommand("pitchWheelChange", { pitchChange = 8192, channel = ch })
-  end
-end
-
-return {
-  getMidiDevice = getMidiDevice,
-  sendMidiNote = sendMidiNote,
-  sendMidiCC = sendMidiCC,
-  sendSustainCC = sendSustainCC,
-  silenceChannel = silenceChannel,
-  panicAllChannels = panicAllChannels,
-  getActiveNoteLedger = getActiveNoteLedger,
-  clearActiveNotes = clearActiveNotes,
-  getTrackForChannel = getTrackForChannel
-}
-
-end
-
-__modules["logic_names"] = function()
--- src/logic_names.lua
--- Real-time track name synchronization with Logic Pro
--- Extracts actual Logic Pro track names via macOS Accessibility (AXUIElement)
--- with zero MIDI port collision and falls back gracefully when Logic is inactive.
-
-local logic_names = {}
-
-local pollTimer = nil
-local appWatcher = nil
-local lastObservedNames = {}
-local isPolling = false
-
-local function parseTrackHeaderDescription(desc)
-  if not desc or type(desc) ~= "string" then return nil, nil end
-  local numStr = string.match(desc, "Track%s+(%d+)")
-  if not numStr then return nil, nil end
-  local trackNum = tonumber(numStr)
-
-  -- Look for UTF-8 curly quotes \226\128\156 (") and \226\128\157 (")
-  local qStart = string.find(desc, "\226\128\156", 1, true)
-  local qEnd = string.find(desc, "\226\128\157", 1, true)
-  local name = nil
-  if qStart and qEnd and qEnd > qStart then
-    name = string.sub(desc, qStart + 3, qEnd - 1)
-  else
-    name = string.match(desc, "Track%s+%d+%s+[\"“](.-)[\"”]")
-  end
-
-  if name and #name > 0 then
-    -- Strip trailing spaces or formatting artifacts
-    name = string.match(name, "^%s*(.-)%s*$")
-  end
-
-  return trackNum, name
-end
-
-function logic_names.scanLogicTracks()
-  local app = hs.application.find("Logic Pro")
-  if not app then
-    return nil, "Logic Pro not running"
-  end
-
-  local tw = nil
-  local focusedWin = app:focusedWindow()
-  if focusedWin and string.find(tostring(focusedWin:title()), "Tracks") then
-    tw = hs.axuielement.windowElement(focusedWin)
-  end
-
-  if not tw then
-    local ax = hs.axuielement.applicationElement(app)
-    if ax then
-      for _, w in ipairs(ax.AXWindows or {}) do
-        if string.find(tostring(w.AXTitle), "Tracks") then
-          tw = w
-          break
-        end
-      end
-    end
-  end
-
-  if not tw then
-    return nil, "Tracks window not found"
-  end
-
-  -- Fast direct path test: root/8/2/1/2/1/1
-  local headerGroup = nil
-  local path = { 8, 2, 1, 2, 1, 1 }
-  local h = tw
-  for _, idx in ipairs(path) do
-    local ch = h and h.AXChildren
-    h = ch and ch[idx]
-  end
-  if h and h.AXDescription and string.find(h.AXDescription, "Tracks header") then
-    headerGroup = h
-  else
-    local function findHeader(el, depth)
-      if depth > 8 then return nil end
-      local desc = el.AXDescription
-      if desc and string.find(desc, "Tracks header") then
-        return el
-      end
-      for _, c in ipairs(el.AXChildren or {}) do
-        local res = findHeader(c, depth + 1)
-        if res then return res end
-      end
-      return nil
-    end
-    headerGroup = findHeader(tw, 0)
-  end
-
-  if not headerGroup then
-    return nil, "Tracks header not found"
-  end
-
-  local tracks = {}
-  for _, item in ipairs(headerGroup.AXChildren or {}) do
-    local desc = item.AXDescription
-    local num, name = parseTrackHeaderDescription(desc)
-    if num and name and #name > 0 then
-      tracks[num] = name
-    end
-  end
-
-  return tracks, nil
-end
-
-function logic_names.updateTrackNames(force)
-  if isPolling then return end
-  isPolling = true
-
-  local ok, res, err = pcall(function()
-    return logic_names.scanLogicTracks()
-  end)
-
-  isPolling = false
-
-  if not ok or not res then
-    return false
-  end
-
-  local state = _G.activeWatchers and _G.activeWatchers.state
-  if not state or not state.tracks then
-    return false
-  end
-
-  local changed = false
-  for trkId = 1, 4 do
-    local trk = state.tracks[trkId]
-    if trk then
-      local observed = res[trkId]
-      if observed and observed ~= "" then
-        if trk.name ~= observed or lastObservedNames[trkId] ~= observed then
-          trk.name = observed
-          trk.nameSource = "logic"
-          lastObservedNames[trkId] = observed
-          changed = true
-        end
-      end
-    end
-  end
-
-  if (changed or force) and _G.activeWatchers and _G.activeWatchers.hud then
-    if _G.activeWatchers.hud.updateWebviewHud then
-      _G.activeWatchers.hud.updateWebviewHud(nil, nil, true)
-    end
-  end
-
-  return changed
-end
-
-function logic_names.init()
-  _G.activeWatchers = _G.activeWatchers or {}
-
-  if _G.activeWatchers.logicNamesTimer then
-    _G.activeWatchers.logicNamesTimer:stop()
-    _G.activeWatchers.logicNamesTimer = nil
-  end
-
-  if _G.activeWatchers.logicNamesAppWatcher then
-    _G.activeWatchers.logicNamesAppWatcher:stop()
-    _G.activeWatchers.logicNamesAppWatcher = nil
-  end
-
-  local state = _G.activeWatchers and _G.activeWatchers.state
-  if state and not state.midiActive then
-    return
-  end
-
-  -- Initial scan
-  logic_names.updateTrackNames(true)
-
-  -- Poll every 2.0s when Logic is running (scan takes ~80ms, non-blocking)
-  pollTimer = hs.timer.new(2.0, function()
-    local app = hs.application.find("Logic Pro")
-    if app then
-      logic_names.updateTrackNames(false)
-    end
-  end)
-  pollTimer:start()
-  _G.activeWatchers.logicNamesTimer = pollTimer
-
-  -- App watcher to trigger immediate scan when Logic Pro activates or launches
-  appWatcher = hs.application.watcher.new(function(appName, eventType, app)
-    if appName == "Logic Pro" then
-      if eventType == hs.application.watcher.activated or eventType == hs.application.watcher.launched then
-        hs.timer.doAfter(0.3, function()
-          logic_names.updateTrackNames(true)
-        end)
-      end
-    end
-  end)
-  appWatcher:start()
-  _G.activeWatchers.logicNamesAppWatcher = appWatcher
-
-  print("QWERTY MIDI: Logic Pro track name synchronization active")
-end
-
-function logic_names.stop()
-  if pollTimer then
-    pollTimer:stop()
-    pollTimer = nil
-  end
-  if appWatcher then
-    appWatcher:stop()
-    appWatcher = nil
-  end
-  if _G.activeWatchers then
-    _G.activeWatchers.logicNamesTimer = nil
-    _G.activeWatchers.logicNamesAppWatcher = nil
-  end
-end
-
-logic_names.parseTrackHeaderDescription = parseTrackHeaderDescription
-
-return logic_names
 
 end
 

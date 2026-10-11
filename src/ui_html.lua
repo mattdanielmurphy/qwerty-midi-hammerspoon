@@ -1,4 +1,4 @@
-local HTML_UI_CONTENT = [[
+local HTML_UI_CONTENT = [===[
 <!DOCTYPE html>
 <html>
 <head>
@@ -6859,6 +6859,6 @@ document.addEventListener('DOMContentLoaded', () => {
 </body>
 </html>
 
-]]
+]===]
 
 return HTML_UI_CONTENT
