@@ -1,0 +1,114 @@
+--- tests/realtime_state_indicators_and_zls.test.js	2026-10-11 11:01:24
++++ .agents/teamwork/teamwork_preview_explorer_m1_rem_1/proposed_realtime_state_indicators_and_zls.test.js	2026-10-11 11:23:06
+@@ -6,17 +6,17 @@
+ 
+ describe("R5: Real-Time State Indicators on Keys & Zero Layout Shift (ZLS)", () => {
+   describe("Tier 1: Feature 9 — Parameter Telemetry Injection (9 Parameters)", () => {
+-    test("T1-R5-PARAM-VOL: Active volume quantity is injected into volume control key labels", () => {
++    test("T1-R5-PARAM-VOL: Active volume quantity is formatted for key labels", () => {
+       const vol80 = 80;
+       const formatted = R5_CONTRACT.formatters.volume(vol80);
+       expect(formatted).toBe("Vol -\n63%");
+       const [action, val] = formatted.split("\n");
+       expect(action).toBe("Vol -");
+       expect(val).toBe("63%");
++    });
+ 
+-      if (hudSource.includes('key.displayNote = "Vol -" ..') || hudSource.includes('volPercent')) {
+-        expect(hudSource).toMatch(/volPercent|volume.*%/);
+-      }
++    test.skip("T1-R5-PARAM-VOL-PROD: hud.lua injects real-time volume quantity into key displayNote // Milestone M4 gate: requires hud.lua parameter telemetry injection", () => {
++      expect(hudSource).toMatch(/key\.displayNote\s*=\s*"Vol -"\s*\.\./);
+     });
+ 
+     test("T1-R5-PARAM-OCT: Active octave offset quantity is injected into octave control key labels", () => {
+@@ -70,39 +70,30 @@
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*height:\s*44px/);
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*flex-shrink:\s*0/);
+ 
+-      // Simulation: varying parameter values yields delta W = 0, delta H = 0
+-      const params = ["Vol -\n100%", "Vol -\n0%", "BPM -\n300", "Mode -\nMixolydian"];
+-      params.forEach(() => {
+-        const outerW = 58;
+-        const outerH = 44;
+-        expect(outerW).toBe(58);
+-        expect(outerH).toBe(44);
+-      });
++      expect(R4_CONTRACT.padWidth).toBe(58);
++      expect(R4_CONTRACT.padHeight).toBe(44);
+     });
+ 
+     test("T1-R5-ZLS-KEYCODE: Key code top offset and bounding box remain invariant when parameter value changes", () => {
+-      // In CSS, .key-pad uses flex column with justify-content center
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*display:\s*flex/);
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*flex-direction:\s*column/);
+       expect(htmlSource).toMatch(/\.key-code\s*\{[^}]*font-size:\s*12px/);
+     });
+ 
+-    test("T1-R5-ZLS-KEYNOTE: Key note container height is rigidly clamped to 20px with overflow hidden", () => {
+-      if (htmlSource.includes(".key-pad .key-note") && htmlSource.includes("height: 20px")) {
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*height:\s*20px/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
+-      } else {
+-        expect(R4_CONTRACT.maxNoteHeight).toBe(20);
+-      }
++    test("T1-R5-ZLS-KEYNOTE-CONTRACT: Key note container height invariant in contract", () => {
++      expect(R4_CONTRACT.maxNoteHeight).toBe(20);
+     });
+ 
++    test.skip("T1-R5-ZLS-KEYNOTE-PROD: Key note container height is rigidly clamped to 20px with overflow hidden // Milestone M4 gate: requires index.html key-note height rule", () => {
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*(?:max-)?height:\s*20px/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
++    });
++
+     test("T1-R5-ZLS-TABULAR: Tabular figures prevent horizontal digit jitter on numeric updates", () => {
+-      // Existing chord-display and bpm-display already use tabular-nums
+       expect(htmlSource).toMatch(/font-variant-numeric:\s*tabular-nums/);
+     });
+ 
+     test("T1-R5-ZLS-GRID: Keyboard rows maintain immutable margin-left and zero cumulative layout shift", () => {
+-      // Row alignment offsets: Number 0px, Upper 0px, Home 18px, Lower 42px
+       expect(htmlSource).toMatch(/\.keyboard-row\.home\s*\{[^}]*margin-left:\s*18px/);
+       expect(htmlSource).toMatch(/\.keyboard-row\.lower\s*\{[^}]*margin-left:\s*42px/);
+     });
+@@ -115,7 +106,6 @@
+       expect(v0).toBe("Vol -\n0%");
+       expect(v127).toBe("Vol -\n100%");
+ 
+-      // Both second lines fit well within 52px
+       expect("100%".length * 5.2).toBeLessThanOrEqual(52);
+     });
+ 
+@@ -140,16 +130,27 @@
+       expect(m2).toBe("Mode -\nHarmonic Minor");
+     });
+ 
+-    test("T2-R5-BOUND-OSC: Rapid alternating parameter increments maintain 0 layout shift", () => {
+-      let cumulativeLayoutShift = 0.0;
++    test("T2-R5-BOUND-OSC: Rapid alternating parameter increments maintain 0 layout shift invariants", () => {
++      const initialLines = R5_CONTRACT.formatters.volume(49).split("\n");
++      const initialLineCount = initialLines.length;
++      const initialHeight = initialLineCount * 9.5;
++
+       for (let i = 0; i < 20; i++) {
+         const val = i % 2 === 0 ? 49 : 50;
+         const text = R5_CONTRACT.formatters.volume(val);
+         expect(text).toContain("Vol -");
+-        // Layout bounds are invariant (CLS contribution = 0)
+-        cumulativeLayoutShift += 0.0;
++        const lines = text.split("\n");
++
++        // Geometric Zero Layout Shift invariant: line count is strictly constant
++        expect(lines.length).toBe(initialLineCount);
++        // Vertical height is strictly invariant and clamped within maxNoteHeight
++        expect(lines.length * 9.5).toBe(initialHeight);
++        expect(lines.length * 9.5).toBeLessThanOrEqual(R4_CONTRACT.maxNoteHeight);
++        // Line lengths never exceed container boundary
++        lines.forEach(line => {
++          expect(line.length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
++        });
+       }
+-      expect(cumulativeLayoutShift).toBe(0.0);
+     });
+ 
+     test("T2-R5-BOUND-ATKDEC-EXTREMES: Attack/Decay 0 and 127 boundaries fit within key frame", () => {

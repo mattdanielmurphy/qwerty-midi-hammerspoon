@@ -1,0 +1,610 @@
+--- tests/hud_overlay_wrapping_and_contrast.test.js	2026-10-11 11:01:03
++++ .agents/teamwork/teamwork_preview_explorer_m1_rem_1/proposed_hud_overlay_wrapping_and_contrast.test.js	2026-10-11 11:22:38
+@@ -6,21 +6,19 @@
+ 
+ describe("R4: Key Overlay Legibility & Label Wrapping", () => {
+   describe("Tier 1: Feature 6 — Key Overlay Multi-line Wrapping", () => {
+-    test("T1-R4-WRAP-1: CSS .key-pad .key-note enforces rigid multi-line container properties", () => {
++    test("T1-R4-WRAP-1: R4 Contract model enforces rigid multi-line container constraints", () => {
+       expect(R4_CONTRACT.maxInnerWidth).toBe(52);
+       expect(R4_CONTRACT.maxNoteHeight).toBe(20);
++      expect(R4_CONTRACT.expectedFontSize).toBe("8.5px");
++      expect(R4_CONTRACT.expectedLineHeight).toBe("9.5px");
++    });
+ 
+-      if (htmlSource.includes("white-space: pre-line")) {
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*white-space:\s*pre-line/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-height:\s*20px/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-width:\s*52px/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*font-variant-numeric:\s*tabular-nums/);
+-      } else {
+-        // Contract requirement verification
+-        expect(R4_CONTRACT.expectedFontSize).toBe("8.5px");
+-        expect(R4_CONTRACT.expectedLineHeight).toBe("9.5px");
+-      }
++    test.skip("T1-R4-WRAP-1-PROD: CSS .key-pad .key-note enforces rigid multi-line container properties // Milestone M4 gate: requires index.html key-note CSS update", () => {
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*white-space:\s*pre-line/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-height:\s*20px/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-width:\s*52px/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*font-variant-numeric:\s*tabular-nums/);
+     });
+ 
+     test("T1-R4-WRAP-2: CSS .key-pad maintains rigid 58px x 44px outer chassis geometry", () => {
+@@ -29,18 +27,21 @@
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*flex-shrink:\s*0/);
+     });
+ 
+-    test("T1-R4-WRAP-3: Smart Sus 2x Off label is formatted with newline break to fit 52px container", () => {
+-      // Long label "Smart Sus · 2× Off" (18 chars, ~96px) must break into 2 lines
+-      const label = "Smart Sus\n2× Off";
+-      const lines = label.split("\n");
++    test("T1-R4-WRAP-3: Smart Sus 2x Off label in hud.lua wraps to fit 52px note container", () => {
++      // In src/hud.lua, key 48 defines the Smart Sus action label
++      expect(hudSource).toMatch(/\[48\]\s*=\s*\{[\s\S]*?name\s*=\s*"Smart Sus · 2× Off"/);
++
++      // Verify that splitting at delimiter into 2 lines fits the 52px container
++      const rawLabel = "Smart Sus · 2× Off";
++      const lines = rawLabel.split(" · ");
+       expect(lines.length).toBe(2);
+-      expect(lines[0].length).toBeLessThanOrEqual(10);
+-      expect(lines[1].length).toBeLessThanOrEqual(10);
++      expect(lines[0]).toBe("Smart Sus");
++      expect(lines[1]).toBe("2× Off");
+ 
+-      // Verify each line fits within 52px width (~5.5px per char at 9.5px font)
++      // Verify each line fits within 52px width (~5.2px per char at 9.5px font)
+       lines.forEach(line => {
+         const approxPx = line.length * 5.2;
+-        expect(approxPx).toBeLessThanOrEqual(52);
++        expect(approxPx).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
+       });
+     });
+ 
+@@ -48,37 +49,41 @@
+       expect(hudSource).toContain('[46] = {');
+       expect(hudSource).toContain('"Minimize Window"');
+ 
+-      const label = "Minimize\nWindow";
+-      const lines = label.split("\n");
++      const rawLabel = "Minimize Window";
++      const lines = rawLabel.split(" ");
+       expect(lines.length).toBe(2);
+-      expect(lines[0].length * 5.2).toBeLessThanOrEqual(52);
+-      expect(lines[1].length * 5.2).toBeLessThanOrEqual(52);
++      expect(lines[0].length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
++      expect(lines[1].length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
+     });
+ 
+     test("T1-R4-WRAP-5: Multi-line text rendering does not cause horizontal text overflow or scrollbar", () => {
+-      const simulatedPadWidth = 58;
+-      const simulatedBorder = 1.5;
+-      const innerAvailableWidth = simulatedPadWidth - (simulatedBorder * 2); // 55px
++      const padWidthMatch = htmlSource.match(/\.key-pad\s*\{[^}]*width:\s*(\d+)px/);
++      const padBorderMatch = htmlSource.match(/\.key-pad\s*\{[^}]*border:\s*([\d.]+)px/);
++      expect(padWidthMatch).not.toBeNull();
++      expect(padBorderMatch).not.toBeNull();
++
++      const padWidth = parseFloat(padWidthMatch[1]);
++      const padBorder = parseFloat(padBorderMatch[1]);
++      const innerAvailableWidth = padWidth - (padBorder * 2); // 58 - 3 = 55px
+       expect(innerAvailableWidth).toBeGreaterThanOrEqual(R4_CONTRACT.maxInnerWidth);
+ 
+-      // Two lines at 9.5px line-height consume 19px <= 20px container
+-      const totalHeight = 2 * 9.5;
++      // Two lines at line-height consume 19px <= 20px container
++      const parsedLineHeight = parseFloat(R4_CONTRACT.expectedLineHeight);
++      const totalHeight = 2 * parsedLineHeight;
+       expect(totalHeight).toBeLessThanOrEqual(R4_CONTRACT.maxNoteHeight);
+     });
+   });
+ 
+   describe("Tier 1: Feature 7 — Pass Through Clutter Elimination", () => {
+-    test("T1-R4-PASS-1: Cmd modifier layer suppresses redundant Pass Through on unmapped keys in hud.lua", () => {
+-      // Contract: in cmd/cmdShift layer, unmapped keys receive empty or em-dash displayNote
+-      if (hudSource.includes('or { name = "", class = "shortcut-passthrough"') ||
+-          hudSource.includes('or { name = "—", class = "shortcut-passthrough"')) {
+-        expect(hudSource).not.toMatch(/activeLayer == "cmd"[\s\S]*?name = "Pass Through"/);
+-      } else {
+-        // Contract invariant: COMMAND_LAYER_MAP maps the only active command keys
+-        expect(hudSource).toContain("local COMMAND_LAYER_MAP = {");
+-      }
++    test("T1-R4-PASS-1: COMMAND_LAYER_MAP in hud.lua defines isolated command shortcuts", () => {
++      expect(hudSource).toContain("local COMMAND_LAYER_MAP = {");
+     });
+ 
++    test.skip("T1-R4-PASS-1-PROD: Cmd modifier layer suppresses redundant Pass Through on unmapped keys in hud.lua // Milestone M4 gate: requires hud.lua unmapped Cmd key label suppression", () => {
++      expect(hudSource).not.toMatch(/activeLayer == "cmd"[\s\S]*?name = "Pass Through"/);
++      expect(hudSource).toMatch(/return layerDef or \{\s*name\s*=\s*["'](?:|—)["'],\s*class\s*=\s*"shortcut-passthrough"/);
++    });
++
+     test("T1-R4-PASS-2: Explicit shortcuts in COMMAND_LAYER_MAP retain descriptive action labels", () => {
+       expect(hudSource).toContain('"Minimize Window"');
+       expect(hudSource).toContain('"Quit App"');
+@@ -90,17 +95,9 @@
+       expect(hudSource).toContain('"Undo in App"');
+     });
+ 
+-    test("T1-R4-PASS-3: Webview renderHud renders blank or em-dash on unmapped passthrough keys", () => {
+-      // Simulate unmapped key rendering under contract
+-      const unmappedKey = {
+-        code: 14,
+-        displayNote: "",
+-        shortcutPassThrough: true,
+-        isControl: true
+-      };
+-      const renderedText = unmappedKey.displayNote || (unmappedKey.shortcutPassThrough ? "" : "—");
+-      expect(renderedText).not.toBe("Pass Through");
+-      expect(renderedText.length).toBeLessThanOrEqual(1);
++    test("T1-R4-PASS-3: Webview stylesheet defines distinct shortcut-passthrough styling class", () => {
++      expect(htmlSource).toMatch(/\.shortcut-passthrough\s*\{/);
++      expect(htmlSource).toMatch(/\.shortcut-passthrough\s*\{[^}]*border-style:\s*dotted/);
+     });
+ 
+     test("T1-R4-PASS-4: Control+Tab contract preserves Pass Through in non-Cmd modifier layer", () => {
+@@ -108,53 +105,45 @@
+     });
+ 
+     test("T1-R4-PASS-5: Cmd modifier mode isolates shortcut visual density without wall-to-wall clutter", () => {
+-      const totalKeys = 45;
+-      const mappedCmdKeys = 8;
+-      const densityRatio = mappedCmdKeys / totalKeys;
+-      expect(densityRatio).toBeLessThan(0.25);
++      const commandKeyMatches = hudSource.match(/\[\d+\]\s*=\s*\{[\s\S]*?cmd\s*=/g) || [];
++      expect(commandKeyMatches.length).toBeGreaterThan(0);
++      expect(commandKeyMatches.length).toBeLessThan(12); // At most 12 command keys across 45-pad chassis (< 27% density)
+     });
+   });
+ 
+   describe("Tier 1: Feature 8 — Modifier Contrast & Opacity", () => {
+-    test("T1-R4-CONT-1: CSS removes element-level opacity 0.48 from .shortcut-reserved", () => {
+-      // Contract invariant: active shortcuts must maintain full 1.0 opacity
+-      const contractReservedOpacity = 1.0;
+-      expect(contractReservedOpacity).toBe(1.0);
+-
+-      // Once M4 updates index.html, verify production CSS
+-      if (!htmlSource.match(/\.shortcut-reserved\s*\{[^}]*opacity:\s*0\.48/)) {
+-        expect(htmlSource).not.toMatch(/\.shortcut-reserved\s*\{[^}]*opacity:\s*0\.48/);
+-      }
++    test.skip("T1-R4-CONT-1: CSS removes element-level opacity 0.48 from .shortcut-reserved // Milestone M4 gate: requires index.html opacity update", () => {
++      expect(htmlSource).not.toMatch(/\.shortcut-reserved\s*\{[^}]*opacity:\s*0\.48/);
+     });
+ 
+-    test("T1-R4-CONT-2: CSS removes element-level opacity 0.40 from .shortcut-passthrough", () => {
+-      // Contract invariant: passthrough keys achieve subdued appearance via background color
+-      const contractPassthroughOpacity = 1.0;
+-      expect(contractPassthroughOpacity).toBe(1.0);
+-
+-      // Once M4 updates index.html, verify production CSS
+-      if (!htmlSource.match(/\.shortcut-passthrough\s*\{[^}]*opacity:\s*0\.4(?:0)?/)) {
+-        expect(htmlSource).not.toMatch(/\.shortcut-passthrough\s*\{[^}]*opacity:\s*0\.4(?:0)?/);
+-      }
++    test.skip("T1-R4-CONT-2: CSS removes element-level opacity 0.40 from .shortcut-passthrough // Milestone M4 gate: requires index.html opacity update", () => {
++      expect(htmlSource).not.toMatch(/\.shortcut-passthrough\s*\{[^}]*opacity:\s*0\.4(?:0)?/);
+     });
+ 
+     test("T1-R4-CONT-3: Active shortcut keys feature high-contrast text and border styling", () => {
++      const bgMatch = htmlSource.match(/\.key-pad\s*\{[^}]*background:\s*rgba\((\d+),\s*(\d+),\s*(\d+)/);
++      expect(bgMatch).not.toBeNull();
++      const bgRgb = [parseInt(bgMatch[1], 10), parseInt(bgMatch[2], 10), parseInt(bgMatch[3], 10)];
+       const activeTextRgb = [100, 216, 240]; // Cyan accent #64d8f0
+-      const bgRgb = [25, 25, 25]; // Dark pad background
+       const ratio = R4_CONTRACT.contrastRatio(bgRgb, activeTextRgb);
+       expect(ratio).toBeGreaterThanOrEqual(4.5);
+     });
+ 
+-    test("T1-R4-CONT-4: Passthrough keys achieve subdued appearance via background color not opacity", () => {
+-      const subduedBgRgb = [20, 20, 20];
+-      const codeRgb = [102, 102, 102];
+-      const ratio = R4_CONTRACT.contrastRatio(subduedBgRgb, codeRgb);
+-      expect(ratio).toBeGreaterThan(2.0);
++    test("T1-R4-CONT-4: Passthrough keys maintain readable key-code contrast against chassis background", () => {
++      const bgMatch = htmlSource.match(/\.key-pad\s*\{[^}]*background:\s*rgba\((\d+),\s*(\d+),\s*(\d+)/);
++      expect(bgMatch).not.toBeNull();
++      const bgRgb = [parseInt(bgMatch[1], 10), parseInt(bgMatch[2], 10), parseInt(bgMatch[3], 10)];
++      // #f0f0f0 key-code text color in index.html
++      const codeRgb = [240, 240, 240];
++      const ratio = R4_CONTRACT.contrastRatio(bgRgb, codeRgb);
++      expect(ratio).toBeGreaterThanOrEqual(4.5);
+     });
+ 
+     test("T1-R4-CONT-5: Calculated contrast ratio for active shortcuts exceeds WCAG AA 4.5:1", () => {
++      const bgMatch = htmlSource.match(/\.key-pad\s*\{[^}]*background:\s*rgba\((\d+),\s*(\d+),\s*(\d+)/);
++      expect(bgMatch).not.toBeNull();
++      const bgRgb = [parseInt(bgMatch[1], 10), parseInt(bgMatch[2], 10), parseInt(bgMatch[3], 10)];
+       const whiteRgb = [255, 255, 255];
+-      const bgRgb = [25, 25, 25];
+       const whiteRatio = R4_CONTRACT.contrastRatio(bgRgb, whiteRgb);
+       expect(whiteRatio).toBeGreaterThanOrEqual(7.0); // WCAG AAA
+     });
+@@ -162,21 +151,22 @@
+ 
+   describe("Tier 2: Boundary & Corner Cases", () => {
+     test("T2-R4-BOUND-1: Extreme label length (>25 chars) wraps or truncates without expanding key-pad", () => {
+-      const extremeLabel = "VeryLongModifierActionLabelTest";
+-      const innerWidth = 52;
+-      const innerHeight = 20;
++      const padWidthMatch = htmlSource.match(/\.key-pad\s*\{[^}]*width:\s*(\d+)px/);
++      const padHeightMatch = htmlSource.match(/\.key-pad\s*\{[^}]*height:\s*(\d+)px/);
++      expect(padWidthMatch).not.toBeNull();
++      expect(padHeightMatch).not.toBeNull();
+ 
+-      // CSS overflow: hidden guarantees parent pad is not stretched
+-      expect(R4_CONTRACT.padWidth).toBe(58);
+-      expect(R4_CONTRACT.padHeight).toBe(44);
+-      expect(innerWidth).toBeLessThan(R4_CONTRACT.padWidth);
+-      expect(innerHeight).toBeLessThan(R4_CONTRACT.padHeight);
++      const chassisW = parseInt(padWidthMatch[1], 10);
++      const chassisH = parseInt(padHeightMatch[1], 10);
++      expect(R4_CONTRACT.padWidth).toBe(chassisW);
++      expect(R4_CONTRACT.padHeight).toBe(chassisH);
++      expect(R4_CONTRACT.maxInnerWidth).toBeLessThan(chassisW);
++      expect(R4_CONTRACT.maxNoteHeight).toBeLessThan(chassisH);
+     });
+ 
+     test("T2-R4-BOUND-2: Unicode symbols and emoji in labels do not break line height or overflow height", () => {
+       const labels = ["Locrian 🌑", "Lydian ☀️", "Near Root ↑", "Near Sub ↓"];
+       labels.forEach(lbl => {
+-        // Formatted into 2 lines if needed
+         const formatted = lbl.replace(" ", "\n");
+         const lines = formatted.split("\n");
+         expect(lines.length).toBeLessThanOrEqual(2);
+--- tests/realtime_state_indicators_and_zls.test.js	2026-10-11 11:01:24
++++ .agents/teamwork/teamwork_preview_explorer_m1_rem_1/proposed_realtime_state_indicators_and_zls.test.js	2026-10-11 11:23:06
+@@ -6,17 +6,17 @@
+ 
+ describe("R5: Real-Time State Indicators on Keys & Zero Layout Shift (ZLS)", () => {
+   describe("Tier 1: Feature 9 — Parameter Telemetry Injection (9 Parameters)", () => {
+-    test("T1-R5-PARAM-VOL: Active volume quantity is injected into volume control key labels", () => {
++    test("T1-R5-PARAM-VOL: Active volume quantity is formatted for key labels", () => {
+       const vol80 = 80;
+       const formatted = R5_CONTRACT.formatters.volume(vol80);
+       expect(formatted).toBe("Vol -\n63%");
+       const [action, val] = formatted.split("\n");
+       expect(action).toBe("Vol -");
+       expect(val).toBe("63%");
++    });
+ 
+-      if (hudSource.includes('key.displayNote = "Vol -" ..') || hudSource.includes('volPercent')) {
+-        expect(hudSource).toMatch(/volPercent|volume.*%/);
+-      }
++    test.skip("T1-R5-PARAM-VOL-PROD: hud.lua injects real-time volume quantity into key displayNote // Milestone M4 gate: requires hud.lua parameter telemetry injection", () => {
++      expect(hudSource).toMatch(/key\.displayNote\s*=\s*"Vol -"\s*\.\./);
+     });
+ 
+     test("T1-R5-PARAM-OCT: Active octave offset quantity is injected into octave control key labels", () => {
+@@ -70,39 +70,30 @@
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*height:\s*44px/);
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*flex-shrink:\s*0/);
+ 
+-      // Simulation: varying parameter values yields delta W = 0, delta H = 0
+-      const params = ["Vol -\n100%", "Vol -\n0%", "BPM -\n300", "Mode -\nMixolydian"];
+-      params.forEach(() => {
+-        const outerW = 58;
+-        const outerH = 44;
+-        expect(outerW).toBe(58);
+-        expect(outerH).toBe(44);
+-      });
++      expect(R4_CONTRACT.padWidth).toBe(58);
++      expect(R4_CONTRACT.padHeight).toBe(44);
+     });
+ 
+     test("T1-R5-ZLS-KEYCODE: Key code top offset and bounding box remain invariant when parameter value changes", () => {
+-      // In CSS, .key-pad uses flex column with justify-content center
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*display:\s*flex/);
+       expect(htmlSource).toMatch(/\.key-pad\s*\{[^}]*flex-direction:\s*column/);
+       expect(htmlSource).toMatch(/\.key-code\s*\{[^}]*font-size:\s*12px/);
+     });
+ 
+-    test("T1-R5-ZLS-KEYNOTE: Key note container height is rigidly clamped to 20px with overflow hidden", () => {
+-      if (htmlSource.includes(".key-pad .key-note") && htmlSource.includes("height: 20px")) {
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*height:\s*20px/);
+-        expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
+-      } else {
+-        expect(R4_CONTRACT.maxNoteHeight).toBe(20);
+-      }
++    test("T1-R5-ZLS-KEYNOTE-CONTRACT: Key note container height invariant in contract", () => {
++      expect(R4_CONTRACT.maxNoteHeight).toBe(20);
+     });
+ 
++    test.skip("T1-R5-ZLS-KEYNOTE-PROD: Key note container height is rigidly clamped to 20px with overflow hidden // Milestone M4 gate: requires index.html key-note height rule", () => {
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*(?:max-)?height:\s*20px/);
++      expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
++    });
++
+     test("T1-R5-ZLS-TABULAR: Tabular figures prevent horizontal digit jitter on numeric updates", () => {
+-      // Existing chord-display and bpm-display already use tabular-nums
+       expect(htmlSource).toMatch(/font-variant-numeric:\s*tabular-nums/);
+     });
+ 
+     test("T1-R5-ZLS-GRID: Keyboard rows maintain immutable margin-left and zero cumulative layout shift", () => {
+-      // Row alignment offsets: Number 0px, Upper 0px, Home 18px, Lower 42px
+       expect(htmlSource).toMatch(/\.keyboard-row\.home\s*\{[^}]*margin-left:\s*18px/);
+       expect(htmlSource).toMatch(/\.keyboard-row\.lower\s*\{[^}]*margin-left:\s*42px/);
+     });
+@@ -115,7 +106,6 @@
+       expect(v0).toBe("Vol -\n0%");
+       expect(v127).toBe("Vol -\n100%");
+ 
+-      // Both second lines fit well within 52px
+       expect("100%".length * 5.2).toBeLessThanOrEqual(52);
+     });
+ 
+@@ -140,16 +130,27 @@
+       expect(m2).toBe("Mode -\nHarmonic Minor");
+     });
+ 
+-    test("T2-R5-BOUND-OSC: Rapid alternating parameter increments maintain 0 layout shift", () => {
+-      let cumulativeLayoutShift = 0.0;
++    test("T2-R5-BOUND-OSC: Rapid alternating parameter increments maintain 0 layout shift invariants", () => {
++      const initialLines = R5_CONTRACT.formatters.volume(49).split("\n");
++      const initialLineCount = initialLines.length;
++      const initialHeight = initialLineCount * 9.5;
++
+       for (let i = 0; i < 20; i++) {
+         const val = i % 2 === 0 ? 49 : 50;
+         const text = R5_CONTRACT.formatters.volume(val);
+         expect(text).toContain("Vol -");
+-        // Layout bounds are invariant (CLS contribution = 0)
+-        cumulativeLayoutShift += 0.0;
++        const lines = text.split("\n");
++
++        // Geometric Zero Layout Shift invariant: line count is strictly constant
++        expect(lines.length).toBe(initialLineCount);
++        // Vertical height is strictly invariant and clamped within maxNoteHeight
++        expect(lines.length * 9.5).toBe(initialHeight);
++        expect(lines.length * 9.5).toBeLessThanOrEqual(R4_CONTRACT.maxNoteHeight);
++        // Line lengths never exceed container boundary
++        lines.forEach(line => {
++          expect(line.length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
++        });
+       }
+-      expect(cumulativeLayoutShift).toBe(0.0);
+     });
+ 
+     test("T2-R5-BOUND-ATKDEC-EXTREMES: Attack/Decay 0 and 127 boundaries fit within key frame", () => {
+--- tests/hud_modifier_and_parameter_scenarios.test.js	2026-10-11 11:01:41
++++ .agents/teamwork/teamwork_preview_explorer_m1_rem_1/proposed_hud_modifier_and_parameter_scenarios.test.js	2026-10-11 11:23:25
+@@ -2,35 +2,24 @@
+ import { R4_CONTRACT, R5_CONTRACT } from "./harness/contracts.js";
+ 
+ const hudSource = await Bun.file("src/hud.lua").text();
++const htmlSource = await Bun.file("src/web/index.html").text();
++const configSource = await Bun.file("src/config.lua").text();
+ 
+ describe("HUD Modifier & Parameter Cross-Feature & E2E Scenarios (Tiers 3 & 4)", () => {
+   describe("Tier 3: Cross-Feature Combinations", () => {
+-    test("T3-CROSS-CMD-PARAM: Engaging Cmd modifier suppresses unmapped keys while active parameters remain visible on mapped keys", () => {
+-      // Simulate state transition: Base layer -> Cmd layer -> Base layer
+-      const baseState = {
+-        activeLayer: "base",
+-        keys: {
+-          46: { displayNote: "Vol -\n63%", isControl: true },
+-          14: { displayNote: "E4", isControl: false }
+-        }
+-      };
++    test("T3-CROSS-CMD-PARAM: COMMAND_LAYER_MAP maps explicit shortcuts while unmapped keys have no command definition", () => {
++      // In src/hud.lua, key 46 (M) is defined in COMMAND_LAYER_MAP with "Minimize Window"
++      expect(hudSource).toMatch(/\[46\]\s*=\s*\{[\s\S]*?cmd\s*=\s*\{[^}]*name\s*=\s*"Minimize Window"/);
+ 
+-      // In Cmd mode: mapped key 46 becomes "Minimize Window", unmapped note key 14 becomes empty
+-      const cmdState = {
+-        activeLayer: "cmd",
+-        keys: {
+-          46: { displayNote: "Minimize\nWindow", isControl: true, reserved: true },
+-          14: { displayNote: "", isControl: true, shortcutPassThrough: true }
+-        }
+-      };
++      // Note key 14 is NOT in COMMAND_LAYER_MAP
++      const commandKeyMapBlock = hudSource.match(/local COMMAND_LAYER_MAP = \{[\s\S]*?\n\}/)?.[0] || "";
++      expect(commandKeyMapBlock).not.toContain("[14] =");
+ 
+-      expect(cmdState.keys[14].displayNote).toBe("");
+-      expect(cmdState.keys[46].displayNote).toContain("Minimize");
+-
+-      // Releasing Cmd restores parameter states
+-      const restoredState = baseState;
+-      expect(restoredState.keys[46].displayNote).toBe("Vol -\n63%");
+-      expect(restoredState.keys[14].displayNote).toBe("E4");
++      // Verify contract state transition: formatted parameter label vs command shortcut
++      const baseParamLabel = R5_CONTRACT.formatters.volume(80);
++      expect(baseParamLabel).toBe("Vol -\n63%");
++      const cmdActionLabel = "Minimize\nWindow";
++      expect(cmdActionLabel.split("\n").length).toBe(2);
+     });
+ 
+     test("T3-CROSS-SHIFT-PARAM: Holding Shift switches parameter controls to secondary parameters without layout shift", () => {
+@@ -40,33 +29,42 @@
+       expect(baseAtk).toBe("Atk -\n10");
+       expect(shiftDec).toBe("Dec -\n64");
+ 
+-      // Both labels fit within 52px width and 20px height
+       [baseAtk, shiftDec].forEach(label => {
+         const lines = label.split("\n");
+         expect(lines.length).toBe(2);
+-        lines.forEach(l => expect(l.length * 5.2).toBeLessThanOrEqual(52));
++        lines.forEach(l => expect(l.length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth));
+       });
+     });
+ 
+-    test("T3-CROSS-TRACK-PARAM: Switching active track (1->2->3->4) updates per-track parameter values and colors with ZLS=0", () => {
+-      const tracks = {
+-        1: { color: "#00e5ff", volume: 100, attack: 10 },
+-        2: { color: "#ff9100", volume: 76,  attack: 50 },
+-        3: { color: "#00e676", volume: 110, attack: 25 },
+-        4: { color: "#d500f9", volume: 90,  attack: 80 }
+-      };
++    test("T3-CROSS-TRACK-PARAM: Switching active track updates per-track parameter values and colors with ZLS=0", () => {
++      // Verify that index.html defines distinct CSS color variables for tracks 1..4 (keys 18..21)
++      expect(htmlSource).toMatch(/#key-18\s*\{[^}]*--trk-color:\s*#00e5ff/);
++      expect(htmlSource).toMatch(/#key-19\s*\{[^}]*--trk-color:\s*#ff9100/);
++      expect(htmlSource).toMatch(/#key-20\s*\{[^}]*--trk-color:\s*#00e676/);
++      expect(htmlSource).toMatch(/#key-21\s*\{[^}]*--trk-color:\s*#d500f9/);
+ 
+-      let clsTotal = 0;
+-      for (let t = 1; t <= 4; t++) {
+-        const trk = tracks[t];
+-        const atkLabel = R5_CONTRACT.formatters.attack(trk.attack);
+-        const volLabel = R5_CONTRACT.formatters.volume(trk.volume);
+-        expect(atkLabel).toContain(`Atk -\n${trk.attack}`);
++      // For each track, parameter labels fit strictly within note dimensions
++      const trackSettings = [
++        { vol: 100, atk: 10 },
++        { vol: 76,  atk: 50 },
++        { vol: 110, atk: 25 },
++        { vol: 90,  atk: 80 }
++      ];
++
++      trackSettings.forEach(trk => {
++        const atkLabel = R5_CONTRACT.formatters.attack(trk.atk);
++        const volLabel = R5_CONTRACT.formatters.volume(trk.vol);
++        expect(atkLabel).toContain(`Atk -\n${trk.atk}`);
+         expect(volLabel).toContain("Vol -");
+-        expect(trk.color).toMatch(/^#[0-9a-f]{6}$/i);
+-        clsTotal += 0.0;
+-      }
+-      expect(clsTotal).toBe(0.0);
++
++        [atkLabel, volLabel].forEach(label => {
++          const lines = label.split("\n");
++          expect(lines.length).toBe(2);
++          lines.forEach(line => {
++            expect(line.length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
++          });
++        });
++      });
+     });
+ 
+     test("T3-CROSS-LONGLABEL-VALUE: Compound long labels with dynamic parameters fit inside 52px x 20px note frame", () => {
+@@ -77,59 +75,57 @@
+       susLabels.forEach(lbl => {
+         const lines = lbl.split("\n");
+         expect(lines.length).toBe(2);
+-        expect(lines[0].length * 5.2).toBeLessThanOrEqual(52);
+-        expect(lines[1].length * 5.2).toBeLessThanOrEqual(52);
++        expect(lines[0].length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
++        expect(lines[1].length * 5.2).toBeLessThanOrEqual(R4_CONTRACT.maxInnerWidth);
+         expect(lines.length * 9.5).toBeLessThanOrEqual(R4_CONTRACT.maxNoteHeight);
+       });
+     });
+   });
+ 
+   describe("Tier 4: Real-World Live Performance & Stress Scenarios", () => {
+-    test("T4-SCENARIO-LIVE-JAM: Live performance jam: simultaneous polyphonic note input, arpeggiator clocking, and parameter tweaks", () => {
+-      const performanceState = {
+-        heldNotes: [60, 64, 67],
+-        arpActive: true,
+-        bpm: 124,
+-        volume: 95
+-      };
++    test("T4-SCENARIO-LIVE-JAM: Live performance jam: simultaneous polyphonic note input and parameter tweaks", () => {
++      // In src/web/index.html, P88_NOTE_NAMES defines standard note nomenclature
++      expect(htmlSource).toContain("const P88_NOTE_NAMES = [");
+ 
+-      // Realtime state formatting
+-      const bpmText = R5_CONTRACT.formatters.bpm(performanceState.bpm);
+-      const volText = R5_CONTRACT.formatters.volume(performanceState.volume);
++      const heldNotePitches = [60, 64, 67]; // C4 major chord
++      const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
++      const renderedNotes = heldNotePitches.map(p => {
++        const name = noteNames[p % 12];
++        const oct = Math.floor(p / 12) - 1;
++        return `${name}${oct}`;
++      });
+ 
++      expect(renderedNotes).toEqual(["C4", "E4", "G4"]);
++
++      // Realtime state formatting alongside note playback
++      const bpmText = R5_CONTRACT.formatters.bpm(124);
++      const volText = R5_CONTRACT.formatters.volume(95);
++
+       expect(bpmText).toBe("BPM -\n124");
+       expect(volText).toBe("Vol -\n75%");
+-      expect(performanceState.heldNotes.length).toBe(3);
+     });
+ 
+     test("T4-SCENARIO-MODIFIER-MACRO: Rapid modifier switching between Base, Shift, Opt, and Cmd under active playback", () => {
+-      const sequence = ["base", "shift", "opt", "cmd", "cmdShift", "base"];
+-      let layoutShift = 0;
++      // In src/hud.lua, getModifierLayer defines the priority resolution hierarchy
++      expect(hudSource).toMatch(/local function getModifierLayer\(\)/);
++      expect(hudSource).toContain('if state.cmdHeld then return state.shiftHeld and "cmdShift" or "cmd" end');
+ 
+-      sequence.forEach(layer => {
+-        // Assert layer definition invariants
+-        expect(typeof layer).toBe("string");
+-        layoutShift += 0;
+-      });
+-
+-      expect(layoutShift).toBe(0);
++      // In src/web/index.html, modifier CSS classes must NEVER override key chassis dimensions
++      expect(htmlSource).not.toMatch(/\.shortcut-reserved\s*\{[^}]*\b(?:width|height):\s*\d+px/);
++      expect(htmlSource).not.toMatch(/\.shortcut-passthrough\s*\{[^}]*\b(?:width|height):\s*\d+px/);
+     });
+ 
+-    test("T4-SCENARIO-FOUR-TRACK-WORKFLOW: Full 4-track studio workflow: track isolation, mute/solo toggling, and independent parameter recall", () => {
+-      const trackSettings = [
+-        { id: 1, name: "Bass",   vol: 110, muted: false },
+-        { id: 2, name: "Chords", vol: 90,  muted: false },
+-        { id: 3, name: "Lead",   vol: 120, muted: true },
+-        { id: 4, name: "Arp",    vol: 100, muted: false }
+-      ];
++    test("T4-SCENARIO-FOUR-TRACK-WORKFLOW: Full 4-track studio workflow: default track architecture and settings persistence", () => {
++      // Grounded in src/config.lua default tracks definition
++      expect(configSource).toMatch(/\[1\]\s*=\s*\{[^}]*name\s*=\s*"Bass"[^}]*channel\s*=\s*0/);
++      expect(configSource).toMatch(/\[2\]\s*=\s*\{[^}]*name\s*=\s*"Chords"[^}]*channel\s*=\s*1/);
++      expect(configSource).toMatch(/\[3\]\s*=\s*\{[^}]*name\s*=\s*"Lead"[^}]*channel\s*=\s*2/);
++      expect(configSource).toMatch(/\[4\]\s*=\s*\{[^}]*name\s*=\s*"Arp"[^}]*channel\s*=\s*3/);
+ 
+-      trackSettings.forEach(trk => {
+-        const volText = R5_CONTRACT.formatters.volume(trk.vol);
+-        expect(volText).toContain("Vol -");
+-        if (trk.muted) {
+-          expect(trk.muted).toBe(true);
+-        }
+-      });
++      // Verify that each track has dedicated volume persistence
++      for (let t = 1; t <= 4; t++) {
++        expect(configSource).toContain(`getSetting("track${t}Volume"`);
++      }
+     });
+ 
+     test("T4-SCENARIO-STRESS-BURST: Chaos stress test: 100 rapid state updates alternating parameters, modifiers, and keypresses", () => {
+@@ -148,29 +144,21 @@
+ 
+       const elapsed = performance.now() - start;
+       expect(framesRendered).toBe(100);
+-      // 100 simulations should execute in < 50ms total (< 0.5ms per frame)
+       expect(elapsed).toBeLessThan(50);
+     });
+ 
+     test("T4-SCENARIO-KEYSTEP-DOCKING: Embedded KeyStep view dock/undock height expansion with QWERTY chassis layout intact", () => {
+-      // Base QWERTY HUD height is 280px; when KeyStep docks, expands to 600px
+-      const baseHeight = 280;
+-      const dockedHeight = 600;
+-      expect(dockedHeight - baseHeight).toBe(320);
+-
++      // In src/hud.lua, dock state conditionally switches height between 600 and 280
++      expect(hudSource).toMatch(/isKeyStepConnected\(\)\s*and\s*600\s*or\s*280/);
++      expect(hudSource).toMatch(/local\s+baseH\s*=\s*\(connected\s*==\s*true\)\s*and\s*600\s*or\s*280/);
+       expect(hudSource).toContain("KeyStep");
+     });
+ 
+     test("T4-SCENARIO-RELOAD-PERSISTENCE: Parameter state recall and presentation across simulated module reload", () => {
+-      const persistedState = {
+-        track1Volume: 108,
+-        inputQuantizeAmount: 90.0,
+-        arpBpm: 126
+-      };
+-
+-      expect(persistedState.track1Volume).toBe(108);
+-      expect(persistedState.inputQuantizeAmount).toBe(90.0);
+-      expect(persistedState.arpBpm).toBe(126);
++      // Grounded in src/config.lua getSetting hooks
++      expect(configSource).toContain('getSetting("track1Volume"');
++      expect(configSource).toContain('getSetting("arpBpm"');
++      expect(configSource).toContain('getSetting("inputQuantizeMode"');
+     });
+   });
+ });
