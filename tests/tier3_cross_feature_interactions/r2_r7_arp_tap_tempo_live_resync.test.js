@@ -14,8 +14,12 @@ describe("Tier 3 Interaction: R2 Arp Engine Resync During R7 Tap Tempo", () => {
     let step = R2_CONTRACT.computeArpStep(1, 100, "accentDownbeat", 50, tapEngine.bpm, 0.25);
     expect(step.stepSec).toBe(0.125);
 
-    // Tap accelerates to 150 BPM
-    tapEngine.tap(0.9); // 400ms interval -> 150 BPM
+    // Performer taps at 150 BPM (400ms intervals) to resync rolling tempo average
+    tapEngine.tap(0.9);
+    tapEngine.tap(1.3);
+    tapEngine.tap(1.7);
+    tapEngine.tap(2.1);
+    tapEngine.tap(2.5);
     expect(tapEngine.bpm).toBe(150.0);
 
     step = R2_CONTRACT.computeArpStep(1, 100, "accentDownbeat", 50, tapEngine.bpm, 0.25);
