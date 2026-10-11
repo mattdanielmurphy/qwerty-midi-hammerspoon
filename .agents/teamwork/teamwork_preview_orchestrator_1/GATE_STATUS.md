@@ -7,7 +7,7 @@
 | m1_reviewer_1 | teamwork_preview_reviewer | REQUEST_CHANGES (INTEGRITY VIOLATION) | handoff.md |
 | m1_reviewer_2 | teamwork_preview_reviewer | REQUEST_CHANGES (INTEGRITY VIOLATION) | handoff.md |
 | m1_challenger_1 | teamwork_preview_challenger | APPROVE | handoff.md |
-| m1_challenger_2 | teamwork_preview_challenger | PENDING | pending |
-| m1_auditor_1 | teamwork_preview_auditor | PENDING | pending |
+| m1_challenger_2 | teamwork_preview_challenger | APPROVE (with recommendations) | handoff.md |
+| m1_auditor_1 | teamwork_preview_auditor | INTEGRITY VIOLATION | handoff.md |
 
-Gate Result: **IN_PROGRESS**
+Gate Result: **FAIL (INTEGRITY VIOLATION: Deceptive guards, tautological tests, and facade simulations)**
