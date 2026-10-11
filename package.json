@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "test": "bun test",
     "bundle": "bash bin/bundle_and_reload.sh",
     "dev:hud": "bun --cwd packages/surface-hud run dev",
     "dualsynth:gui": "cd packages/dualsynth/macos && swift run dualsynth-gui",

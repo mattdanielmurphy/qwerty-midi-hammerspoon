@@ -58,7 +58,14 @@ def sync_ui_html(web_index, ui_html_lua):
     if web_index and ui_html_lua and os.path.exists(web_index):
         with open(web_index, "r", encoding="utf-8") as f:
             html_content = f.read()
-        lua_module_content = f'local HTML_UI_CONTENT = [[\n{html_content}\n]]\n\nreturn HTML_UI_CONTENT\n'
+
+        # Find safe Lua multiline fence level (at least 3: [===[ ... ]===])
+        eq_count = 3
+        while f']{"=" * eq_count}]' in html_content:
+            eq_count += 1
+        fence = "=" * eq_count
+
+        lua_module_content = f'local HTML_UI_CONTENT = [{fence}[\n{html_content}\n]{fence}]\n\nreturn HTML_UI_CONTENT\n'
         os.makedirs(os.path.dirname(os.path.abspath(ui_html_lua)), exist_ok=True)
         with open(ui_html_lua, "w", encoding="utf-8") as f:
             f.write(lua_module_content)
@@ -88,8 +95,9 @@ def bundle_lua(src_dirs, entry_file, output_file, web_index=None, ui_lua=None):
             if os.path.exists(candidate_web):
                 sync_ui_html(candidate_web, candidate_ui)
 
-        for root, _, files in os.walk(abs_src_dir):
-            for file in files:
+        for root, dirs, files in os.walk(abs_src_dir):
+            dirs.sort()
+            for file in sorted(files):
                 if file.endswith(".lua"):
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, abs_src_dir)
@@ -139,7 +147,9 @@ def bundle_lua(src_dirs, entry_file, output_file, web_index=None, ui_lua=None):
         "end\n"
     ]
 
-    for mod_name, code in modules.items():
+    for mod_name in sorted(modules.keys()):
+        code = modules[mod_name]
+
         def req_replacer(match):
             req_name = match.group(1)
             if req_name in modules:
