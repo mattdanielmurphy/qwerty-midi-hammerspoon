@@ -57,12 +57,13 @@ Deliver comprehensive fix and enhancement suite for qwerty-midi-hammerspoon acro
 | survey_explorer_3 | teamwork_preview_explorer | Survey Test Infra & Verification | completed | ecd948b7-0ad0-43ca-8426-580d0ff71f6e |
 | m1_explorer_1 | teamwork_preview_explorer | M1 Audio Test Suite Design | completed | f75cf65e-3197-4c6a-b620-aa6303f8b448 |
 | m1_explorer_2 | teamwork_preview_explorer | M1 HUD Test Suite Design | completed | dad44884-3f49-469a-98bf-94637a1b2ca2 |
-| m1_explorer_3 | teamwork_preview_explorer | M1 Build Pipeline Hardening Design | in-progress | 3542376f-200b-4e09-954a-068a2d5eef9a |
+| m1_explorer_3 | teamwork_preview_explorer | M1 Build Pipeline Hardening Design | completed | 3542376f-200b-4e09-954a-068a2d5eef9a |
+| worker_m1 | teamwork_preview_worker | M1 Test Infra & Build Hardening | in-progress | 5a434663-f466-4a1d-a008-0b1df79ca0ef |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 6 / 16
-- Pending subagents: f75cf65e-3197-4c6a-b620-aa6303f8b448, dad44884-3f49-469a-98bf-94637a1b2ca2, 3542376f-200b-4e09-954a-068a2d5eef9a
+- Spawn count: 7 / 16
+- Pending subagents: 5a434663-f466-4a1d-a008-0b1df79ca0ef
 - Predecessor: none
 - Successor: not yet spawned
 
