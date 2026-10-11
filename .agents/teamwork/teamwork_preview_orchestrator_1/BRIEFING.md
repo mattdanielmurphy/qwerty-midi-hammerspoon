@@ -66,17 +66,17 @@ Deliver comprehensive fix and enhancement suite for qwerty-midi-hammerspoon acro
 | m1_rem_explorer_1 | teamwork_preview_explorer | M1 UI Test Remediation | completed | c32976f5-5057-4faf-b253-a8e491733e43 |
 | m1_rem_explorer_2 | teamwork_preview_explorer | M1 Audio Test Remediation | completed | 82539b84-f2e6-4503-9eef-86d0df8a6d02 |
 | m1_rem_explorer_3 | teamwork_preview_explorer | M1 Harness Remediation | completed | 27a746ed-a78f-406a-b1ab-fecdce854418 |
-| worker_m1_rem_1 | teamwork_preview_worker | M1 Test Suite & Harness Remediation | in-progress | 1e24b82e-0fc6-432e-8ff5-ad7630794474 |
+| worker_m1_rem_1 | teamwork_preview_worker | M1 Test Suite & Harness Remediation | completed | 1e24b82e-0fc6-432e-8ff5-ad7630794474 |
 
 ## Succession Status
-- Succession required: yes (threshold reached, pending subagent completion)
-- Spawn count: 16 / 16
-- Pending subagents: 1e24b82e-0fc6-432e-8ff5-ad7630794474
+- Succession required: no (orchestrator is persistent top-level agent)
+- Spawn count: 16 (cumulative)
+- Pending subagents: none
 - Predecessor: none
-- Successor: not yet spawned
+- Successor: none
 
 ## Active Timers
-- Heartbeat cron: d8b964c9-55f5-4610-a971-90f0b67129c3/task-18 (every 10 min)
+- Heartbeat cron: d8b964c9-55f5-4610-a971-90f0b67129c3/task-249 (every 10 min)
 - Safety timer: none
 - On succession: kill all timers before spawning successor
 - On context truncation: run manage_task(Action="list") — re-create if missing
