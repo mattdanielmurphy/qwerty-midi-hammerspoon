@@ -1,35 +1,57 @@
 import { expect, test, describe } from "bun:test";
 import { TapTempoEngine, R2_CONTRACT } from "../harness/contracts.js";
 
+const arpSrc = await Bun.file("src/arpeggiator.lua").text();
+const controlsSrc = await Bun.file("src/controls.lua").text();
+
 describe("Tier 3 Interaction: R2 Arp Engine Resync During R7 Tap Tempo", () => {
   test("r2_r7_interaction_01_tap_tempo_updates_running_arp_clock", () => {
-    let currentBpm = 120.0;
-    let stepDuration = (60.0 / currentBpm) * 0.25; // 16th note
+    const tapEngine = new TapTempoEngine();
+    tapEngine.tap(0.0);
+    tapEngine.tap(0.5); // 120 BPM
+    expect(tapEngine.bpm).toBe(120.0);
 
-    function applyTapTempo(newBpm) {
-      currentBpm = newBpm;
-      stepDuration = (60.0 / currentBpm) * 0.25;
-    }
+    let step = R2_CONTRACT.computeArpStep(1, 100, "accentDownbeat", 50, tapEngine.bpm, 0.25);
+    expect(step.stepSec).toBe(0.125);
 
-    expect(stepDuration).toBe(0.125); // At 120 BPM
-    applyTapTempo(140.0);
-    expect(stepDuration).toBeCloseTo(0.1071, 4); // At 140 BPM
+    // Tap accelerates to 150 BPM
+    tapEngine.tap(0.9); // 400ms interval -> 150 BPM
+    expect(tapEngine.bpm).toBe(150.0);
+
+    step = R2_CONTRACT.computeArpStep(1, 100, "accentDownbeat", 50, tapEngine.bpm, 0.25);
+    expect(step.stepSec).toBeCloseTo(0.100, 4);
+
+    // Verify arpeggiator interval recalculation in production Lua
+    expect(arpSrc).toMatch(/local function getArpIntervalSeconds\(\)[\s\S]*?state\.arpBpm/);
   });
 
   test("r2_r7_interaction_02_gate_timer_preserved_across_bpm_change", () => {
-    // When BPM changes midway through a gate duration, active gate timer must fire safely
-    let noteOffFired = false;
-    let activeGate = { pitch: 60, generation: 1 };
+    // Verify production arpeggiator uses generation-guarded gate timers
+    expect(arpSrc).toContain("trk.gateGeneration");
+    expect(arpSrc).toMatch(/activeGate\.generation\s*==\s*gateGeneration/);
 
-    function onGateExpired(gen) {
-      if (activeGate && activeGate.generation === gen) {
-        noteOffFired = true;
-        activeGate = null;
+    // Validate generation guard model: stale generation timers are ignored
+    let releasedPitch = null;
+    let gateGeneration = 1;
+    const activeGate = { pitch: 60, generation: 1 };
+
+    function onTimerFire(timerGen) {
+      if (activeGate && activeGate.generation === timerGen) {
+        releasedPitch = activeGate.pitch;
       }
     }
 
-    onGateExpired(1);
-    expect(noteOffFired).toBe(true);
+    // BPM change increments gate generation
+    gateGeneration = 2;
+    activeGate.generation = gateGeneration;
+
+    // Stale timer fire (generation 1) must NOT release pitch
+    onTimerFire(1);
+    expect(releasedPitch).toBeNull();
+
+    // Active timer fire (generation 2) releases pitch
+    onTimerFire(2);
+    expect(releasedPitch).toBe(60);
   });
 
   test("r2_r7_interaction_03_continuous_taps_during_rich_pattern_playback", () => {
@@ -37,10 +59,10 @@ describe("Tier 3 Interaction: R2 Arp Engine Resync During R7 Tap Tempo", () => {
     tapEngine.tap(0.0);
     tapEngine.tap(0.4); // 150 BPM
 
-    // Compute arp step with new BPM
     const step = R2_CONTRACT.computeArpStep(1, 100, "accentDownbeat", 50, tapEngine.bpm, 0.25);
     expect(tapEngine.bpm).toBe(150.0);
     expect(step.vel).toBe(125);
     expect(step.stepSec).toBeCloseTo(0.1, 4);
+    expect(controlsSrc).toContain("arpeggiator.tapTempo()");
   });
 });
