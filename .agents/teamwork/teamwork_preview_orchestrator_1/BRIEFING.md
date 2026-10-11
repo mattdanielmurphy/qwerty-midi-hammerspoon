@@ -52,16 +52,19 @@ Deliver comprehensive fix and enhancement suite for qwerty-midi-hammerspoon acro
 ## Team Roster
 | Agent | Type | Work Item | Status | Conv ID |
 |-------|------|-----------|--------|---------|
+| survey_explorer_1 | teamwork_preview_explorer | Survey Audio & MIDI Engine (R1, R2, R3, R6, R7) | in-progress | 54383719-0809-44f2-9824-b1112ddd5833 |
+| survey_explorer_2 | teamwork_preview_explorer | Survey HUD & UI Overlay (R4, R5) | in-progress | 70a33529-66a7-4b1f-a1a7-046413d90a7d |
+| survey_explorer_3 | teamwork_preview_explorer | Survey Test Infra & Verification | in-progress | ecd948b7-0ad0-43ca-8426-580d0ff71f6e |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 0 / 16
-- Pending subagents: none
+- Spawn count: 3 / 16
+- Pending subagents: 54383719-0809-44f2-9824-b1112ddd5833, 70a33529-66a7-4b1f-a1a7-046413d90a7d, ecd948b7-0ad0-43ca-8426-580d0ff71f6e
 - Predecessor: none
 - Successor: not yet spawned
 
 ## Active Timers
-- Heartbeat cron: not started
+- Heartbeat cron: d8b964c9-55f5-4610-a971-90f0b67129c3/task-18 (every 10 min)
 - Safety timer: none
 - On succession: kill all timers before spawning successor
 - On context truncation: run manage_task(Action="list") — re-create if missing
