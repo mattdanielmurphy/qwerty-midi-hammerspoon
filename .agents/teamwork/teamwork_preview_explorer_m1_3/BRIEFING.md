@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-11T16:51:00Z
+# BRIEFING — 2026-10-11T16:57:00Z
 
 ## Mission
 Investigate and design hardening changes for the build and bundle pipeline (`bin/bundle_and_reload.sh`, `bin/hs-bundler`, and `package.json`).
@@ -20,16 +20,26 @@ Investigate and design hardening changes for the build and bundle pipeline (`bin
 
 ## Current Parent
 - Conversation ID: d8b964c9-55f5-4610-a971-90f0b67129c3
-- Updated: 2026-10-11T16:51:00Z
+- Updated: 2026-10-11T16:57:00Z
 
 ## Investigation State
-- **Explored paths**: [TBD]
-- **Key findings**: [TBD]
-- **Unexplored areas**: `bin/bundle_and_reload.sh`, `bin/hs-bundler`, `package.json`, survey 3 handoff, context docs
+- **Explored paths**: `bin/bundle_and_reload.sh`, `bin/hs-bundler`, `package.json`, `qwerty_midi.lua`, `src/ui_html.lua`, `tests/`
+- **Key findings**:
+  - `bin/bundle_and_reload.sh` lacked `luac -p` syntax validation and exit 1 on errors.
+  - `bin/hs-bundler` produced non-deterministic 9,813-line diffs due to unordered `os.walk` and dict keys. Hardened with `dirs.sort()`, `sorted(files)`, and `sorted(modules.keys())` delivering bit-for-bit identical SHA-256 hashes across repeated runs.
+  - `sync_ui_html` used fragile `[[ ... ]]` fences that break on `arr[idx[0]]` array indexing; hardened with dynamic `[===[ ... ]===]` fences.
+  - `package.json` updated with `"test": "bun test"`.
+- **Unexplored areas**: None for M1 build pipeline hardening.
 
 ## Key Decisions Made
-- Initializing investigation per Milestone M1 requirements.
+- Hardened pipeline with `luac -p qwerty_midi.lua` validation before `hs.reload()`.
+- Implemented deterministic sorting in `hs-bundler` module traversal.
+- Upgraded `sync_ui_html` to dynamic long brackets `[===[ ... ]===]`.
+- Produced machine-applicable patch file `build_pipeline_hardening.patch`.
 
 ## Artifact Index
-- /Users/matt/projects/qwerty-midi-hammerspoon/.agents/teamwork/teamwork_preview_explorer_m1_3/DISPATCH.md — Incoming task dispatch record
-- /Users/matt/projects/qwerty-midi-hammerspoon/.agents/teamwork/teamwork_preview_explorer_m1_3/progress.md — Liveness heartbeat and activity log
+- `.agents/teamwork/teamwork_preview_explorer_m1_3/DISPATCH.md` — Task dispatch log
+- `.agents/teamwork/teamwork_preview_explorer_m1_3/progress.md` — Activity progress log
+- `.agents/teamwork/teamwork_preview_explorer_m1_3/analysis.md` — Detailed technical analysis & diffs
+- `.agents/teamwork/teamwork_preview_explorer_m1_3/handoff.md` — 5-component handoff report
+- `.agents/teamwork/teamwork_preview_explorer_m1_3/build_pipeline_hardening.patch` — Validated unified git patch
