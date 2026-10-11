@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-11T17:15:00Z
+# BRIEFING — 2026-10-11T17:20:00Z
 
 ## Mission
 Design the headless mock harness (`tests/harness/hs_mock.lua`) integration and test execution architecture to resolve dead-code audit findings, add missing APIs, and establish authentic headless Lua verification.
@@ -22,14 +22,27 @@ Design the headless mock harness (`tests/harness/hs_mock.lua`) integration and t
 - Updated: 2026-10-11T17:14:09Z
 
 ## Investigation State
-- **Explored paths**: None yet
-- **Key findings**: None yet
-- **Unexplored areas**: hs_mock.lua, audit report, reviewer handoffs, challenger handoffs, PROJECT.md, TEST_INFRA.md, test execution runner options (bun test child_process vs lua CLI)
+- **Explored paths**: `tests/harness/hs_mock.lua`, `src/init.lua`, `src/midi.lua`, `src/config.lua`, `packages/music-engine/quantizer.lua`, `tests/` test files, audit and reviewer handoffs
+- **Key findings**:
+  1. Lua 5.4.8 is installed at `/opt/homebrew/bin/lua` matching Hammerspoon's Lua 5.4 runtime.
+  2. `hs_mock.lua` was previously dead code because no test imported or invoked it.
+  3. `hs_mock.lua` lacked `hs.eventtap` (used in `src/init.lua:182, 291`), `hs.timer.new(sec, fn)` (used in `src/init.lua:418`), and `timer:running()` method (used in `src/init.lua:134`).
+  4. `mock.advanceTime` suffered from non-chronological firing and only fired repeating timers once, swallowing intermediate ticks. A discrete-event loop resolves this completely.
+  5. `hs.midi` in `hs_mock.lua` lacked `devices()`, `virtualSources()`, `new()`, `newVirtualSource()`, and table metadata handling in `sendCommand(cmd, table)`.
+  6. Real modules (`packages/music-engine/quantizer.lua`, `src/midi.lua`) execute successfully in headless Lua against enhanced `hs_mock.lua`.
+  7. Bridging via Bun child process (`Bun.spawnSync(["lua", ...])`) in `tests/headless_lua_integration.test.js` allows `bun test` to seamlessly discover, run, and report pure-Lua tests with zero overhead (<5ms per suite).
+- **Unexplored areas**: None. Prototype verified with 100% pass rate.
 
 ## Key Decisions Made
-- Commencing investigation of audit failures, test harness code, and execution integration options.
+- Architecture selected: Multi-file headless Lua test suite in `tests/lua/test_*.lua` + pure-Lua runner `tests/lua/runner.lua` + Bun bridge `tests/headless_lua_integration.test.js`.
+- Discrete event simulation loop with earliest `nextFire` selection in `mock.advanceTime`.
+- Full `hs.eventtap` implementation with event swallowing simulation.
 
 ## Artifact Index
-- DISPATCH.md — Incoming dispatch message
-- BRIEFING.md — Working memory
-- progress.md — Heartbeat and status tracking
+- DISPATCH.md — Incoming message
+- BRIEFING.md — Working memory and status
+- progress.md — Liveness heartbeat
+- tmp/test_enhanced_mock.lua — Prototype verification of hs_mock additions
+- tmp/test_real_modules.lua — Prototype verification of real modules against hs_mock
+- analysis.md — Full deep-dive analysis
+- handoff.md — 5-component handoff report
