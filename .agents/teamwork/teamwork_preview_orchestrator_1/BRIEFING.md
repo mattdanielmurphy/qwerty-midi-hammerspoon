@@ -63,14 +63,15 @@ Deliver comprehensive fix and enhancement suite for qwerty-midi-hammerspoon acro
 | m1_reviewer_2 | teamwork_preview_reviewer | M1 Robustness Review | completed | 7b54a45e-bded-406b-9ada-7d5e5a1a3bb2 |
 | m1_challenger_1 | teamwork_preview_challenger | M1 Build Stress Challenger | completed | 4c50efb3-1de2-4f5d-b170-ce815e76a95c |
 | m1_challenger_2 | teamwork_preview_challenger | M1 Contract Stress Challenger | completed | 21c4e36c-d961-4cb4-ab21-a8a1765f3c64 |
-| m1_rem_explorer_1 | teamwork_preview_explorer | M1 UI Test Remediation | in-progress | c32976f5-5057-4faf-b253-a8e491733e43 |
-| m1_rem_explorer_2 | teamwork_preview_explorer | M1 Audio Test Remediation | in-progress | 82539b84-f2e6-4503-9eef-86d0df8a6d02 |
-| m1_rem_explorer_3 | teamwork_preview_explorer | M1 Harness Remediation | in-progress | 27a746ed-a78f-406a-b1ab-fecdce854418 |
+| m1_rem_explorer_1 | teamwork_preview_explorer | M1 UI Test Remediation | completed | c32976f5-5057-4faf-b253-a8e491733e43 |
+| m1_rem_explorer_2 | teamwork_preview_explorer | M1 Audio Test Remediation | completed | 82539b84-f2e6-4503-9eef-86d0df8a6d02 |
+| m1_rem_explorer_3 | teamwork_preview_explorer | M1 Harness Remediation | completed | 27a746ed-a78f-406a-b1ab-fecdce854418 |
+| worker_m1_rem_1 | teamwork_preview_worker | M1 Test Suite & Harness Remediation | in-progress | 1e24b82e-0fc6-432e-8ff5-ad7630794474 |
 
 ## Succession Status
-- Succession required: no
-- Spawn count: 15 / 16
-- Pending subagents: c32976f5-5057-4faf-b253-a8e491733e43, 82539b84-f2e6-4503-9eef-86d0df8a6d02, 27a746ed-a78f-406a-b1ab-fecdce854418
+- Succession required: yes (threshold reached, pending subagent completion)
+- Spawn count: 16 / 16
+- Pending subagents: 1e24b82e-0fc6-432e-8ff5-ad7630794474
 - Predecessor: none
 - Successor: not yet spawned
 
