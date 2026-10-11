@@ -142,12 +142,12 @@ export const R6_CONTRACT = {
 export class TapTempoEngine {
   constructor() {
     this.history = [];
-    this.lastTapTime = 0;
+    this.lastTapTime = null;
     this.bpm = 120.0;
   }
 
   tap(t) {
-    if (this.lastTapTime > 0) {
+    if (this.lastTapTime !== null) {
       const delta = t - this.lastTapTime;
       if (delta < 0.050) {
         return this.bpm;
