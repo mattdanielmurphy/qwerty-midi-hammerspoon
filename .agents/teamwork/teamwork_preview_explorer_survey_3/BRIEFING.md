@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-11T16:40:50Z
+# BRIEFING — 2026-10-11T16:46:20Z
 
 ## Mission
 Survey test infrastructure, build/bundle pipeline, and design a 4-tier E2E testing architecture for R1-R7.
@@ -20,12 +20,15 @@ Survey test infrastructure, build/bundle pipeline, and design a 4-tier E2E testi
 - Updated: 2026-10-11T16:40:50Z
 
 ## Investigation State
-- **Explored paths**: None yet
-- **Key findings**: None yet
-- **Unexplored areas**: package.json, bin/hs-bundler, bin/bundle_and_reload.sh, existing tests in tests/ and packages/, build/bundle pipeline, R1-R7 testing architecture
+- **Explored paths**: `package.json`, `tests/` (all 19 test files), `bin/hs-bundler`, `bin/bundle_and_reload.sh`, `qwerty_midi.lua`, `src/controls.lua`, `src/arpeggiator.lua`, `src/config.lua`, `src/midi.lua`, `src/init.lua`, `src/hud.lua`, `src/web/index.html`, `packages/music-engine/quantizer.lua`, `packages/music-engine/clock.lua`.
+- **Key findings**:
+  1. Existing suite runs with `bun test` passing 77 tests in 750ms.
+  2. Bundler pipeline lacks pre-reload `luac -p` check and uses unsorted `os.walk()`.
+  3. R1 lacks dedicated track volume keybindings; R2 lacks velocity contours & microtiming; R3 lacks 0-100% strength parameter; R4 has `white-space: nowrap;` and noisy Cmd pass-through overlays; R5 lacks real-time numeric badges on parameter keys; R6 lacks MIDI stuck note watchdog; R7 `tapTempo` is completely missing in `arpeggiator.lua`.
+- **Unexplored areas**: None within the survey scope; complete 4-tier testing architecture designed.
 
 ## Key Decisions Made
-- Initializing briefing and starting systematic investigation
+- Formulated comprehensive 4-tier E2E testing suite (Tier 1 Feature Contracts, Tier 2 Boundary/Edge Cases, Tier 3 Cross-Feature Interactions, Tier 4 Real-World Performance Scenarios) combining Bun and Lua test harnesses.
 
 ## Artifact Index
 - DISPATCH.md — Dispatch log
