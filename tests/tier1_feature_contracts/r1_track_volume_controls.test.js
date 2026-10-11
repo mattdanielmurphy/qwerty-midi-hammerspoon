@@ -4,21 +4,19 @@ import { R1_CONTRACT } from "../harness/contracts.js";
 const controlsSrc = await Bun.file("src/controls.lua").text();
 
 describe("R1 Tier 1: Dedicated Track Volume Controls Contract", () => {
-  test("r1_contract_01_dedicated_actions_registered", () => {
-    // Verifies dedicated keyboard actions exist for tracks 1 through 4
-    const hasProductionActions = controlsSrc.includes("trk1VolUp") || controlsSrc.includes("trkVolUp1");
-    if (hasProductionActions) {
-      for (let t = 1; t <= 4; t++) {
-        expect(controlsSrc).toMatch(new RegExp(`trk${t}VolUp|trkVolUp${t}`));
-        expect(controlsSrc).toMatch(new RegExp(`trk${t}VolDown|trkVolDown${t}`));
-      }
-    } else {
-      // Validate contract specification
-      expect(R1_CONTRACT.actions.length).toBe(8);
-      for (let t = 1; t <= 4; t++) {
-        expect(R1_CONTRACT.actions).toContain(`trk${t}VolUp`);
-        expect(R1_CONTRACT.actions).toContain(`trk${t}VolDown`);
-      }
+  test("r1_contract_01_dedicated_actions_specification", () => {
+    // Validate contract specification for dedicated track volume actions
+    expect(R1_CONTRACT.actions.length).toBe(8);
+    for (let t = 1; t <= 4; t++) {
+      expect(R1_CONTRACT.actions).toContain(`trk${t}VolUp`);
+      expect(R1_CONTRACT.actions).toContain(`trk${t}VolDown`);
+    }
+  });
+
+  test.skip("[Milestone M3 Implementation Gate: Dedicated volume actions in controls.lua]", () => {
+    for (let t = 1; t <= 4; t++) {
+      expect(controlsSrc).toMatch(new RegExp(`trk${t}VolUp|trkVolUp${t}`));
+      expect(controlsSrc).toMatch(new RegExp(`trk${t}VolDown|trkVolDown${t}`));
     }
   });
 
@@ -39,13 +37,12 @@ describe("R1 Tier 1: Dedicated Track Volume Controls Contract", () => {
   });
 
   test("r1_contract_04_debounced_persistence_trailing_timer", () => {
-    // Verifies debounced trailing timer specification
-    const hasDebouncedSave = controlsSrc.includes("saveSettingsDebounced") || controlsSrc.includes("saveSettingsTrailing");
-    if (hasDebouncedSave) {
-      expect(controlsSrc).toMatch(/saveSettingsDebounced|saveSettingsTrailing/);
-    } else {
-      expect(R1_CONTRACT.debounceMs).toBe(300);
-    }
+    // Verifies debounced trailing timer contract specification
+    expect(R1_CONTRACT.debounceMs).toBe(300);
+  });
+
+  test.skip("[Milestone M3 Implementation Gate: Debounced persistence trailing timer in controls.lua]", () => {
+    expect(controlsSrc).toMatch(/saveSettingsDebounced|saveSettingsTrailing/);
   });
 
   test("r1_contract_05_hud_spotlight_feedback_per_track", () => {

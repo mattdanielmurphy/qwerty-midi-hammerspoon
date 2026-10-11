@@ -22,7 +22,8 @@ export const R1_CONTRACT = {
   debounceMs: 300,
 
   channelForTrack(trackId) {
-    return Math.max(0, Math.min(15, trackId - 1));
+    const id = Number.isFinite(Number(trackId)) ? Number(trackId) : 1;
+    return Math.max(0, Math.min(15, Math.floor(id) - 1));
   },
 
   adjustVolume(initialVol, delta) {
@@ -33,8 +34,15 @@ export const R1_CONTRACT = {
     return Math.max(this.minVolume, Math.min(this.maxVolume, Math.round(base + change)));
   },
 
+  restoreVolumeCC(volume) {
+    const vol = Number.isFinite(Number(volume)) ? Number(volume) : this.defaultVolume;
+    // Matches src/controls.lua:372: math.floor(math.min(127, math.max(0, vol * 1.27)))
+    return Math.floor(Math.min(127, Math.max(0, vol * 1.27)));
+  },
+
   formatSpotlight(trackId, volume, trackColor) {
-    const pct = Math.floor((volume / 127) * 100 + 0.5);
+    const vol = Number.isFinite(Number(volume)) ? Number(volume) : 100;
+    const pct = Math.floor((vol / 127) * 100 + 0.5);
     return {
       title: `VOLUME (TRK ${trackId})`,
       value: `${pct}%`,
@@ -50,19 +58,36 @@ export const R2_CONTRACT = {
     accentDownbeat: [1.25, 0.85, 1.05, 0.80],
     grooveCurve: [1.10, 0.90, 1.20, 0.75, 1.05, 0.85, 1.15, 0.70]
   },
+  gateProfiles: {
+    accentDownbeat: [0.95, 0.45, 0.80, 0.40],
+    default: [0.80]
+  },
   minVelocity: 1,
   maxVelocity: 127,
 
   computeArpStep(stepIndex, baseVol, contourPattern, swingPercent, bpm, rateFactor) {
     const mults = this.contours[contourPattern] || [1.0];
-    const mult = mults[(stepIndex - 1) % mults.length];
-    const vel = Math.max(this.minVelocity, Math.min(this.maxVelocity, Math.floor(baseVol * mult)));
+    const idx = (((stepIndex - 1) % mults.length) + mults.length) % mults.length;
+    const mult = mults[idx];
+    const base = Number.isFinite(Number(baseVol)) ? Number(baseVol) : 100;
+    const vel = Math.max(this.minVelocity, Math.min(this.maxVelocity, Math.floor(base * mult)));
 
-    const stepSec = (60.0 / bpm) * rateFactor;
-    const isEvenStep = (stepIndex % 2 === 0);
-    const swingOffset = isEvenStep ? ((swingPercent - 50.0) / 100.0) * stepSec : 0;
+    const currentBpm = Number.isFinite(Number(bpm)) && bpm > 0 ? Number(bpm) : 120.0;
+    const currentRate = Number.isFinite(Number(rateFactor)) && rateFactor > 0 ? Number(rateFactor) : 0.25;
+    const stepSec = (60.0 / currentBpm) * currentRate;
+
+    const isEvenStep = (Math.abs(stepIndex) % 2 === 0);
+    const swing = Number.isFinite(Number(swingPercent)) ? Number(swingPercent) : 50.0;
+    const swingOffset = isEvenStep ? ((swing - 50.0) / 100.0) * stepSec : 0;
 
     return { vel, stepSec, swingOffset };
+  },
+
+  computeGateDuration(stepSec, contourPattern = "default", stepIndex = 1) {
+    const profile = this.gateProfiles[contourPattern] || this.gateProfiles.default;
+    const idx = (((stepIndex - 1) % profile.length) + profile.length) % profile.length;
+    const gateRatio = profile[idx];
+    return Math.max(0.010, stepSec * gateRatio);
   }
 };
 
@@ -79,16 +104,21 @@ export const R3_CONTRACT = {
     const factor = this.divisionFactors[mode];
     if (!factor) return 0;
 
-    const clampedBpm = Math.max(20.0, Math.min(999.0, bpm || 120.0));
+    const clampedBpm = Math.max(20.0, Math.min(999.0, Number.isFinite(Number(bpm)) ? Number(bpm) : 120.0));
     const stepDuration = (60.0 / clampedBpm) * factor;
 
-    const elapsed = elapsedOffset % stepDuration;
+    const offset = Number.isFinite(Number(elapsedOffset)) ? Number(elapsedOffset) : 0;
+    const elapsed = ((offset % stepDuration) + stepDuration) % stepDuration;
     const timeToNext = stepDuration - elapsed;
 
     if (timeToNext <= this.anticipationToleranceSec) return 0;
     if (elapsed <= this.catchupToleranceSec) return 0;
 
-    const quantAmount = Math.max(0, Math.min(100, amount === undefined || amount === null ? this.defaultAmount : Number(amount)));
+    const parsed = Number(amount);
+    const rawAmount = (amount === undefined || amount === null || !Number.isFinite(parsed))
+      ? this.defaultAmount
+      : parsed;
+    const quantAmount = Math.max(0, Math.min(100, rawAmount));
     if (quantAmount <= 0) return 0;
 
     return timeToNext * (quantAmount / 100.0);
@@ -136,7 +166,28 @@ export const R5_CONTRACT = {
 
 export const R6_CONTRACT = {
   maxOrphanAgeSec: 5.0,
-  staccatoGateWindowSec: 0.060
+  staccatoGateWindowSec: 0.060,
+
+  isVoiceOrphaned(voice, currentTime, maxAgeSec = 5.0, state = {}) {
+    const age = currentTime - voice.startTime;
+    if (age <= maxAgeSec) return false;
+    if (voice.keycode && state.pressedKeys && state.pressedKeys[voice.keycode]) return false;
+    if (state.sustainedPitches && state.sustainedPitches[voice.note]) return false;
+    if (voice.heldForPending) return false;
+    return true;
+  },
+
+  generatePanicMessages() {
+    const msgs = [];
+    for (let ch = 0; ch < 16; ch++) {
+      msgs.push({ type: "cc", controller: 64, value: 0, channel: ch });  // Damper / Sustain Off
+      msgs.push({ type: "cc", controller: 120, value: 0, channel: ch }); // All Sound Off
+      msgs.push({ type: "cc", controller: 123, value: 0, channel: ch }); // All Notes Off
+      msgs.push({ type: "cc", controller: 121, value: 0, channel: ch }); // Reset All Controllers
+      msgs.push({ type: "pitchWheel", value: 8192, channel: ch });       // Pitch Bend Center
+    }
+    return msgs;
+  }
 };
 
 export class TapTempoEngine {
@@ -164,5 +215,53 @@ export class TapTempoEngine {
     }
     this.lastTapTime = t;
     return this.bpm;
+  }
+}
+
+export class MidiVoiceTracker {
+  constructor() {
+    this.activeVoices = new Map();
+    this.sentMessages = [];
+  }
+
+  noteOn(note, channel = 0, velocity = 100, track = 1, timestamp = 0, keycode = null) {
+    const key = `${note}_${channel}`;
+    const voice = { note, channel, velocity, track, startTime: timestamp, keycode };
+    this.activeVoices.set(key, voice);
+    this.sentMessages.push({ type: "noteOn", note, channel, velocity, timestamp });
+    return voice;
+  }
+
+  noteOff(note, channel = 0, timestamp = 0) {
+    const key = `${note}_${channel}`;
+    const voice = this.activeVoices.get(key);
+    this.activeVoices.delete(key);
+    this.sentMessages.push({ type: "noteOff", note, channel, timestamp });
+    return voice;
+  }
+
+  checkOrphanedVoices(currentTime, maxAgeSec = 5.0, state = {}) {
+    const orphans = [];
+    for (const [key, voice] of this.activeVoices.entries()) {
+      if (R6_CONTRACT.isVoiceOrphaned(voice, currentTime, maxAgeSec, state)) {
+        orphans.push(voice);
+        this.activeVoices.delete(key);
+        this.sentMessages.push({
+          type: "noteOff",
+          note: voice.note,
+          channel: voice.channel,
+          timestamp: currentTime,
+          reason: "watchdog_orphan"
+        });
+      }
+    }
+    return orphans;
+  }
+
+  panic() {
+    this.activeVoices.clear();
+    const panicMsgs = R6_CONTRACT.generatePanicMessages();
+    this.sentMessages.push(...panicMsgs);
+    return panicMsgs;
   }
 }
