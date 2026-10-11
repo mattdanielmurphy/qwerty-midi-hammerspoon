@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-11T17:39:10Z
+# BRIEFING — 2026-10-11T17:42:20Z
 
 ## Mission
 Empirically stress-test the new headless Lua testing pipeline (Lua runner, hs_mock timers/eventtap, headless integration with Bun test) for M1 Remediation and determine an APPROVE/REJECT verdict.
@@ -20,7 +20,7 @@ Empirically stress-test the new headless Lua testing pipeline (Lua runner, hs_mo
 
 ## Current Parent
 - Conversation ID: d8b964c9-55f5-4610-a971-90f0b67129c3
-- Updated: 2026-10-11T17:39:10Z
+- Updated: 2026-10-11T17:42:20Z
 
 ## Review Scope
 - **Files to review**:
@@ -41,15 +41,21 @@ Empirically stress-test the new headless Lua testing pipeline (Lua runner, hs_mo
   - Test reproducibility and robustness
 
 ## Attack Surface
-- **Hypotheses tested**: [TBD]
-- **Vulnerabilities found**: [TBD]
-- **Untested angles**: [TBD]
+- **Hypotheses tested**:
+  - H1: Runner exit code and suite enumeration under `lua tests/lua/runner.lua` — Confirmed pass (4/4 suites pass, exit code 0).
+  - H2: `hs_mock.lua` discrete-event simulation under dense interleaved timers and co-prime intervals — Confirmed strictly monotonic and accurate (32/32 assertions passed in `./tmp/stress_hs_mock.lua`).
+  - H3: `hs_mock.lua` eventtap swallowing and chaining semantics — Confirmed downstream taps blocked on swallowed events, enabled taps intercept, stopped taps pass through.
+  - H4: `tests/headless_lua_integration.test.js` failure propagation to Bun test — Confirmed via live probe injection; failed assertions and syntax errors immediately trigger Bun test failure with non-zero exit code.
+- **Vulnerabilities found**: None in production codebase; pipeline is robust.
+- **Untested angles**: Hardware CoreMIDI loopback (requires live macOS Hammerspoon desktop environment, scoped for M5).
 
 ## Loaded Skills
 - None requested in dispatch
 
 ## Key Decisions Made
-- Initializing briefing and investigation plan.
+- Executed empirical tests in isolated throwaway scripts under `./tmp/`.
+- Verified live failure injection and immediate recovery in Bun test runner.
+- Final verdict: APPROVE.
 
 ## Artifact Index
 - DISPATCH.md — Incoming parent instructions
