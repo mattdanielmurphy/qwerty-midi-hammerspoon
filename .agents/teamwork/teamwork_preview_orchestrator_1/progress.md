@@ -11,5 +11,5 @@ Last visited: 2026-10-11T16:40:00Z
 
 ## Iteration Status
 Current iteration: 1 / 32
-Spawn count: 3 / 16
-Active subagents: 0 running, 3 completed (survey_explorer_1, survey_explorer_2, survey_explorer_3)
+Spawn count: 6 / 16
+Active subagents: 3 running (m1_explorer_1, m1_explorer_2, m1_explorer_3)
