@@ -1,4 +1,4 @@
-# BRIEFING — 2026-10-11T17:40:00Z
+# BRIEFING — 2026-10-11T17:45:00Z
 
 ## Mission
 Forensic integrity audit of remediated Milestone M1 work product in qwerty-midi-hammerspoon.
@@ -19,7 +19,7 @@ Forensic integrity audit of remediated Milestone M1 work product in qwerty-midi-
 
 ## Current Parent
 - Conversation ID: d8b964c9-55f5-4610-a971-90f0b67129c3
-- Updated: not yet
+- Updated: 2026-10-11T17:45:00Z
 
 ## Audit Scope
 - **Work product**: Remediated Milestone M1 test infrastructure & preview tests
@@ -27,23 +27,27 @@ Forensic integrity audit of remediated Milestone M1 work product in qwerty-midi-
 - **Audit type**: forensic integrity check
 
 ## Audit Progress
-- **Phase**: investigating
-- **Checks completed**: [none]
+- **Phase**: reporting
+- **Checks completed**:
+  - Read ORIGINAL_REQUEST.md, AG_CONTEXT.md, PROJECT.md, TEST_INFRA.md [PASS]
+  - Read prior auditor handoff.md and worker remediation reports [PASS]
+  - Verified elimination of deceptive conditional bypasses (`if (!htmlSource.match)`) [PASS]
+  - Verified elimination of self-certifying tautological tests (`key === key`, `0 === 0`) [PASS]
+  - Verified elimination of fallback branches (`if (hasProductionX)`) [PASS]
+  - Verified `tests/harness/hs_mock.lua` execution status across pure-Lua and Bun runners [PASS]
+  - Checked for new integrity violations (hardcoded results, dummy facades, test padding) [CLEAN]
+  - Verified production source code in `src/` and `packages/` was NOT prematurely modified [PASS]
+  - Ran test suite independently (`bun test`, `bun run test:lua`, bundler, luac, reload) [PASS]
+  - Performed adversarial and edge-case stress-testing [PASS]
 - **Checks remaining**:
-  - Read ORIGINAL_REQUEST.md, AG_CONTEXT.md, PROJECT.md, TEST_INFRA.md
-  - Read prior auditor handoff.md and worker remediation reports
-  - Verify elimination of deceptive conditional bypasses
-  - Verify elimination of self-certifying tautological tests
-  - Verify elimination of fallback branches
-  - Verify tests/harness/hs_mock.lua execution status
-  - Check for new integrity violations (hardcoded results, dummy facades, test padding)
-  - Verify production source code in src/ and packages/ was NOT prematurely modified
-  - Run test suite independently
-  - Stress-test and issue verdict
-- **Findings so far**: TBD
+  - Write handoff.md report
+  - Send verdict message to parent
+- **Findings so far**: CLEAN — All 4 prior audit violations resolved with 0 regressions and 0 new violations.
 
 ## Key Decisions Made
-- Initializing audit plan and reading background materials.
+- Confirmed that all 14 `test.skip` annotations are legitimate, honest milestone gates (M2, M3, M4) rather than masked bypasses.
+- Confirmed that `hs_mock.lua` is actively wired and exercising real production Lua files headlessly.
+- Issued verdict: CLEAN.
 
 ## Artifact Index
 - DISPATCH.md — dispatch record
@@ -52,9 +56,13 @@ Forensic integrity audit of remediated Milestone M1 work product in qwerty-midi-
 - handoff.md — final audit report
 
 ## Attack Surface
-- **Hypotheses tested**: TBD
-- **Vulnerabilities found**: TBD
-- **Untested angles**: TBD
+- **Hypotheses tested**:
+  - H1: Are there remaining hidden `if` bypasses in tests? Result: Disproved (0 deceptive `if` statements found).
+  - H2: Are there remaining tautologies in assertions? Result: Disproved (All assertions evaluate dynamic outcomes or code inspection).
+  - H3: Is `hs_mock.lua` dead code or fake? Result: Disproved (4 active test suites load real modules and run under Lua 5.4, bridged into `bun test`).
+  - H4: Were `src/` or `packages/` prematurely modified? Result: Disproved (Git diff against base 78021a8a is empty).
+- **Vulnerabilities found**: None.
+- **Untested angles**: None within Milestone M1 audit scope.
 
 ## Loaded Skills
 - None
