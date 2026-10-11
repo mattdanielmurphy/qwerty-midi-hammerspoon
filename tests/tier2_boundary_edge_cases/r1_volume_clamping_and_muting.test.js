@@ -43,12 +43,18 @@ describe("R1 Tier 2: Volume Clamping & Muting Boundary Cases", () => {
     expect(saveCount).toBe(1); // Exactly 1 debounced save executed
   });
 
-  test("r1_edge_06_unmute_restoration_payload", () => {
-    // When track is unmuted, CC 7 must restore stored volume level
-    const trk = { id: 2, volume: 112, muted: false, channel: 1 };
-    const ccEmitted = { cc: 7, val: trk.volume, ch: trk.channel };
-    expect(ccEmitted.cc).toBe(7);
-    expect(ccEmitted.val).toBe(112);
-    expect(ccEmitted.ch).toBe(1);
+  test("r1_edge_06_unmute_restoration_payload", async () => {
+    // 1. Inspect production restoration in src/controls.lua
+    const controlsSrc = await Bun.file("src/controls.lua").text();
+    expect(controlsSrc).toContain("midi.sendMidiCC(108, 0, ch)");
+    expect(controlsSrc).toMatch(/local volCc = math\.floor\(math\.min\(127,\s*math\.max\(0,\s*vol\s*\*\s*1\.27\)\)\)/);
+    expect(controlsSrc).toContain("midi.sendMidiCC(7, volCc, ch)");
+    expect(controlsSrc).toContain("midi.sendMidiCC(11, 127, ch)");
+
+    // 2. Validate conversion formulas
+    expect(R1_CONTRACT.restoreVolumeCC(100)).toBe(127); // 100% maps to CC 127
+    expect(R1_CONTRACT.restoreVolumeCC(50)).toBe(63);   // 50% maps to CC 63
+    expect(R1_CONTRACT.restoreVolumeCC(0)).toBe(0);     // 0% maps to CC 0
+    expect(R1_CONTRACT.restoreVolumeCC(150)).toBe(127); // Over-range clamps to 127
   });
 });
