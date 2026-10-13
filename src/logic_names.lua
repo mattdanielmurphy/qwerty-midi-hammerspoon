@@ -73,8 +73,10 @@ function logic_names.scanLogicTracks()
   if h and h.AXDescription and string.find(h.AXDescription, "Tracks header") then
     headerGroup = h
   else
+    local visited = 0
     local function findHeader(el, depth)
-      if depth > 8 then return nil end
+      if depth > 4 or visited > 60 then return nil end
+      visited = visited + 1
       local desc = el.AXDescription
       if desc and string.find(desc, "Tracks header") then
         return el
@@ -169,8 +171,8 @@ function logic_names.init()
   -- Initial scan
   logic_names.updateTrackNames(true)
 
-  -- Poll every 2.0s when Logic is running (scan takes ~80ms, non-blocking)
-  pollTimer = hs.timer.new(2.0, function()
+  -- Poll every 3.0s when Logic is running
+  pollTimer = hs.timer.new(3.0, function()
     local app = hs.application.find("Logic Pro")
     if app then
       logic_names.updateTrackNames(false)

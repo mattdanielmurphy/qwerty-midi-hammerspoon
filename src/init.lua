@@ -46,6 +46,11 @@ local function disarmMidiInput(reason)
   if arpeggiator and arpeggiator.stopLogicSync then arpeggiator.stopLogicSync() end
   state.pressedKeys = {}
   state.bpmInputMode = false
+  _G.activeWatchers.keyTapFailureCount = 0
+  _G.activeWatchers.scrollTapFailureCount = 0
+  _G._lastDisarmReason = tostring(reason)
+  local f = io.open("/Users/matt/projects/qwerty-midi-hammerspoon/tmp/qwerty_midi_debug.log", "a")
+  if f then f:write(os.date("%H:%M:%S") .. " [DISARM]: " .. tostring(reason) .. "\n"); f:close() end
   print("QWERTY MIDI: keyboard interception disabled — " .. tostring(reason))
 end
 
@@ -125,6 +130,8 @@ function _G.toggleMidiMode(newState)
   hs.settings.set("qwertyMidi_wasOpen", state.midiActive)
 
   if state.midiActive then
+    _G.activeWatchers.keyTapFailureCount = 0
+    _G.activeWatchers.scrollTapFailureCount = 0
     if controls and controls.selectTrack then
       controls.selectTrack(state.activeTrack or 1)
     end
@@ -321,7 +328,11 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
         state.shiftHeld = flags.shift == true
         state.altHeld = flags.alt == true
         state.ctrlHeld = flags.ctrl == true
-        hud.updateWebviewHud()
+        hs.timer.doAfter(0, function()
+          if state.midiActive and hud and hud.updateWebviewHud then
+            hud.updateWebviewHud()
+          end
+        end)
       end
 
       -- Exception: Let text input fields receive keystrokes natively
@@ -338,11 +349,14 @@ _G.activeWatchers.midiKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown
       end
 
       -- Exception: Pass keys through natively ONLY if Web Inspector or DevTools window is focused
-      local focusedWin = hs.window.focusedWindow()
-      if focusedWin then
-        local title = focusedWin:title() or ""
-        if string.find(title, "Inspector") or string.find(title, "DevTools") then
-          return false
+      local frontApp = hs.application.frontmostApplication()
+      if frontApp and frontApp:bundleID() == "org.hammerspoon.Hammerspoon" then
+        local focusedWin = hs.window.focusedWindow()
+        if focusedWin then
+          local title = focusedWin:title() or ""
+          if string.find(title, "Inspector") or string.find(title, "DevTools") then
+            return false
+          end
         end
       end
 
@@ -418,12 +432,35 @@ local lastRefreshClickTime = 0
 _G.activeWatchers.keyTapWatchdog = hs.timer.new(3.0, function()
   if state.midiActive then
     if _G.activeWatchers.midiKeyTap and not _G.activeWatchers.midiKeyTap:isEnabled() then
-      failOpenMidiInput("keyboard event tap stopped")
-      return
+      if hs.eventtap.isSecureInputEnabled() then
+        -- macOS temporarily disables event taps while Secure Input is active
+        -- (e.g. password fields, terminal sudo, 1Password). Do not fail open;
+        -- wait for Secure Input to disengage.
+      else
+        _G.activeWatchers.keyTapFailureCount = (_G.activeWatchers.keyTapFailureCount or 0) + 1
+        if _G.activeWatchers.keyTapFailureCount <= 3 then
+          print("QWERTY MIDI: event tap temporarily disabled by macOS — re-enabling (attempt " .. _G.activeWatchers.keyTapFailureCount .. "/3)")
+          _G.activeWatchers.midiKeyTap:start()
+        else
+          failOpenMidiInput("keyboard event tap stopped")
+          return
+        end
+      end
+    else
+      _G.activeWatchers.keyTapFailureCount = 0
     end
+
     if _G.activeWatchers.midiScrollTap and not _G.activeWatchers.midiScrollTap:isEnabled() then
-      failOpenMidiInput("scroll event tap stopped")
-      return
+      _G.activeWatchers.scrollTapFailureCount = (_G.activeWatchers.scrollTapFailureCount or 0) + 1
+      if _G.activeWatchers.scrollTapFailureCount <= 3 then
+        print("QWERTY MIDI: scroll tap temporarily disabled by macOS — re-enabling (attempt " .. _G.activeWatchers.scrollTapFailureCount .. "/3)")
+        _G.activeWatchers.midiScrollTap:start()
+      else
+        failOpenMidiInput("scroll event tap stopped")
+        return
+      end
+    else
+      _G.activeWatchers.scrollTapFailureCount = 0
     end
 
     if keystep and keystep.checkConnection then
