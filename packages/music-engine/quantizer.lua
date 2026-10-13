@@ -32,8 +32,9 @@ end
 --- Calculate delay in seconds until the next quantized grid tick.
 -- @param bpm number
 -- @param mode string (e.g. "1/4", "1/8", "1/16", "Off")
+-- @param amount number optional quantize strength percentage (0..100, default 90.0)
 -- @return number delay in seconds (0 if Off or on-beat)
-function quantizer.calculateDelay(bpm, mode)
+function quantizer.calculateDelay(bpm, mode, amount)
   if not mode or mode == "Off" or mode == "None" then
     return 0
   end
@@ -60,7 +61,13 @@ function quantizer.calculateDelay(bpm, mode)
     return 0
   end
 
-  return timeToNext
+  local quantAmount = tonumber(amount) or 90.0
+  quantAmount = math.max(0.0, math.min(100.0, quantAmount))
+  if quantAmount <= 0 then
+    return 0
+  end
+
+  return timeToNext * (quantAmount / 100.0)
 end
 
 --- Schedule or immediately execute a Note On / Chord event through quantization.
@@ -73,7 +80,8 @@ end
 -- @param bpm number active BPM
 -- @param mode string quantize mode ("Off", "1/4", "1/8", etc.)
 -- @param onTrigger function(pitches, vel, ch) callback executed when note fires
-function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
+-- @param amount number optional quantize strength percentage (0..100, default 90.0)
+function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger, amount)
   if type(pitches) == "number" then
     pitches = { pitches }
   end
@@ -82,12 +90,16 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
 
   -- Cancel any previous pending event for this ID
   if pendingEvents[eventId] then
-    if pendingEvents[eventId].timer then pcall(function() pendingEvents[eventId].timer:stop() end) end
-    if pendingEvents[eventId].gateTimer then pcall(function() pendingEvents[eventId].gateTimer:stop() end) end
+    local prevEv = pendingEvents[eventId]
+    if prevEv.timer then pcall(function() prevEv.timer:stop() end) end
+    if prevEv.gateTimer then pcall(function() prevEv.gateTimer:stop() end) end
+    if prevEv.onFired and prevEv.onRelease then
+      pcall(function() prevEv.onRelease(prevEv.pitches, prevEv.channel) end)
+    end
     pendingEvents[eventId] = nil
   end
 
-  local delay = quantizer.calculateDelay(bpm, mode)
+  local delay = quantizer.calculateDelay(bpm, mode, amount)
 
   if delay <= 0 then
     -- Immediate playback (No quantization or landed on grid)

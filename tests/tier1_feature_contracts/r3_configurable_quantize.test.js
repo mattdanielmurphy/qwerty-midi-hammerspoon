@@ -11,7 +11,7 @@ describe("R3 Tier 1: Configurable Quantization Amount Contracts", () => {
     expect(R3_CONTRACT.maxAmount).toBe(100.0);
   });
 
-  test.skip("[Milestone M2 Implementation Gate: Configurable amount in quantizer.lua]", () => {
+  test("[Milestone M2 Implementation Gate: Configurable amount in quantizer.lua]", () => {
     expect(quantizerSrc).toMatch(/function quantizer\.calculateDelay\(bpm,\s*mode,\s*amount\)/);
     expect(quantizerSrc).toMatch(/local quantAmount\s*=\s*tonumber\(amount\)\s*or\s*90\.0/);
   });

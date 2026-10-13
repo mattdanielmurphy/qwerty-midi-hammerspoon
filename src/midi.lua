@@ -57,11 +57,84 @@ local function getActiveNoteLedger()
   local snapshot = {}
   for note, voices in pairs(activeNoteLedger) do
     for ch, voice in pairs(voices) do
-      snapshot[tostring(note)] = { note = note, channel = ch, track = voice.track, color = voice.color }
+      snapshot[tostring(note)] = {
+        note = note,
+        channel = ch,
+        track = voice.track,
+        color = voice.color,
+        startTime = voice.startTime,
+        vel = voice.vel
+      }
       break
     end
   end
   return snapshot
+end
+
+--- Scan active notes for hung/orphaned voices exceeding maxAgeSec (default 5.0s)
+--- and automatically silence them unless physically held or sustained.
+--- @param currentTime number optional timestamp (seconds)
+--- @param maxAgeSec number optional threshold (seconds, default 5.0)
+--- @param state table optional controller state table
+--- @return table list of silenced orphan note tables
+local function checkOrphanedVoices(currentTime, maxAgeSec, state)
+  local now = currentTime or ((hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time())
+  local threshold = maxAgeSec or 5.0
+  local st = state or (_G.activeWatchers and _G.activeWatchers.state) or {}
+
+  local orphans = {}
+  for note, voices in pairs(activeNoteLedger) do
+    for ch, voice in pairs(voices) do
+      local age = now - (voice.startTime or now)
+      local isOrphan = (age > threshold)
+
+      -- Check if note corresponds to any currently pressed physical key
+      if isOrphan and st.pressedKeys then
+        for code, keyInfo in pairs(st.pressedKeys) do
+          if type(keyInfo) == "table" and keyInfo.pitches then
+            for _, p in ipairs(keyInfo.pitches) do
+              if p == note and (keyInfo.channel == nil or keyInfo.channel == ch) then
+                isOrphan = false
+                break
+              end
+            end
+          end
+          if not isOrphan then break end
+        end
+      end
+
+      -- Check if note is sustained in any track's sustainedPitches or global state
+      if isOrphan then
+        if st.sustainedPitches and st.sustainedPitches[note] then
+          isOrphan = false
+        elseif st.tracks then
+          for _, trk in pairs(st.tracks) do
+            if trk.sustainedPitches then
+              for _, sp in ipairs(trk.sustainedPitches) do
+                local p = (type(sp) == "table" and sp.pitch) or sp
+                local c = (type(sp) == "table" and sp.channel) or nil
+                if p == note and (c == nil or c == ch) then
+                  isOrphan = false
+                  break
+                end
+              end
+            end
+            if not isOrphan then break end
+          end
+        end
+      end
+
+      if isOrphan then
+        table.insert(orphans, { note = note, channel = ch, track = voice.track, startTime = voice.startTime })
+      end
+    end
+  end
+
+  for _, orphan in ipairs(orphans) do
+    sendMidiNote("noteOff", orphan.note, 0, orphan.channel)
+  end
+
+  return orphans
 end
 
 local function clearActiveNotes()
@@ -94,8 +167,9 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
 
   -- Update active note ledger & real-time piano visualizer
   if isNoteOn then
+    local now = (hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time()
     activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
-    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel }
+    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel, startTime = now, note = noteNum, channel = ch }
     if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
       _G.activeWatchers.hud.updatePianoNote(noteNum, true, trkId, trkColor)
     end
@@ -188,5 +262,6 @@ return {
   panicAllChannels = panicAllChannels,
   getActiveNoteLedger = getActiveNoteLedger,
   clearActiveNotes = clearActiveNotes,
-  getTrackForChannel = getTrackForChannel
+  getTrackForChannel = getTrackForChannel,
+  checkOrphanedVoices = checkOrphanedVoices
 }

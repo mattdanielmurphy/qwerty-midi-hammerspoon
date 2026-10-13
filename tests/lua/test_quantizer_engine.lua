@@ -39,8 +39,10 @@ T.test("calculateDelay calculates proper delay and applies tolerance windows", f
   -- At 120 BPM: quarter note is 0.5s (mode "1/4")
   -- Advance clock 0.1s -> elapsed = 0.1s. timeToNext = 0.4s.
   mock.setTime(1000.1)
-  local delay = quantizer.calculateDelay(120, "1/4")
-  T.assertClose(delay, 0.4, 1e-3, "Delay should be ~0.4s")
+  local delay100 = quantizer.calculateDelay(120, "1/4", 100)
+  T.assertClose(delay100, 0.4, 1e-3, "Full strength delay should be ~0.4s")
+  local delayDefault = quantizer.calculateDelay(120, "1/4")
+  T.assertClose(delayDefault, 0.36, 1e-3, "Default 90% strength delay should be ~0.36s")
 
   -- Anticipation tolerance test: within 12ms before the beat
   -- timeToNext <= 0.012 -> returns 0

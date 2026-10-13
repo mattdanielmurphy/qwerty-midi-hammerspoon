@@ -82,6 +82,7 @@ local state = {
   arpGatePercent = getSetting("arpGatePercent", 80.0),
   arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
   inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
+  inputQuantizeAmount = getSetting("inputQuantizeAmount", 90.0), -- 0.0 .. 100.0, default 90.0
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,

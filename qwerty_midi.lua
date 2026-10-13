@@ -1834,6 +1834,7 @@ local state = {
   arpGatePercent = getSetting("arpGatePercent", 80.0),
   arpQuantizeMode = getSetting("arpQuantizeMode", "None"),
   inputQuantizeMode = getSetting("inputQuantizeMode", "Off"), -- "Off", "1/1", "1/2", "1/4", "1/8", "1/16", "1/32"
+  inputQuantizeAmount = getSetting("inputQuantizeAmount", 90.0), -- 0.0 .. 100.0, default 90.0
   arpBpm = getSetting("arpBpm", 120.0),
   arpTimer = nil,
   arpGateTimer = nil,
@@ -3106,6 +3107,22 @@ local function selectTrack(id)
   if ks and ks.syncToHud then ks.syncToHud() end
 end
 
+local saveSettingsTimer = nil
+local function saveSettingsDebounced()
+  if saveSettingsTimer then
+    pcall(function() saveSettingsTimer:stop() end)
+    saveSettingsTimer = nil
+  end
+  if hs and hs.timer and hs.timer.doAfter then
+    saveSettingsTimer = hs.timer.doAfter(0.300, function()
+      saveSettingsTimer = nil
+      config.saveSettings()
+    end)
+  else
+    config.saveSettings()
+  end
+end
+
 local function adjustTrackVolume(trackId, delta)
   local id = math.max(1, math.min(4, math.floor(tonumber(trackId) or 0)))
   local trk = state.tracks and state.tracks[id]
@@ -3114,7 +3131,7 @@ local function adjustTrackVolume(trackId, delta)
   if isTrackAudible(id) then midi.sendMidiCC(7, trk.volume, trk.channel or (id - 1)) end
   if id <= 2 and state.bottomRowTrack == id then state.bottomRowVolume = trk.volume end
   if id >= 3 and state.topRowTrack == id then state.topRowVolume = trk.volume end
-  config.saveSettings()
+  saveSettingsDebounced()
   hud.updateWebviewHud({
     title = "VOLUME (TRK " .. id .. ")",
     value = math.floor((trk.volume / 127) * 100 + 0.5) .. "%",
@@ -3972,6 +3989,22 @@ local function executeControlAction(act, code)
       }
       hud.updateWebviewHud(spot)
     end
+  elseif act == "trk1VolUp" or act == "trkVolUp1" then
+    adjustTrackVolume(1, 4)
+  elseif act == "trk1VolDown" or act == "trkVolDown1" then
+    adjustTrackVolume(1, -4)
+  elseif act == "trk2VolUp" or act == "trkVolUp2" then
+    adjustTrackVolume(2, 4)
+  elseif act == "trk2VolDown" or act == "trkVolDown2" then
+    adjustTrackVolume(2, -4)
+  elseif act == "trk3VolUp" or act == "trkVolUp3" then
+    adjustTrackVolume(3, 4)
+  elseif act == "trk3VolDown" or act == "trkVolDown3" then
+    adjustTrackVolume(3, -4)
+  elseif act == "trk4VolUp" or act == "trkVolUp4" then
+    adjustTrackVolume(4, 4)
+  elseif act == "trk4VolDown" or act == "trkVolDown4" then
+    adjustTrackVolume(4, -4)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
     local trkId = state.activeTrack or 1
@@ -4649,6 +4682,10 @@ local function shouldRepeat(act)
     volUp = true, volDown = true, volume = true,
     topVolUp = true, topVolDown = true,
     botVolUp = true, botVolDown = true,
+    trk1VolUp = true, trk1VolDown = true, trkVolUp1 = true, trkVolDown1 = true,
+    trk2VolUp = true, trk2VolDown = true, trkVolUp2 = true, trkVolDown2 = true,
+    trk3VolUp = true, trk3VolDown = true, trkVolUp3 = true, trkVolDown3 = true,
+    trk4VolUp = true, trk4VolDown = true, trkVolUp4 = true, trkVolDown4 = true,
     modWheelUp = true, modWheelDown = true, modWheel = true
   }
   return repeatingActions[act] == true
@@ -4839,6 +4876,7 @@ local function handleKeyDown(code, externalNoteKey)
     else 
       if isTrackAudible(trkIdx) then
         local quantMode = state.inputQuantizeMode or "Off"
+        local quantAmount = state.inputQuantizeAmount or 90.0
         local bpm = state.arpBpm or 120.0
         local vel = transposer.getEffectiveRowVelocity(isTop)
 
@@ -4848,7 +4886,7 @@ local function handleKeyDown(code, externalNoteKey)
           for _, p in ipairs(pitches) do
             midi.sendMidiNote("noteOn", p, v, channel)
           end
-        end)
+        end, quantAmount)
       end
     end
     if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end
@@ -7918,6 +7956,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.new(3.0, function()
     if keystep and keystep.checkConnection then
       pcall(function() keystep.checkConnection() end)
     end
+
+    if midi and midi.checkOrphanedVoices then
+      pcall(function() midi.checkOrphanedVoices(nil, 5.0, state) end)
+    end
     
     hud.pingWebview()
     local hb = hud.getLastHeartbeat()
@@ -9991,11 +10033,84 @@ local function getActiveNoteLedger()
   local snapshot = {}
   for note, voices in pairs(activeNoteLedger) do
     for ch, voice in pairs(voices) do
-      snapshot[tostring(note)] = { note = note, channel = ch, track = voice.track, color = voice.color }
+      snapshot[tostring(note)] = {
+        note = note,
+        channel = ch,
+        track = voice.track,
+        color = voice.color,
+        startTime = voice.startTime,
+        vel = voice.vel
+      }
       break
     end
   end
   return snapshot
+end
+
+--- Scan active notes for hung/orphaned voices exceeding maxAgeSec (default 5.0s)
+--- and automatically silence them unless physically held or sustained.
+--- @param currentTime number optional timestamp (seconds)
+--- @param maxAgeSec number optional threshold (seconds, default 5.0)
+--- @param state table optional controller state table
+--- @return table list of silenced orphan note tables
+local function checkOrphanedVoices(currentTime, maxAgeSec, state)
+  local now = currentTime or ((hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time())
+  local threshold = maxAgeSec or 5.0
+  local st = state or (_G.activeWatchers and _G.activeWatchers.state) or {}
+
+  local orphans = {}
+  for note, voices in pairs(activeNoteLedger) do
+    for ch, voice in pairs(voices) do
+      local age = now - (voice.startTime or now)
+      local isOrphan = (age > threshold)
+
+      -- Check if note corresponds to any currently pressed physical key
+      if isOrphan and st.pressedKeys then
+        for code, keyInfo in pairs(st.pressedKeys) do
+          if type(keyInfo) == "table" and keyInfo.pitches then
+            for _, p in ipairs(keyInfo.pitches) do
+              if p == note and (keyInfo.channel == nil or keyInfo.channel == ch) then
+                isOrphan = false
+                break
+              end
+            end
+          end
+          if not isOrphan then break end
+        end
+      end
+
+      -- Check if note is sustained in any track's sustainedPitches or global state
+      if isOrphan then
+        if st.sustainedPitches and st.sustainedPitches[note] then
+          isOrphan = false
+        elseif st.tracks then
+          for _, trk in pairs(st.tracks) do
+            if trk.sustainedPitches then
+              for _, sp in ipairs(trk.sustainedPitches) do
+                local p = (type(sp) == "table" and sp.pitch) or sp
+                local c = (type(sp) == "table" and sp.channel) or nil
+                if p == note and (c == nil or c == ch) then
+                  isOrphan = false
+                  break
+                end
+              end
+            end
+            if not isOrphan then break end
+          end
+        end
+      end
+
+      if isOrphan then
+        table.insert(orphans, { note = note, channel = ch, track = voice.track, startTime = voice.startTime })
+      end
+    end
+  end
+
+  for _, orphan in ipairs(orphans) do
+    sendMidiNote("noteOff", orphan.note, 0, orphan.channel)
+  end
+
+  return orphans
 end
 
 local function clearActiveNotes()
@@ -10028,8 +10143,9 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
 
   -- Update active note ledger & real-time piano visualizer
   if isNoteOn then
+    local now = (hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time()
     activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
-    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel }
+    activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel, startTime = now, note = noteNum, channel = ch }
     if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
       _G.activeWatchers.hud.updatePianoNote(noteNum, true, trkId, trkColor)
     end
@@ -10122,7 +10238,8 @@ return {
   panicAllChannels = panicAllChannels,
   getActiveNoteLedger = getActiveNoteLedger,
   clearActiveNotes = clearActiveNotes,
-  getTrackForChannel = getTrackForChannel
+  getTrackForChannel = getTrackForChannel,
+  checkOrphanedVoices = checkOrphanedVoices
 }
 
 end
@@ -10162,8 +10279,9 @@ end
 --- Calculate delay in seconds until the next quantized grid tick.
 -- @param bpm number
 -- @param mode string (e.g. "1/4", "1/8", "1/16", "Off")
+-- @param amount number optional quantize strength percentage (0..100, default 90.0)
 -- @return number delay in seconds (0 if Off or on-beat)
-function quantizer.calculateDelay(bpm, mode)
+function quantizer.calculateDelay(bpm, mode, amount)
   if not mode or mode == "Off" or mode == "None" then
     return 0
   end
@@ -10190,7 +10308,13 @@ function quantizer.calculateDelay(bpm, mode)
     return 0
   end
 
-  return timeToNext
+  local quantAmount = tonumber(amount) or 90.0
+  quantAmount = math.max(0.0, math.min(100.0, quantAmount))
+  if quantAmount <= 0 then
+    return 0
+  end
+
+  return timeToNext * (quantAmount / 100.0)
 end
 
 --- Schedule or immediately execute a Note On / Chord event through quantization.
@@ -10203,7 +10327,8 @@ end
 -- @param bpm number active BPM
 -- @param mode string quantize mode ("Off", "1/4", "1/8", etc.)
 -- @param onTrigger function(pitches, vel, ch) callback executed when note fires
-function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
+-- @param amount number optional quantize strength percentage (0..100, default 90.0)
+function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger, amount)
   if type(pitches) == "number" then
     pitches = { pitches }
   end
@@ -10212,12 +10337,16 @@ function quantizer.queueNoteOn(eventId, pitches, vel, ch, bpm, mode, onTrigger)
 
   -- Cancel any previous pending event for this ID
   if pendingEvents[eventId] then
-    if pendingEvents[eventId].timer then pcall(function() pendingEvents[eventId].timer:stop() end) end
-    if pendingEvents[eventId].gateTimer then pcall(function() pendingEvents[eventId].gateTimer:stop() end) end
+    local prevEv = pendingEvents[eventId]
+    if prevEv.timer then pcall(function() prevEv.timer:stop() end) end
+    if prevEv.gateTimer then pcall(function() prevEv.gateTimer:stop() end) end
+    if prevEv.onFired and prevEv.onRelease then
+      pcall(function() prevEv.onRelease(prevEv.pitches, prevEv.channel) end)
+    end
     pendingEvents[eventId] = nil
   end
 
-  local delay = quantizer.calculateDelay(bpm, mode)
+  local delay = quantizer.calculateDelay(bpm, mode, amount)
 
   if delay <= 0 then
     -- Immediate playback (No quantization or landed on grid)

@@ -492,6 +492,22 @@ local function selectTrack(id)
   if ks and ks.syncToHud then ks.syncToHud() end
 end
 
+local saveSettingsTimer = nil
+local function saveSettingsDebounced()
+  if saveSettingsTimer then
+    pcall(function() saveSettingsTimer:stop() end)
+    saveSettingsTimer = nil
+  end
+  if hs and hs.timer and hs.timer.doAfter then
+    saveSettingsTimer = hs.timer.doAfter(0.300, function()
+      saveSettingsTimer = nil
+      config.saveSettings()
+    end)
+  else
+    config.saveSettings()
+  end
+end
+
 local function adjustTrackVolume(trackId, delta)
   local id = math.max(1, math.min(4, math.floor(tonumber(trackId) or 0)))
   local trk = state.tracks and state.tracks[id]
@@ -500,7 +516,7 @@ local function adjustTrackVolume(trackId, delta)
   if isTrackAudible(id) then midi.sendMidiCC(7, trk.volume, trk.channel or (id - 1)) end
   if id <= 2 and state.bottomRowTrack == id then state.bottomRowVolume = trk.volume end
   if id >= 3 and state.topRowTrack == id then state.topRowVolume = trk.volume end
-  config.saveSettings()
+  saveSettingsDebounced()
   hud.updateWebviewHud({
     title = "VOLUME (TRK " .. id .. ")",
     value = math.floor((trk.volume / 127) * 100 + 0.5) .. "%",
@@ -1358,6 +1374,22 @@ local function executeControlAction(act, code)
       }
       hud.updateWebviewHud(spot)
     end
+  elseif act == "trk1VolUp" or act == "trkVolUp1" then
+    adjustTrackVolume(1, 4)
+  elseif act == "trk1VolDown" or act == "trkVolDown1" then
+    adjustTrackVolume(1, -4)
+  elseif act == "trk2VolUp" or act == "trkVolUp2" then
+    adjustTrackVolume(2, 4)
+  elseif act == "trk2VolDown" or act == "trkVolDown2" then
+    adjustTrackVolume(2, -4)
+  elseif act == "trk3VolUp" or act == "trkVolUp3" then
+    adjustTrackVolume(3, 4)
+  elseif act == "trk3VolDown" or act == "trkVolDown3" then
+    adjustTrackVolume(3, -4)
+  elseif act == "trk4VolUp" or act == "trkVolUp4" then
+    adjustTrackVolume(4, 4)
+  elseif act == "trk4VolDown" or act == "trkVolDown4" then
+    adjustTrackVolume(4, -4)
   elseif act == "chordUp" then
     state.chordIdx = (state.chordIdx % #state.CHORDS) + 1
     local trkId = state.activeTrack or 1
@@ -2035,6 +2067,10 @@ local function shouldRepeat(act)
     volUp = true, volDown = true, volume = true,
     topVolUp = true, topVolDown = true,
     botVolUp = true, botVolDown = true,
+    trk1VolUp = true, trk1VolDown = true, trkVolUp1 = true, trkVolDown1 = true,
+    trk2VolUp = true, trk2VolDown = true, trkVolUp2 = true, trkVolDown2 = true,
+    trk3VolUp = true, trk3VolDown = true, trkVolUp3 = true, trkVolDown3 = true,
+    trk4VolUp = true, trk4VolDown = true, trkVolUp4 = true, trkVolDown4 = true,
     modWheelUp = true, modWheelDown = true, modWheel = true
   }
   return repeatingActions[act] == true
@@ -2225,6 +2261,7 @@ local function handleKeyDown(code, externalNoteKey)
     else 
       if isTrackAudible(trkIdx) then
         local quantMode = state.inputQuantizeMode or "Off"
+        local quantAmount = state.inputQuantizeAmount or 90.0
         local bpm = state.arpBpm or 120.0
         local vel = transposer.getEffectiveRowVelocity(isTop)
 
@@ -2234,7 +2271,7 @@ local function handleKeyDown(code, externalNoteKey)
           for _, p in ipairs(pitches) do
             midi.sendMidiNote("noteOn", p, v, channel)
           end
-        end)
+        end, quantAmount)
       end
     end
     if not externalNoteKey then hud.updateSingleKeyState(code, true, false) end

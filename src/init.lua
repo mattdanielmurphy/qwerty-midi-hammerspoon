@@ -429,6 +429,10 @@ _G.activeWatchers.keyTapWatchdog = hs.timer.new(3.0, function()
     if keystep and keystep.checkConnection then
       pcall(function() keystep.checkConnection() end)
     end
+
+    if midi and midi.checkOrphanedVoices then
+      pcall(function() midi.checkOrphanedVoices(nil, 5.0, state) end)
+    end
     
     hud.pingWebview()
     local hb = hud.getLastHeartbeat()

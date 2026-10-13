@@ -11,7 +11,7 @@ describe("R6 Tier 1: Stuck Note Mitigation & Watchdog Contracts", () => {
     expect(R6_CONTRACT.staccatoGateWindowSec).toBe(0.060);
   });
 
-  test.skip("[Milestone M2 Implementation Gate: Guaranteed voice release in quantizer.lua]", () => {
+  test("[Milestone M2 Implementation Gate: Guaranteed voice release in quantizer.lua]", () => {
     const cancelBlock = quantizerSrc.match(/if pendingEvents\[eventId\] then([\s\S]*?)pendingEvents\[eventId\] = nil/);
     expect(cancelBlock).toBeTruthy();
     expect(cancelBlock[1]).toMatch(/onRelease|sendMidiNote/);
@@ -32,7 +32,7 @@ describe("R6 Tier 1: Stuck Note Mitigation & Watchdog Contracts", () => {
     expect(R6_CONTRACT.maxOrphanAgeSec).toBe(5.0);
   });
 
-  test.skip("[Milestone M2 Implementation Gate: checkOrphanedVoices in midi.lua]", () => {
+  test("[Milestone M2 Implementation Gate: checkOrphanedVoices in midi.lua]", () => {
     expect(midiSrc).toContain("checkOrphanedVoices");
   });
 
