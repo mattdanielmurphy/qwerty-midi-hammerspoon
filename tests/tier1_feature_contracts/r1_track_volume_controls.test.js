@@ -13,7 +13,7 @@ describe("R1 Tier 1: Dedicated Track Volume Controls Contract", () => {
     }
   });
 
-  test.skip("[Milestone M3 Implementation Gate: Dedicated volume actions in controls.lua]", () => {
+  test("[Milestone M3 Implementation Gate: Dedicated volume actions in controls.lua]", () => {
     for (let t = 1; t <= 4; t++) {
       expect(controlsSrc).toMatch(new RegExp(`trk${t}VolUp|trkVolUp${t}`));
       expect(controlsSrc).toMatch(new RegExp(`trk${t}VolDown|trkVolDown${t}`));
@@ -41,7 +41,7 @@ describe("R1 Tier 1: Dedicated Track Volume Controls Contract", () => {
     expect(R1_CONTRACT.debounceMs).toBe(300);
   });
 
-  test.skip("[Milestone M3 Implementation Gate: Debounced persistence trailing timer in controls.lua]", () => {
+  test("[Milestone M3 Implementation Gate: Debounced persistence trailing timer in controls.lua]", () => {
     expect(controlsSrc).toMatch(/saveSettingsDebounced|saveSettingsTrailing/);
   });
 

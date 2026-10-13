@@ -15,7 +15,7 @@ describe("R5: Real-Time State Indicators on Keys & Zero Layout Shift (ZLS)", () 
       expect(val).toBe("63%");
     });
 
-    test.skip("T1-R5-PARAM-VOL-PROD: hud.lua injects real-time volume quantity into key displayNote // Milestone M4 gate: requires hud.lua parameter telemetry injection", () => {
+    test("T1-R5-PARAM-VOL-PROD: hud.lua injects real-time volume quantity into key displayNote // Milestone M4 gate: requires hud.lua parameter telemetry injection", () => {
       expect(hudSource).toMatch(/key\.displayNote\s*=\s*"Vol -"\s*\.\./);
     });
 
@@ -84,7 +84,7 @@ describe("R5: Real-Time State Indicators on Keys & Zero Layout Shift (ZLS)", () 
       expect(R4_CONTRACT.maxNoteHeight).toBe(20);
     });
 
-    test.skip("T1-R5-ZLS-KEYNOTE-PROD: Key note container height is rigidly clamped to 20px with overflow hidden // Milestone M4 gate: requires index.html key-note height rule", () => {
+    test("T1-R5-ZLS-KEYNOTE-PROD: Key note container height is rigidly clamped to 20px with overflow hidden // Milestone M4 gate: requires index.html key-note height rule", () => {
       expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*(?:max-)?height:\s*20px/);
       expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*overflow:\s*hidden/);
     });

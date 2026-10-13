@@ -28,6 +28,57 @@ local ARP_GATES = state.ARP_GATES
 local DIGIT_KEYCODES = state.DIGIT_KEYCODES
 
 
+local ARP_PATTERNS = {
+  ["UP"] = { label = "UP" },
+  ["DOWN"] = { label = "DOWN" },
+  ["UP-DOWN"] = { label = "UP-DOWN" },
+  ["DOWN-UP"] = { label = "DOWN-UP" },
+  ["CONVERGE"] = { label = "CONVERGE" },
+  ["DIVERGE"] = { label = "DIVERGE" },
+  ["RANDOM"] = { label = "RANDOM" },
+  ["PING-PONG"] = { label = "PING-PONG" },
+  ["OCTAVE-HOP"] = { label = "OCTAVE-HOP" },
+  ["CHORD-PULSE"] = { label = "CHORD-PULSE" },
+  ["SWING-16"] = { label = "SWING-16" },
+  ["CRESCENDO"] = { label = "CRESCENDO" }
+}
+
+local tapHistory = {}
+local lastTapTime = nil
+
+--- Diagnostic and calculation engine for tap tempo
+--- Accurately averages consecutive tap intervals within [30, 300] BPM
+local function tapTempo()
+  local now = (hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time()
+  if lastTapTime ~= nil then
+    local delta = now - lastTapTime
+    if delta >= 0.050 then
+      if delta > 2.0 then
+        tapHistory = {}
+      else
+        table.insert(tapHistory, delta)
+        if #tapHistory > 5 then
+          table.remove(tapHistory, 1)
+        end
+        local sum = 0
+        for _, d in ipairs(tapHistory) do sum = sum + d end
+        local avgDelta = sum / #tapHistory
+        local rawBpm = 60.0 / avgDelta
+        local newBpm = math.max(30.0, math.min(300.0, math.floor(rawBpm * 10 + 0.5) / 10))
+        state.arpBpm = newBpm
+        if applyBpmChange then
+          applyBpmChange()
+        end
+        if config and config.saveSettings then
+          config.saveSettings()
+        end
+      end
+    end
+  end
+  lastTapTime = now
+  return state.arpBpm
+end
+
 local function countTableKeys(t)
   local count = 0
   for _ in pairs(t or {}) do count = count + 1 end
@@ -433,7 +484,14 @@ local function arpTickTrack(trk)
 
   local success, err = pcall(function()
     local gateRatio = (trk.arpGatePercent or state.arpGatePercent or 80.0) / 100.0
-    local vel = math.floor(math.min(127, (trk.volume or 100) * 1.0))
+    local stepIndex = trk.stepIndex or 1
+    local velMultiplier = 1.0
+    if trk.velocityContour == "accentDownbeat" or state.velocityContour == "accentDownbeat" then
+      local accents = { 1.25, 0.85, 1.05, 0.80 }
+      velMultiplier = accents[((stepIndex - 1) % #accents) + 1] or 1.0
+    end
+    local rawVel = math.floor((trk.volume or 100) * velMultiplier)
+    local vel = math.max(1, math.min(127, rawVel))
     local ch = trk.channel or 0
 
     if gateRatio <= 1.0 and trk.currentPitch then
@@ -1688,7 +1746,9 @@ return {
   clearRowEngine = clearRowEngine,
   clearTrackArp = clearTrackArp,
   stopAllLoops = stopAllLoops,
-  setArpPowerImplicit = setArpPowerImplicit
+  setArpPowerImplicit = setArpPowerImplicit,
+  tapTempo = tapTempo,
+  ARP_PATTERNS = ARP_PATTERNS
 }
 
 end
@@ -6183,7 +6243,7 @@ local function getProposedActionDef(code)
   if activeLayer == "cmd" or activeLayer == "cmdShift" then
     local layerEntry = COMMAND_LAYER_MAP[tonumber(code)]
     local layerDef = layerEntry and layerEntry[activeLayer]
-    return layerDef or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+    return layerDef or { name = "", class = "shortcut-passthrough", action = "none", passThrough = true }
   end
   if lowerRowCodes[code] and not isKeyStepConnected() then
     return nil
@@ -6573,6 +6633,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           keyUpdates[strCode].sustainActive = false
         end
       end
+
+      -- Parameter telemetry injection for real-time state display (R5)
+      local key = keyUpdates[strCode]
+      if key and key.displayNote then
+        if key.action == "volDown" or key.displayNote == "Vol -" then
+          local vol = (trk and trk.volume) or 100
+          local pct = math.floor((vol / 127) * 100 + 0.5) .. "%"
+          key.displayNote = "Vol -" .. "\n" .. pct
+          key.note = key.displayNote
+        end
+      end
     end
   end
   end
@@ -6590,7 +6661,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       local code = tonumber(codeStr)
       local command = COMMAND_LAYER_MAP[code]
       local layerDef = command and command[activeLayer]
-        or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+        or { name = "", class = "shortcut-passthrough", action = "none", passThrough = true }
       key.displayNote = layerDef.name
       key.note = layerDef.name
       key.action = layerDef.action
@@ -12635,11 +12706,17 @@ local HTML_UI_CONTENT = [===[
   }
 
   .key-pad .key-note {
-    font-size: 9.5px;
+    font-size: 8.5px;
+    line-height: 9.5px;
     font-weight: 500;
     color: rgba(200, 200, 200, 0.9);
     margin-top: 1px;
-    white-space: nowrap;
+    white-space: pre-line;
+    max-height: 20px;
+    height: 20px;
+    max-width: 52px;
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }
@@ -12907,12 +12984,10 @@ local HTML_UI_CONTENT = [===[
     font-variant-numeric: tabular-nums;
   }
   .shortcut-reserved {
-    opacity: 0.48 !important;
     border-style: dashed !important;
     background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255,255,255,0.045) 5px 8px) !important;
   }
   .shortcut-passthrough {
-    opacity: 0.4 !important;
     border-style: dotted !important;
   }
   .trk-badge {

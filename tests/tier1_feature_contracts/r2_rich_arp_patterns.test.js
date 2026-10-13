@@ -13,7 +13,7 @@ describe("R2 Tier 1: Rich Arp Patterns & Human Feel Contracts", () => {
     expect(configSrc).toContain("ARP_DIRECTIONS");
   });
 
-  test.skip("[Milestone M3 Implementation Gate: Rich patterns in arpeggiator.lua]", () => {
+  test("[Milestone M3 Implementation Gate: Rich patterns in arpeggiator.lua]", () => {
     expect(arpSrc).toMatch(/ARP_PATTERNS|ARP_GROOVES|getArpVelocityMultiplier/);
   });
 
@@ -25,7 +25,7 @@ describe("R2 Tier 1: Rich Arp Patterns & Human Feel Contracts", () => {
     expect(step2.vel).toBe(85);
   });
 
-  test.skip("[Milestone M3 Implementation Gate: Velocity contours in arpeggiator.lua]", () => {
+  test("[Milestone M3 Implementation Gate: Velocity contours in arpeggiator.lua]", () => {
     expect(arpSrc).toMatch(/local velMultiplier\s*=|local stepAccent\s*=/);
   });
 

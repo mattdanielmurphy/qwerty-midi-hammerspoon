@@ -551,7 +551,7 @@ local function getProposedActionDef(code)
   if activeLayer == "cmd" or activeLayer == "cmdShift" then
     local layerEntry = COMMAND_LAYER_MAP[tonumber(code)]
     local layerDef = layerEntry and layerEntry[activeLayer]
-    return layerDef or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+    return layerDef or { name = "", class = "shortcut-passthrough", action = "none", passThrough = true }
   end
   if lowerRowCodes[code] and not isKeyStepConnected() then
     return nil
@@ -941,6 +941,17 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
           keyUpdates[strCode].sustainActive = false
         end
       end
+
+      -- Parameter telemetry injection for real-time state display (R5)
+      local key = keyUpdates[strCode]
+      if key and key.displayNote then
+        if key.action == "volDown" or key.displayNote == "Vol -" then
+          local vol = (trk and trk.volume) or 100
+          local pct = math.floor((vol / 127) * 100 + 0.5) .. "%"
+          key.displayNote = "Vol -" .. "\n" .. pct
+          key.note = key.displayNote
+        end
+      end
     end
   end
   end
@@ -958,7 +969,7 @@ local function performWebviewHudUpdate(spotlightInfo, activeArpPitch)
       local code = tonumber(codeStr)
       local command = COMMAND_LAYER_MAP[code]
       local layerDef = command and command[activeLayer]
-        or { name = "Pass Through", class = "shortcut-passthrough", action = "none", passThrough = true }
+        or { name = "", class = "shortcut-passthrough", action = "none", passThrough = true }
       key.displayNote = layerDef.name
       key.note = layerDef.name
       key.action = layerDef.action

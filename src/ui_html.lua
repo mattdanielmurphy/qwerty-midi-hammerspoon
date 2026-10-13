@@ -731,11 +731,17 @@ local HTML_UI_CONTENT = [===[
   }
 
   .key-pad .key-note {
-    font-size: 9.5px;
+    font-size: 8.5px;
+    line-height: 9.5px;
     font-weight: 500;
     color: rgba(200, 200, 200, 0.9);
     margin-top: 1px;
-    white-space: nowrap;
+    white-space: pre-line;
+    max-height: 20px;
+    height: 20px;
+    max-width: 52px;
+    overflow: hidden;
+    font-variant-numeric: tabular-nums;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }
@@ -1003,12 +1009,10 @@ local HTML_UI_CONTENT = [===[
     font-variant-numeric: tabular-nums;
   }
   .shortcut-reserved {
-    opacity: 0.48 !important;
     border-style: dashed !important;
     background-image: repeating-linear-gradient(135deg, transparent 0 5px, rgba(255,255,255,0.045) 5px 8px) !important;
   }
   .shortcut-passthrough {
-    opacity: 0.4 !important;
     border-style: dotted !important;
   }
   .trk-badge {

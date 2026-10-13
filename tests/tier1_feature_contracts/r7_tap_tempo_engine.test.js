@@ -11,7 +11,7 @@ describe("R7 Tier 1: Tap Tempo Engine Contracts", () => {
     expect(engine.bpm).toBe(120.0);
   });
 
-  test.skip("[Milestone M3 Implementation Gate: tapTempo function in arpeggiator.lua]", () => {
+  test("[Milestone M3 Implementation Gate: tapTempo function in arpeggiator.lua]", () => {
     expect(arpSrc).toMatch(/local function tapTempo\(\)|function arpeggiator\.tapTempo\(\)/);
   });
 

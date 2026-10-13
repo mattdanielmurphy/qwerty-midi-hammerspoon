@@ -13,7 +13,7 @@ describe("R4: Key Overlay Legibility & Label Wrapping", () => {
       expect(R4_CONTRACT.expectedLineHeight).toBe("9.5px");
     });
 
-    test.skip("T1-R4-WRAP-1-PROD: CSS .key-pad .key-note enforces rigid multi-line container properties // Milestone M4 gate: requires index.html key-note CSS update", () => {
+    test("T1-R4-WRAP-1-PROD: CSS .key-pad .key-note enforces rigid multi-line container properties // Milestone M4 gate: requires index.html key-note CSS update", () => {
       expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*white-space:\s*pre-line/);
       expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-height:\s*20px/);
       expect(htmlSource).toMatch(/\.key-note\s*\{[^}]*max-width:\s*52px/);
@@ -79,7 +79,7 @@ describe("R4: Key Overlay Legibility & Label Wrapping", () => {
       expect(hudSource).toContain("local COMMAND_LAYER_MAP = {");
     });
 
-    test.skip("T1-R4-PASS-1-PROD: Cmd modifier layer suppresses redundant Pass Through on unmapped keys in hud.lua // Milestone M4 gate: requires hud.lua unmapped Cmd key label suppression", () => {
+    test("T1-R4-PASS-1-PROD: Cmd modifier layer suppresses redundant Pass Through on unmapped keys in hud.lua // Milestone M4 gate: requires hud.lua unmapped Cmd key label suppression", () => {
       expect(hudSource).not.toMatch(/activeLayer == "cmd"[\s\S]*?name = "Pass Through"/);
       expect(hudSource).toMatch(/return layerDef or \{\s*name\s*=\s*["'](?:|—)["'],\s*class\s*=\s*"shortcut-passthrough"/);
     });
@@ -112,11 +112,11 @@ describe("R4: Key Overlay Legibility & Label Wrapping", () => {
   });
 
   describe("Tier 1: Feature 8 — Modifier Contrast & Opacity", () => {
-    test.skip("T1-R4-CONT-1: CSS removes element-level opacity 0.48 from .shortcut-reserved // Milestone M4 gate: requires index.html opacity update", () => {
+    test("T1-R4-CONT-1: CSS removes element-level opacity 0.48 from .shortcut-reserved // Milestone M4 gate: requires index.html opacity update", () => {
       expect(htmlSource).not.toMatch(/\.shortcut-reserved\s*\{[^}]*opacity:\s*0\.48/);
     });
 
-    test.skip("T1-R4-CONT-2: CSS removes element-level opacity 0.40 from .shortcut-passthrough // Milestone M4 gate: requires index.html opacity update", () => {
+    test("T1-R4-CONT-2: CSS removes element-level opacity 0.40 from .shortcut-passthrough // Milestone M4 gate: requires index.html opacity update", () => {
       expect(htmlSource).not.toMatch(/\.shortcut-passthrough\s*\{[^}]*opacity:\s*0\.4(?:0)?/);
     });
 

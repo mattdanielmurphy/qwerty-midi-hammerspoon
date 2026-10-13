@@ -11,6 +11,57 @@ local ARP_GATES = state.ARP_GATES
 local DIGIT_KEYCODES = state.DIGIT_KEYCODES
 
 
+local ARP_PATTERNS = {
+  ["UP"] = { label = "UP" },
+  ["DOWN"] = { label = "DOWN" },
+  ["UP-DOWN"] = { label = "UP-DOWN" },
+  ["DOWN-UP"] = { label = "DOWN-UP" },
+  ["CONVERGE"] = { label = "CONVERGE" },
+  ["DIVERGE"] = { label = "DIVERGE" },
+  ["RANDOM"] = { label = "RANDOM" },
+  ["PING-PONG"] = { label = "PING-PONG" },
+  ["OCTAVE-HOP"] = { label = "OCTAVE-HOP" },
+  ["CHORD-PULSE"] = { label = "CHORD-PULSE" },
+  ["SWING-16"] = { label = "SWING-16" },
+  ["CRESCENDO"] = { label = "CRESCENDO" }
+}
+
+local tapHistory = {}
+local lastTapTime = nil
+
+--- Diagnostic and calculation engine for tap tempo
+--- Accurately averages consecutive tap intervals within [30, 300] BPM
+local function tapTempo()
+  local now = (hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time()
+  if lastTapTime ~= nil then
+    local delta = now - lastTapTime
+    if delta >= 0.050 then
+      if delta > 2.0 then
+        tapHistory = {}
+      else
+        table.insert(tapHistory, delta)
+        if #tapHistory > 5 then
+          table.remove(tapHistory, 1)
+        end
+        local sum = 0
+        for _, d in ipairs(tapHistory) do sum = sum + d end
+        local avgDelta = sum / #tapHistory
+        local rawBpm = 60.0 / avgDelta
+        local newBpm = math.max(30.0, math.min(300.0, math.floor(rawBpm * 10 + 0.5) / 10))
+        state.arpBpm = newBpm
+        if applyBpmChange then
+          applyBpmChange()
+        end
+        if config and config.saveSettings then
+          config.saveSettings()
+        end
+      end
+    end
+  end
+  lastTapTime = now
+  return state.arpBpm
+end
+
 local function countTableKeys(t)
   local count = 0
   for _ in pairs(t or {}) do count = count + 1 end
@@ -416,7 +467,14 @@ local function arpTickTrack(trk)
 
   local success, err = pcall(function()
     local gateRatio = (trk.arpGatePercent or state.arpGatePercent or 80.0) / 100.0
-    local vel = math.floor(math.min(127, (trk.volume or 100) * 1.0))
+    local stepIndex = trk.stepIndex or 1
+    local velMultiplier = 1.0
+    if trk.velocityContour == "accentDownbeat" or state.velocityContour == "accentDownbeat" then
+      local accents = { 1.25, 0.85, 1.05, 0.80 }
+      velMultiplier = accents[((stepIndex - 1) % #accents) + 1] or 1.0
+    end
+    local rawVel = math.floor((trk.volume or 100) * velMultiplier)
+    local vel = math.max(1, math.min(127, rawVel))
     local ch = trk.channel or 0
 
     if gateRatio <= 1.0 and trk.currentPitch then
@@ -1671,5 +1729,7 @@ return {
   clearRowEngine = clearRowEngine,
   clearTrackArp = clearTrackArp,
   stopAllLoops = stopAllLoops,
-  setArpPowerImplicit = setArpPowerImplicit
+  setArpPowerImplicit = setArpPowerImplicit,
+  tapTempo = tapTempo,
+  ARP_PATTERNS = ARP_PATTERNS
 }
