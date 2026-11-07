@@ -10,6 +10,29 @@ local appWatcher = nil
 local lastObservedNames = {}
 local isPolling = false
 
+-- hs.application.find("Logic Pro") walks every running app and window by name and
+-- blocks the Hammerspoon main thread for ~370 ms. Run on a 3 s poll, that froze key
+-- events and MIDI output in a regular rhythm (the "quantizer feel" dropouts, 2026-11-07).
+-- Looking up by bundle ID is ~0.02 ms.
+local LOGIC_BUNDLE_ID = "com.apple.logic10"
+local function findLogic()
+  local apps = hs.application.applicationsForBundleID(LOGIC_BUNDLE_ID)
+  return apps and apps[1] or nil
+end
+logic_names.findLogic = findLogic
+
+-- Never run the synchronous AX scan while someone is playing: skip a poll if a note
+-- key is held or a note went out in the last IDLE_BEFORE_SCAN seconds.
+local IDLE_BEFORE_SCAN = 2.0
+local function isPlaying()
+  local state = _G.activeWatchers and _G.activeWatchers.state
+  if not state then return false end
+  if state.pressedKeys and next(state.pressedKeys) ~= nil then return true end
+  local last = state.lastNoteOutTime or 0
+  return (hs.timer.absoluteTime() / 1e9 - last) < IDLE_BEFORE_SCAN
+end
+logic_names.isPlaying = isPlaying
+
 local function parseTrackHeaderDescription(desc)
   if not desc or type(desc) ~= "string" then return nil, nil end
   local numStr = string.match(desc, "Track%s+(%d+)")
@@ -35,7 +58,7 @@ local function parseTrackHeaderDescription(desc)
 end
 
 function logic_names.scanLogicTracks()
-  local app = hs.application.find("Logic Pro")
+  local app = findLogic()
   if not app then
     return nil, "Logic Pro not running"
   end
@@ -173,8 +196,7 @@ function logic_names.init()
 
   -- Poll every 3.0s when Logic is running
   pollTimer = hs.timer.new(3.0, function()
-    local app = hs.application.find("Logic Pro")
-    if app then
+    if findLogic() and not isPlaying() then
       logic_names.updateTrackNames(false)
     end
   end)

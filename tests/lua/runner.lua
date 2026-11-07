@@ -5,7 +5,8 @@ local suites = {
   "tests/lua/test_hs_mock.lua",
   "tests/lua/test_quantizer_engine.lua",
   "tests/lua/test_midi_engine.lua",
-  "tests/lua/test_config_engine.lua"
+  "tests/lua/test_config_engine.lua",
+  "tests/lua/test_scale_lock.lua"
 }
 
 print("==================================================")

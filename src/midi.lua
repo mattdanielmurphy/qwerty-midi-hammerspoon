@@ -168,6 +168,9 @@ local function sendMidiNote(cmd, noteNum, vel, channel)
   -- Update active note ledger & real-time piano visualizer
   if isNoteOn then
     local now = (hs and hs.timer and hs.timer.absoluteTime and (hs.timer.absoluteTime() / 1e9)) or os.time()
+    -- Background pollers (logic_names) back off while notes are going out.
+    local st = _G.activeWatchers and _G.activeWatchers.state
+    if st then st.lastNoteOutTime = now end
     activeNoteLedger[noteNum] = activeNoteLedger[noteNum] or {}
     activeNoteLedger[noteNum][ch] = { track = trkId, color = trkColor, vel = vel, startTime = now, note = noteNum, channel = ch }
     if _G.activeWatchers and _G.activeWatchers.hud and _G.activeWatchers.hud.updatePianoNote then
