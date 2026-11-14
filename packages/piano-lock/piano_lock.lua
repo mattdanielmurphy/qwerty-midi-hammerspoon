@@ -1,18 +1,22 @@
 -- packages/piano-lock/piano_lock.lua  (symlinked to ~/.hammerspoon/modules/piano_lock.lua)
--- Piano key-lock: the Yamaha digital piano plays into Ableton through Hammerspoon,
--- and notes outside this week's scale don't sound.
+-- Piano key-lock CONTROLLER. Hammerspoon no longer carries any piano MIDI.
 --
---   Digital Piano (USB) ──► Hammerspoon ──► IAC Driver (Bus 1), MIDI channel 16 ──► Ableton
+--   Digital Piano (USB) ──► piano-thru (own launchd daemon) ──► IAC Driver Bus 1, ch 16 ──► Ableton
+--                                  ▲
+--     this module writes ~/Library/Application Support/piano-thru/filter.json
 --
---   • Note-on outside the active note set is dropped. Note-off always passes (so a
---     note can never stick, even if the scale changes while you hold it).
---   • Pedals, pitch bend and everything else pass straight through.
---   • Runs with the screen off or every HUD hidden: no UI, just a MIDI callback.
---   • When the piano connects, it is told Local Control OFF (CC 122 = 0) so its own
---     speakers stay silent and you only hear what Ableton plays. When the lock is
---     turned off or Hammerspoon stops, it gets Local Control ON back.
---   • Each piano connection or Hammerspoon load is a new session: it starts on this
---     week's scale (scale_lock.lua), dropping any switch made with setScale().
+-- piano-thru (~/projects/piano-thru) forwards every message itself, so reloading,
+-- editing or crashing Hammerspoon can never interrupt playing ("Piano MIDI is
+-- sacred", Matt 2026-11-14). This module only says which notes are allowed:
+--   • Note-ons outside the active note set are dropped by the daemon; note-offs,
+--     pedals and everything else always pass.
+--   • The file carries an expiry (the next weekly rollover). If Hammerspoon is gone
+--     past it, or the file is missing or broken, the daemon passes every note.
+--   • Each piano connection (daemon's status.json `connectedAt`) is a new session: it
+--     starts on this week's scale (scale_lock.lua), dropping any setScale() switch.
+--     A Hammerspoon reload keeps the current scale (it is restored from the file).
+--   • Local Control (piano speakers) is the daemon's job, from `localOff`.
+--   • stop() never touches the daemon or the file.
 --
 -- For the HUD:  local lock = require("scale_lock")
 --   lock.getState()       current set, mode ("weekly"|"manual"|"off"), weekly scale, last note time
@@ -28,127 +32,81 @@ local KNOBS = {
   ["weekly.current"] = { "", note = "This week's scale (written by Hammerspoon each session; editing it does nothing)" },
   ["lock.enabled"] = { 1, min = 0, max = 1, step = 1, note = "1 = drop out-of-key notes, 0 = pass everything" },
   ["midi.outChannel"] = { 16, min = 1, max = 16, step = 1, note = "MIDI channel the piano arrives on in Ableton (IAC Driver Bus 1)" },
-  ["midi.localOff"] = { 1, min = 0, max = 1, step = 1, note = "1 = mute the piano's own speakers (Local Control off) while the lock runs" },
-  ["midi.pollSeconds"] = { 3, min = 1, max = 30, step = 1, note = "How often to look for the piano being plugged in or switched on (applies on reload)" },
+  ["midi.localOff"] = { 1, min = 0, max = 1, step = 1, note = "1 = mute the piano's own speakers (Local Control off); piano-thru sends it" },
+  ["midi.pollSeconds"] = { 3, min = 1, max = 30, step = 1, note = "How often to check piano-thru's status (piano reconnects) and the weekly rollover (applies on reload)" },
 }
 
 local tweaks = require("modules.tweaks")
 local TWEAKS_FILE = tweaks.dir .. "/piano_lock.json"
+
+local DIR = os.getenv("HOME") .. "/Library/Application Support/piano-thru"
+local FILTER = DIR .. "/filter.json"
+local STATUS = DIR .. "/status.json"
 
 local M = { id = "piano_lock", name = "Piano Key-Lock" }
 
 _G.activeWatchers = _G.activeWatchers or {}
 local W = _G.activeWatchers
 
-local PIANO_MATCH = { "Digital Piano", "Yamaha" } -- USB device names to treat as the piano
-local OUT_MATCH = { "IAC" }
-
 local T
-local st = { inDev = nil, inName = nil, outDev = nil, held = {} }
+local st = { lastWritten = nil, connectedAt = nil }
 
 local function log(msg) print("🎹 piano_lock: " .. msg) end
 
-local function matches(name, list)
-  for _, m in ipairs(list) do if name:find(m, 1, true) then return true end end
-  return false
+local function readJson(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local s = f:read("*a"); f:close()
+  local ok, v = pcall(hs.json.decode, s)
+  return ok and type(v) == "table" and v or nil
 end
 
-local function findPianoName()
-  for _, name in ipairs(hs.midi.devices() or {}) do
-    if matches(name, PIANO_MATCH) then return name end
-  end
+local function status() return readJson(STATUS) end
+
+-- The filter file the daemon reads. Written atomically (tmp + rename), only on change.
+local function writeFilter()
+  local s = lock.getState()
+  local body = {
+    enabled = s.enabled,
+    pitchClasses = s.pitchClasses,
+    scale = s.current,
+    source = s.mode,                     -- "weekly" | "manual" | "off"
+    outChannel = math.floor(tonumber(T("midi.outChannel")) or 16),
+    localOff = tonumber(T("midi.localOff")) == 1,
+    expires = s.nextRollover,
+    writtenBy = "hammerspoon piano_lock",
+  }
+  local key = hs.json.encode({ body.enabled, body.pitchClasses, body.scale, body.outChannel, body.localOff, body.expires })
+  if key == st.lastWritten then return end
+  hs.fs.mkdir(DIR)
+  local tmp = FILTER .. ".tmp"
+  local f = io.open(tmp, "w")
+  if not f then log("can't write " .. tmp); return end
+  f:write(hs.json.encode(body, true)); f:close()
+  os.rename(tmp, FILTER)
+  st.lastWritten = key
+  log("filter → " .. (s.enabled and s.current or "pass all") .. " · ch " .. body.outChannel)
 end
 
-local function outDevice()
-  if st.outDev then return st.outDev end
-  for _, name in ipairs(hs.midi.devices() or {}) do
-    if matches(name, OUT_MATCH) then st.outDev = hs.midi.new(name); return st.outDev end
-  end
-end
-
-local function outChannel() return math.floor(tonumber(T("midi.outChannel")) or 16) - 1 end
-
-local function sendLocal(on)
-  if not st.inDev or tonumber(T("midi.localOff")) ~= 1 then return end
-  -- CC 122 Local Control, recognised by the P-45 (MIDI implementation chart). Channel 1.
-  st.inDev:sendCommand("controlChange", { controllerNumber = 122, controllerValue = on and 127 or 0, channel = 0 })
-  log("Local Control " .. (on and "ON (piano speakers back)" or "OFF (piano speakers muted)"))
-end
-
--- Pass-through commands (channel remapped). Realtime/system bytes (clock, active
--- sensing) are ignored. Each builds the sendCommand table from hs.midi's metadata.
-local PASS = {
-  controlChange = function(m) return { controllerNumber = m.controllerNumber, controllerValue = m.controllerValue } end,
-  pitchWheelChange = function(m) return { pitchChange = m.pitchChange } end,
-  polyphonicKeyPressure = function(m) return { note = m.note, pressure = m.pressure } end,
-  channelPressure = function(m) return { pressure = m.pressure } end,
-  programChange = function(m) return { programNumber = m.programNumber } end,
-}
-
--- hs.midi callback: (object, deviceName, commandType, description string, metadata table)
-local function onMidi(_, _, cmd, _, m)
-  if type(m) ~= "table" then return end
-  local out = outDevice()
-  if not out then return end
-  local ch = outChannel()
-  if cmd == "noteOn" and (m.velocity or 0) > 0 then
-    local note = m.note
-    local ok = lock.isAllowed(note)
-    lock.record(note, ok)
-    if ok then
-      st.held[note] = true
-      out:sendCommand("noteOn", { note = note, velocity = m.velocity, channel = ch })
-    end
-  elseif cmd == "noteOff" or cmd == "noteOn" then
-    -- Always pass note-off, allowed or not: nothing can stick.
-    st.held[m.note] = nil
-    out:sendCommand("noteOff", { note = m.note, velocity = m.velocity or 0, channel = ch })
-  elseif PASS[cmd] then
-    local d = PASS[cmd](m)
-    d.channel = ch
-    out:sendCommand(cmd, d)
-  end
-end
-
-local function releaseHeld()
-  local out = outDevice()
-  if out then
-    for note in pairs(st.held) do out:sendCommand("noteOff", { note = note, velocity = 0, channel = outChannel() }) end
-  end
-  st.held = {}
-end
-
-local function disconnect()
-  if st.inDev then
-    st.inDev:callback(nil)
-    log("piano disconnected: " .. tostring(st.inName))
-  end
-  releaseHeld()
-  st.inDev, st.inName = nil, nil
-end
-
-local function connect(name)
-  local dev = hs.midi.new(name)
-  if not dev then return end
-  st.inDev, st.inName = dev, name
-  dev:callback(onMidi)
-  lock.startSession() -- piano switched on = new session = this week's scale
+local function newSession(why)
+  lock.startSession()
   pcall(tweaks.setValue, TWEAKS_FILE, "weekly.current", lock.getState().weekly)
-  if lock.enabled then sendLocal(false) end
-  log("listening to " .. name .. " → IAC ch " .. (outChannel() + 1) .. " · " .. lock.getState().current)
+  log("new session (" .. why .. ") · " .. lock.getState().current)
 end
 
-local function checkDevice()
-  local name = findPianoName()
-  if name and not st.inDev then connect(name)
-  elseif not name and st.inDev then disconnect()
-  elseif st.inDev and not st.inDev:isOnline() then disconnect() end
+local function poll()
+  local s = status()
+  local c = s and tonumber(s.connectedAt) or 0
+  if c > 0 and st.connectedAt ~= nil and c ~= st.connectedAt then newSession("piano connected") end
+  if c > 0 or st.connectedAt == nil then st.connectedAt = c end
+  writeFilter() -- also catches the weekly rollover (getState refreshes the week)
 end
 
 local function applyTweaks()
   lock.configure({ order = T("weekly.order"), anchor = T("weekly.anchor") })
   local want = tonumber(T("lock.enabled")) == 1
-  if want ~= lock.enabled then M.setEnabled(want) end
+  if want ~= lock.enabled then lock.setEnabled(want) end
+  writeFilter()
 end
 
 -- ── Public API ────────────────────────────────────────────────────────────────
@@ -156,19 +114,16 @@ end
 function M.setScale(name) return lock.setScale(name) end
 function M.getState()
   local s = lock.getState()
-  s.connected = st.inDev ~= nil
-  s.device = st.inName
-  s.outChannel = outChannel() + 1
+  local d = status() or {}
+  s.connected = d.connected == true
+  s.device = d.piano
+  s.outChannel = math.floor(tonumber(T("midi.outChannel")) or 16)
+  s.daemon = d
   return s
 end
 function M.setEnabled(on)
   lock.setEnabled(on)
-  sendLocal(not on) -- lock off → the piano's own speakers come back
-end
-
--- Feed a note without the piano (tests): M.simulate("noteOn", 61, 90)
-function M.simulate(cmd, note, vel)
-  onMidi(nil, nil, cmd, "", { note = note, velocity = vel or 0, channel = 0 })
+  pcall(tweaks.setValue, TWEAKS_FILE, "lock.enabled", on and 1 or 0)
 end
 
 function M.start()
@@ -176,18 +131,24 @@ function M.start()
   T = tweaks.open{ app = "Piano Key-Lock", file = TWEAKS_FILE, knobs = KNOBS, onChange = applyTweaks }
   lock.configure({ order = T("weekly.order"), anchor = T("weekly.anchor") })
   lock.setEnabled(tonumber(T("lock.enabled")) == 1)
-  lock.startSession()
+  -- A reload keeps the scale you were on: restore a manual pick that hasn't expired.
+  local prev = readJson(FILTER)
+  if prev and prev.source == "manual" and type(prev.scale) == "string"
+      and (tonumber(prev.expires) or 0) > os.time() then
+    lock.setScale(prev.scale)
+  end
   pcall(tweaks.setValue, TWEAKS_FILE, "weekly.current", lock.getState().weekly)
-  checkDevice()
-  W.pianoLockPoll = hs.timer.doEvery(tonumber(T("midi.pollSeconds")) or 3, checkDevice)
+  lock.on("piano_lock", function() writeFilter() end)
+  st.lastWritten = nil
+  poll()
+  W.pianoLockPoll = hs.timer.doEvery(tonumber(T("midi.pollSeconds")) or 3, poll)
   _G.pianoLock = M
 end
 
 function M.stop()
   if W.pianoLockPoll then W.pianoLockPoll:stop(); W.pianoLockPoll = nil end
-  if st.inDev then sendLocal(true) end -- leave the piano playable on its own
-  disconnect()
-  st.outDev = nil
+  lock.off("piano_lock")
+  -- Never touch the daemon or the filter file here: playing carries on through reloads.
 end
 
 return M
