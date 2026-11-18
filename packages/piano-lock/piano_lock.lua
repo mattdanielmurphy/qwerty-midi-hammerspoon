@@ -22,7 +22,13 @@
 --   lock.getState()       current set, mode ("weekly"|"manual"|"off"), weekly scale, last note time
 --   lock.setScale("D dorian") / lock.setScale("weekly")
 --   lock.on(id, fn) / lock.off(id)   change notifications
--- Also global: _G.pianoLock.setScale(name), .setEnabled(bool), .getState().
+-- Also global: _G.pianoLock.setScale(name), .setEnabled(bool), .getState(),
+--   .setOff(bool) / .toggleOff() / .isOff()   Off / Chromatic for this session (HUD chip, ⌃⌥⌘O).
+--
+-- Off / Chromatic (Matt 2026-11-18, "so I can play whatever I want"): writes enabled=false,
+-- which piano-thru already reads as "pass everything". It behaves like a key pick: it survives
+-- Hammerspoon reloads, and a new piano session or the weekly rollover turns the lock back on.
+-- The lock.enabled tweak stays the permanent master switch; Off sits on top of it.
 
 local lock = require("scale_lock")
 
@@ -49,7 +55,9 @@ _G.activeWatchers = _G.activeWatchers or {}
 local W = _G.activeWatchers
 
 local T
-local st = { lastWritten = nil, connectedAt = nil }
+local st = { lastWritten = nil, connectedAt = nil, off = false, offUntil = nil }
+
+local function wantEnabled() return tonumber(T("lock.enabled")) == 1 and not st.off end
 
 local function log(msg) print("🎹 piano_lock: " .. msg) end
 
@@ -71,12 +79,15 @@ local function writeFilter()
     pitchClasses = s.pitchClasses,
     scale = s.current,
     source = s.mode,                     -- "weekly" | "manual" | "off"
+    resume = lock.current().source,      -- what Off goes back to: "weekly" | "manual" (scale = that key)
+    sessionOff = st.off,                 -- true = Off / Chromatic from the HUD (not the lock.enabled tweak)
     outChannel = math.floor(tonumber(T("midi.outChannel")) or 16),
     localOff = tonumber(T("midi.localOff")) == 1,
     expires = s.nextRollover,
     writtenBy = "hammerspoon piano_lock",
   }
-  local key = hs.json.encode({ body.enabled, body.pitchClasses, body.scale, body.outChannel, body.localOff, body.expires })
+  local key = hs.json.encode({ body.enabled, body.pitchClasses, body.scale, body.outChannel, body.localOff, body.expires,
+    body.resume, body.sessionOff })
   if key == st.lastWritten then return end
   hs.fs.mkdir(DIR)
   local tmp = FILTER .. ".tmp"
@@ -89,6 +100,8 @@ local function writeFilter()
 end
 
 local function newSession(why)
+  st.off, st.offUntil = false, nil
+  lock.setEnabled(wantEnabled())
   lock.startSession()
   pcall(tweaks.setValue, TWEAKS_FILE, "weekly.current", lock.getState().weekly)
   log("new session (" .. why .. ") · " .. lock.getState().current)
@@ -99,12 +112,17 @@ local function poll()
   local c = s and tonumber(s.connectedAt) or 0
   if c > 0 and st.connectedAt ~= nil and c ~= st.connectedAt then newSession("piano connected") end
   if c > 0 or st.connectedAt == nil then st.connectedAt = c end
+  if st.off and st.offUntil and os.time() >= st.offUntil then   -- weekly rollover ends Off, like a pick
+    st.off, st.offUntil = false, nil
+    lock.setEnabled(wantEnabled())
+    log("Off ended at the weekly rollover")
+  end
   writeFilter() -- also catches the weekly rollover (getState refreshes the week)
 end
 
 local function applyTweaks()
   lock.configure({ order = T("weekly.order"), anchor = T("weekly.anchor") })
-  local want = tonumber(T("lock.enabled")) == 1
+  local want = wantEnabled()
   if want ~= lock.enabled then lock.setEnabled(want) end
   writeFilter()
 end
@@ -122,21 +140,37 @@ function M.getState()
   return s
 end
 function M.setEnabled(on)
-  lock.setEnabled(on)
   pcall(tweaks.setValue, TWEAKS_FILE, "lock.enabled", on and 1 or 0)
+  lock.setEnabled(on and not st.off)
 end
+
+-- Off / Chromatic: every note passes until you pick a key again (or a new session starts).
+function M.setOff(off)
+  off = off and true or false
+  st.off = off
+  st.offUntil = off and lock.getState().nextRollover or nil
+  lock.setEnabled(wantEnabled())   -- notifies → writeFilter + HUD redraw
+  log(off and "Off · all notes" or ("lock back on · " .. lock.getState().current))
+end
+function M.toggleOff() M.setOff(not st.off) end
+function M.isOff() return st.off end
 
 function M.start()
   M.stop()
   T = tweaks.open{ app = "Piano Key-Lock", file = TWEAKS_FILE, knobs = KNOBS, onChange = applyTweaks }
   lock.configure({ order = T("weekly.order"), anchor = T("weekly.anchor") })
-  lock.setEnabled(tonumber(T("lock.enabled")) == 1)
-  -- A reload keeps the scale you were on: restore a manual pick that hasn't expired.
+  -- A reload keeps what you were on: a manual pick, or Off (and the pick under it), until it expires.
   local prev = readJson(FILTER)
-  if prev and prev.source == "manual" and type(prev.scale) == "string"
-      and (tonumber(prev.expires) or 0) > os.time() then
+  local fresh = prev and (tonumber(prev.expires) or 0) > os.time()
+  st.off, st.offUntil = false, nil
+  if fresh and prev.sessionOff == true then
+    st.off, st.offUntil = true, tonumber(prev.expires)
+  end
+  if fresh and type(prev.scale) == "string"
+      and (prev.source == "manual" or (prev.source == "off" and prev.resume == "manual")) then
     lock.setScale(prev.scale)
   end
+  lock.setEnabled(wantEnabled())
   pcall(tweaks.setValue, TWEAKS_FILE, "weekly.current", lock.getState().weekly)
   lock.on("piano_lock", function() writeFilter() end)
   st.lastWritten = nil
