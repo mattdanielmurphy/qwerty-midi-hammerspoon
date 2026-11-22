@@ -71,6 +71,14 @@ end
 
 local function status() return readJson(STATUS) end
 
+-- The song whose key is on, when piano_hud is following the playing song (nil otherwise).
+local function followingSong(current)
+  local hud = package.loaded["modules.piano_hud"]
+  local f = hud and hud.followingSong and hud.followingSong()
+  if f and f.key == current then return f.title or "" end
+  return nil
+end
+
 -- The filter file the daemon reads. Written atomically (tmp + rename), only on change.
 local function writeFilter()
   local s = lock.getState()
@@ -84,10 +92,16 @@ local function writeFilter()
     outChannel = math.floor(tonumber(T("midi.outChannel")) or 16),
     localOff = tonumber(T("midi.localOff")) == 1,
     expires = s.nextRollover,
+    -- For piano-thru's White keys mode and Muzak's key panel (2026-11-21): the root and the scale's steps from it,
+    -- and the song when the key came from the playing song (piano_hud follows it).
+    root = s.root,
+    scaleMode = s.scaleMode,
+    steps = lock.MODES[s.scaleMode],
+    song = followingSong(s.current),
     writtenBy = "hammerspoon piano_lock",
   }
   local key = hs.json.encode({ body.enabled, body.pitchClasses, body.scale, body.outChannel, body.localOff, body.expires,
-    body.resume, body.sessionOff })
+    body.resume, body.sessionOff, body.root, body.song })
   if key == st.lastWritten then return end
   hs.fs.mkdir(DIR)
   local tmp = FILTER .. ".tmp"
